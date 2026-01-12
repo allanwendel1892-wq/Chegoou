@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Company, Product, User, ProductGroup, ProductOption, Order, ChatMessage, Address, CreditCard as CreditCardType } from '../types';
-import { Search, MapPin, Star, ShoppingBag, Plus, Minus, CreditCard, ChevronRight, Clock, Heart, LogOut, CheckCircle, X, AlertTriangle, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Edit2, Lock, Mail, Phone, Settings, CircleDashed, Loader2, Navigation, Check, MousePointer2, Map as MapIcon, Crosshair, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, Zap, Tag, DollarSign, QrCode } from 'lucide-react';
+import { supabase } from '../services/supabaseClient';
+import { Search, MapPin, Star, ShoppingBag, Plus, Minus, CreditCard, ChevronRight, Clock, Heart, LogOut, CheckCircle, X, AlertTriangle, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Edit2, Lock, Mail, Phone, Settings, CircleDashed, Loader2, Navigation, Check, MousePointer2, Map as MapIcon, Crosshair, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, Zap, Tag, DollarSign, QrCode, ExternalLink } from 'lucide-react';
 
 // Declaration to avoid TS errors with Google Maps
 declare global {
@@ -166,6 +167,7 @@ const ClientView: React.FC<ClientViewProps> = ({
   // Payment State
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'pix'>('card');
   const [changeAmount, setChangeAmount] = useState<string>('');
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
   // Customization Modal
   const [customizingProduct, setCustomizingProduct] = useState<Product | null>(null);
@@ -539,28 +541,49 @@ const ClientView: React.FC<ClientViewProps> = ({
           }
       }
 
-      // Mercado Pago Simulation
+      setIsProcessingPayment(true);
+
+      // --- SUPABASE EDGE FUNCTION CALL (REAL PAYMENT) ---
       if (paymentMethod === 'card' || paymentMethod === 'pix') {
-          const w = window.open('', '_blank');
-          if (w) {
-              w.document.write(`
-                <html>
-                    <head><title>Mercado Pago Checkout</title></head>
-                    <body style="font-family: sans-serif; text-align: center; padding-top: 50px;">
-                        <h1 style="color: #009EE3;">Mercado Pago</h1>
-                        <p>Simulando pagamento de <strong>R$ ${finalTotal.toFixed(2)}</strong> via ${paymentMethod === 'pix' ? 'PIX' : 'Cartão'}.</p>
-                        <p>Processando...</p>
-                        <script>
-                            setTimeout(() => {
-                                document.body.innerHTML += '<h2 style="color: green;">Pagamento Aprovado!</h2><p>Você pode fechar esta janela.</p>';
-                            }, 2000);
-                        </script>
-                    </body>
-                </html>
-              `);
+          try {
+              const { data, error } = await supabase.functions.invoke('create-payment', {
+                  body: { 
+                      orderId: `ord-${Date.now()}`, // Temporary ID for payment intent
+                      amount: finalTotal,
+                      description: `Pedido em ${selectedCompany?.name}`,
+                      paymentMethod: paymentMethod,
+                      payerEmail: user.email
+                  }
+              });
+
+              if (error) {
+                  console.error("Payment Function Error:", error);
+                  alert("Erro ao iniciar pagamento. Verifique sua conexão ou tente Dinheiro.");
+                  setIsProcessingPayment(false);
+                  return;
+              }
+
+              if (data) {
+                  if (data.paymentUrl) {
+                      // Redirect to Mercado Pago or show Link
+                      const win = window.open(data.paymentUrl, '_blank');
+                      if (!win) alert(`Por favor, permita popups para abrir o pagamento.`);
+                  } else if (data.qrCode) {
+                      // Handle Pix QR Code display (simplified: just alert/log for now as MVP)
+                      alert("Código Pix gerado! (Simulação: Pagamento Aprovado)");
+                  } else if (data.simulated) {
+                      // Mock Success from Edge Function fallback
+                      // Continue to Place Order
+                  }
+              }
+          } catch (e) {
+              console.error("Payment Exception:", e);
+              setIsProcessingPayment(false);
+              return; // Stop if payment fails
           }
       }
-
+      
+      // Proceed to Place Order in DB
       const success = await onPlaceOrder(
           cart, 
           cart[0].product.companyId, 
@@ -572,6 +595,8 @@ const ClientView: React.FC<ClientViewProps> = ({
           paymentMethod,
           changeForValue
       ); 
+
+      setIsProcessingPayment(false);
 
       if (success) {
           setIsCartOpen(false); 
@@ -1242,9 +1267,16 @@ const ClientView: React.FC<ClientViewProps> = ({
                     
                     <button 
                         onClick={handleFinalizeOrder} 
-                        className="w-full bg-red-600 text-white font-bold py-3 rounded-xl mt-4 hover:bg-red-700 transition-colors"
+                        disabled={isProcessingPayment}
+                        className={`w-full text-white font-bold py-3 rounded-xl mt-4 transition-colors flex items-center justify-center gap-2
+                            ${isProcessingPayment ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700'}
+                        `}
                     >
-                        {paymentMethod === 'cash' ? 'Finalizar Pedido' : 'Ir para Pagamento'}
+                        {isProcessingPayment && <Loader2 className="w-5 h-5 animate-spin" />}
+                        {isProcessingPayment 
+                            ? 'Processando...' 
+                            : (paymentMethod === 'cash' ? 'Finalizar Pedido' : 'Pagar Agora')
+                        }
                     </button>
                </div>
            </div>
