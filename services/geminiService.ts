@@ -1,8 +1,11 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Product, SalesHistoryItem, ForecastData } from "../types";
 
-// Access the API key directly via process.env as per guidelines.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// FIX: Use import.meta.env.VITE_API_KEY for Vite/Browser environment.
+// We fallback to an empty string to ensure the app loads even if the key is missing.
+// Casting import.meta to any to avoid TS errors regarding 'env' property.
+const apiKey = (import.meta as any).env?.VITE_API_KEY || '';
+const ai = new GoogleGenAI({ apiKey });
 
 // Forecast Logic (Real AI Implementation)
 export const generateSalesForecast = async (history: SalesHistoryItem[], products: Product[]): Promise<ForecastData> => {
@@ -15,6 +18,11 @@ export const generateSalesForecast = async (history: SalesHistoryItem[], product
     predictedProducts: [],
     insight: "Dados insuficientes para previsão. Continue vendendo para gerar histórico."
   };
+
+  if (!apiKey) {
+      console.warn("Gemini API Key missing. Please set VITE_API_KEY in your environment variables.");
+      return fallbackData;
+  }
 
   try {
     // 1. Prepare Context
@@ -109,6 +117,8 @@ export const generateSalesForecast = async (history: SalesHistoryItem[], product
 export const enhanceProductImage = async (originalBase64: string, productName: string, productCategory: string): Promise<string | null> => {
   const model = "gemini-2.5-flash-image";
 
+  if (!apiKey) return null;
+
   try {
     // 1. Prepare Base64 (remove data:image/png;base64, prefix if present)
     const matches = originalBase64.match(/^data:(.+);base64,(.+)$/);
@@ -168,6 +178,8 @@ export const enhanceProductImage = async (originalBase64: string, productName: s
 export const parseWhatsAppMessage = async (message: string, menu: Product[]) => {
   const model = "gemini-3-flash-preview";
   
+  if (!apiKey) return { items: [], reply: "Erro de configuração de IA." };
+
   try {
       const menuContext = menu.map(p => `${p.name} (R$ ${p.price})`).join("\n");
       const prompt = `
