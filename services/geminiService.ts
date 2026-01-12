@@ -1,9 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Product, SalesHistoryItem, ForecastData } from "../types";
 
-// Declare process variable to satisfy TypeScript and follow guidelines
-declare const process: { env: { API_KEY: string } };
-
+// Access the API key directly via process.env as per guidelines.
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // Forecast Logic (Real AI Implementation)
@@ -17,11 +15,6 @@ export const generateSalesForecast = async (history: SalesHistoryItem[], product
     predictedProducts: [],
     insight: "Dados insuficientes para previsão. Continue vendendo para gerar histórico."
   };
-
-  if (!process.env.API_KEY) {
-      console.warn("Gemini API Key missing.");
-      return fallbackData;
-  }
 
   try {
     // 1. Prepare Context
@@ -116,8 +109,6 @@ export const generateSalesForecast = async (history: SalesHistoryItem[], product
 export const enhanceProductImage = async (originalBase64: string, productName: string, productCategory: string): Promise<string | null> => {
   const model = "gemini-2.5-flash-image";
 
-  if (!process.env.API_KEY) return null;
-
   try {
     // 1. Prepare Base64 (remove data:image/png;base64, prefix if present)
     const matches = originalBase64.match(/^data:(.+);base64,(.+)$/);
@@ -177,8 +168,6 @@ export const enhanceProductImage = async (originalBase64: string, productName: s
 export const parseWhatsAppMessage = async (message: string, menu: Product[]) => {
   const model = "gemini-3-flash-preview";
   
-  if (!process.env.API_KEY) return { items: [], reply: "Erro de configuração de IA." };
-
   try {
       const menuContext = menu.map(p => `${p.name} (R$ ${p.price})`).join("\n");
       const prompt = `
