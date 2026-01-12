@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import { Order, User } from '../types';
+import { User } from '../types';
 
 export interface PaymentResponse {
   success: boolean;
@@ -14,23 +14,23 @@ export interface PaymentResponse {
 export const PaymentService = {
   /**
    * Process a REAL payment request via Supabase Edge Functions.
-   * Requires the 'create-payment' function to be deployed on Supabase.
+   * STRICT MODE: No simulations. Fails if backend fails.
    */
   async processPayment(
     amount: number, 
     method: 'pix' | 'card' | 'cash', 
     user: User, 
     description: string,
-    cardToken?: string // Used only for card payments (requires MP CardForm implementation)
+    cardToken?: string
   ): Promise<PaymentResponse> {
     
-    // 1. Dinheiro continua sendo aprovação imediata (pagamento na entrega)
+    // 1. Dinheiro é tratado localmente (não requer API)
     if (method === 'cash') {
       return { success: true, status: 'pending', message: 'Pagamento na entrega (Dinheiro)' };
     }
 
     try {
-      console.log(`Iniciando pagamento real via ${method}...`);
+      console.log(`[PaymentService] Iniciando transação real via ${method} para ${user.email}`);
 
       // 2. Chamada Real ao Backend
       const { data, error } = await supabase.functions.invoke('create-payment', {
@@ -39,47 +39,79 @@ export const PaymentService = {
           method,
           payerEmail: user.email,
           description,
-          token: cardToken // Se for cartão, passamos o token seguro
+          token: cardToken
         }
       });
 
+      // 3. Tratamento de Erros de Infraestrutura (Supabase/Rede)
       if (error) {
-        console.error("Erro na Edge Function:", error);
-        throw new Error(`Erro de conexão com servidor de pagamento: ${error.message}`);
+        console.error("[PaymentService] Erro na Edge Function:", error);
+        throw new Error(error.message || "Erro de comunicação com o servidor de pagamento.");
       }
 
+      // 4. Tratamento de Erros de Negócio (Mercado Pago recusou)
       if (!data || !data.success) {
-         throw new Error(data?.error || "Pagamento rejeitado ou falha na criação.");
+         console.warn("[PaymentService] Recusa do Gateway:", data);
+         throw new Error(data?.error || "Pagamento recusado pelo processador.");
       }
 
-      // 3. Sucesso: Retorna dados reais do Mercado Pago
+      // 5. Sucesso Real
       return {
         success: true,
         status: data.status,
         paymentId: data.id,
-        qrCode: data.qrCodeBase64, // Imagem Base64 do QR Code
-        copyPaste: data.qrCode,     // Código Copia e Cola
+        qrCode: data.qrCodeBase64,
+        copyPaste: data.qrCode,
         ticketUrl: data.ticketUrl,
         message: data.status === 'approved' ? 'Pagamento Aprovado' : 'Aguardando Pagamento'
       };
 
     } catch (e: any) {
-      console.error("PaymentService Error:", e);
-      
-      // Fallback de erro amigável para o usuário
-      let userMessage = "Não foi possível processar o pagamento.";
-      
-      if (e.message.includes("FunctionsFetchError")) {
-        userMessage = "Erro de configuração: A função 'create-payment' não foi encontrada no Supabase. Verifique se o deploy foi feito.";
-      } else {
-        userMessage = e.message;
-      }
-
+      console.error("[PaymentService] Falha Crítica:", e);
       return { 
         success: false, 
         status: 'rejected', 
-        message: userMessage 
+        message: e.message || "Erro desconhecido no processamento."
       };
+    }
+  },
+
+  /**
+   * Creates a Preference ID for the Mercado Pago Wallet Brick
+   */
+  async createPreference(
+    amount: number,
+    user: User,
+    description: string,
+    items: any[]
+  ): Promise<string | null> {
+    try {
+        console.log(`[PaymentService] Criando Preferência MP para ${user.email}`);
+        
+        // Call backend to create preference
+        // const { data, error } = await supabase.functions.invoke('create-preference', {
+        //   body: {
+        //     title: description,
+        //     quantity: 1,
+        //     price: amount,
+        //     payerEmail: user.email
+        //   }
+        // });
+
+        // if (error || !data?.preferenceId) {
+        //    console.error("Erro ao criar preferência:", error);
+        //    return null;
+        // }
+        // return data.preferenceId;
+
+        // MOCK RETURN FOR DEMO (Replace with actual backend call above)
+        // Without a real backend returning a real ID, the Wallet component will error.
+        // Returning a placeholder to show logic structure.
+        return "YOUR_PREFERENCE_ID"; 
+
+    } catch (e) {
+        console.error("Erro no createPreference:", e);
+        return null;
     }
   }
 };

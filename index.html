@@ -5,6 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Chegoou Delivery | Portal do Parceiro</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              brand: '#EA1D2C', // iFood Official Red
+              brandHover: '#B9121F',
+              brandLight: '#FEF2F2'
+            }
+          }
+        }
+      }
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyChZ--rhWfvNOT9QYLYS2GlCjs36R9hgR8&libraries=places"></script>
     <script src="https://sdk.mercadopago.com/js/v2"></script>
@@ -55,7 +68,8 @@
     "recharts": "https://esm.sh/recharts@^3.6.0",
     "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.90.1",
     "vite": "https://esm.sh/vite@^7.3.1",
-    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2"
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+    "@mercadopago/sdk-react": "https://esm.sh/@mercadopago/sdk-react@0.0.19"
   }
 }
 </script>

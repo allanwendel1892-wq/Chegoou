@@ -349,7 +349,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
                   <div className="absolute top-0 left-0 right-0 p-4 z-10 flex justify-between items-start pointer-events-none">
                       <div className="bg-white/95 backdrop-blur px-4 py-2 rounded-xl shadow-md border border-gray-100 pointer-events-auto">
                           <h3 className="font-bold text-gray-800 flex items-center gap-2">
-                             <Navigation className="w-4 h-4 text-red-600" /> 
+                             <Navigation className="w-4 h-4 text-brand" /> 
                              {mapError ? 'Localização Manual' : 'Confirmar Localização'}
                           </h3>
                           <p className="text-xs text-gray-500">
@@ -385,7 +385,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
                                 ${isMapDragging ? '-mt-16 scale-110' : '-mt-8'}
                             `}
                           >
-                              <div className="w-12 h-12 bg-red-600 rounded-full flex items-center justify-center shadow-2xl border-[3px] border-white">
+                              <div className="w-12 h-12 bg-brand rounded-full flex items-center justify-center shadow-2xl border-[3px] border-white">
                                   <MapPin className="w-6 h-6 text-white fill-current" />
                               </div>
                               <div 
@@ -409,8 +409,8 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
                       <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"></div>
                       
                       <div className="flex items-start gap-3 mb-6">
-                           <div className="p-2 bg-red-50 rounded-lg shrink-0">
-                               <MapPin className="w-6 h-6 text-red-600" />
+                           <div className="p-2 bg-brandLight rounded-lg shrink-0">
+                               <MapPin className="w-6 h-6 text-brand" />
                            </div>
                            <div className="flex-1">
                                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Endereço Selecionado</p>
@@ -423,7 +423,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
 
                       <button 
                         onClick={() => setShowMapModal(false)}
-                        className="w-full bg-red-600 text-white font-bold py-3.5 rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 flex items-center justify-center gap-2 transition-transform active:scale-95"
+                        className="w-full bg-brand text-white font-bold py-3.5 rounded-xl hover:bg-brandHover shadow-lg shadow-red-200 flex items-center justify-center gap-2 transition-transform active:scale-95"
                       >
                           <Check className="w-5 h-5" /> {mapError ? 'Confirmar Endereço Manual' : 'Confirmar Localização'}
                       </button>
@@ -433,7 +433,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
       )}
 
       {/* Left Side - Image */}
-      <div className="hidden lg:flex w-1/2 bg-red-600 relative overflow-hidden items-center justify-center">
+      <div className="hidden lg:flex w-1/2 bg-brand relative overflow-hidden items-center justify-center">
         <div className="absolute inset-0 bg-black opacity-20 z-10"></div>
         <img 
             src="https://images.unsplash.com/photo-1504674900247-0877df9cc836?q=80&w=2070&auto=format&fit=crop" 
@@ -441,10 +441,10 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
             alt="Food Background"
         />
         <div className="relative z-20 text-white p-12 max-w-lg">
-            <div className="bg-red-600/90 backdrop-blur-sm p-8 rounded-3xl shadow-2xl">
+            <div className="bg-brand/90 backdrop-blur-sm p-8 rounded-3xl shadow-2xl">
                 <div className="flex items-center gap-3 mb-4">
                     <div className="bg-white p-2 rounded-xl">
-                        <ShoppingBag className="w-6 h-6 text-red-600" />
+                        <ShoppingBag className="w-6 h-6 text-brand" />
                     </div>
                     <h1 className="text-3xl font-bold">Chegoou Delivery</h1>
                 </div>
@@ -479,7 +479,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
                             <label className="text-sm font-semibold text-gray-700 ml-1">Email</label>
                             <input 
                                 type="email" 
-                                className="mt-1 w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-transparent outline-none transition-all shadow-sm"
+                                className="mt-1 w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-brandLight focus:border-transparent outline-none transition-all shadow-sm"
                                 placeholder="seu@email.com"
                                 value={formData.email}
                                 onChange={e => setFormData({...formData, email: e.target.value})}
@@ -490,7 +490,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
                             <label className="text-sm font-semibold text-gray-700 ml-1">Senha</label>
                             <input 
                                 type="password" 
-                                className="mt-1 w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-transparent outline-none transition-all shadow-sm"
+                                className="mt-1 w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-brandLight focus:border-transparent outline-none transition-all shadow-sm"
                                 placeholder="••••••••"
                                 value={formData.password}
                                 onChange={e => setFormData({...formData, password: e.target.value})}
@@ -502,17 +502,17 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
                     <div className="space-y-4 animate-fade-in-up">
                         <input 
                             type="text" placeholder="Nome Completo" 
-                            className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 outline-none shadow-sm"
+                            className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-brandLight outline-none shadow-sm"
                             value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} required
                         />
                         <input 
                             type="email" placeholder="Email" 
-                            className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 outline-none shadow-sm"
+                            className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-brandLight outline-none shadow-sm"
                             value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} required
                         />
                          <input 
                                 type="password" 
-                                className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-transparent outline-none shadow-sm"
+                                className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-brandLight focus:border-transparent outline-none shadow-sm"
                                 placeholder="Crie uma senha"
                                 value={formData.password}
                                 onChange={e => setFormData({...formData, password: e.target.value})}
@@ -520,7 +520,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
                             />
                         <input 
                             type="tel" placeholder="Celular" 
-                            className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 outline-none shadow-sm"
+                            className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-brandLight outline-none shadow-sm"
                             value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} required
                         />
                         
@@ -533,7 +533,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
                                     type="button" 
                                     onClick={handleGetCurrentLocation}
                                     disabled={loadingLocation}
-                                    className="text-xs text-red-600 font-bold hover:text-red-700 flex items-center gap-1"
+                                    className="text-xs text-brand font-bold hover:text-brandHover flex items-center gap-1"
                                 >
                                     {loadingLocation ? <Loader2 className="w-3 h-3 animate-spin"/> : <Crosshair className="w-3 h-3" />}
                                     Usar localização atual
@@ -545,18 +545,18 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
                                 <div className="w-1/3 relative">
                                     <input 
                                         type="text" placeholder="CEP" 
-                                        className="w-full px-3 py-2 border rounded-lg bg-gray-50 focus:bg-white transition-colors outline-none focus:ring-2 focus:ring-red-500"
+                                        className="w-full px-3 py-2 border rounded-lg bg-gray-50 focus:bg-white transition-colors outline-none focus:ring-2 focus:ring-brandLight"
                                         value={formData.zipCode} 
                                         onChange={handleCepChange}
                                         maxLength={8}
                                         required
                                     />
-                                    {loadingCep && <Loader2 className="absolute right-2 top-2.5 w-4 h-4 text-red-500 animate-spin" />}
+                                    {loadingCep && <Loader2 className="absolute right-2 top-2.5 w-4 h-4 text-brand animate-spin" />}
                                 </div>
                                 <button 
                                     type="button" 
                                     onClick={() => setShowMapModal(true)}
-                                    className="flex-1 text-xs bg-red-50 text-red-600 font-bold rounded-lg hover:bg-red-100 flex items-center justify-center gap-2 border border-red-100 transition-colors"
+                                    className="flex-1 text-xs bg-brandLight text-brand font-bold rounded-lg hover:bg-red-100 flex items-center justify-center gap-2 border border-red-100 transition-colors"
                                 >
                                     <MapPin className="w-3 h-3" /> Abrir Mapa
                                 </button>
@@ -565,21 +565,21 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
                             {/* Address Fields */}
                             <div className="flex gap-2">
                                 <input 
-                                    type="text" placeholder="Rua" className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none"
+                                    type="text" placeholder="Rua" className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brandLight outline-none"
                                     value={formData.street} onChange={e => setFormData({...formData, street: e.target.value})} required
                                 />
                                 <input 
-                                    type="text" placeholder="Nº" className="w-20 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none"
+                                    type="text" placeholder="Nº" className="w-20 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brandLight outline-none"
                                     value={formData.number} onChange={e => setFormData({...formData, number: e.target.value})} required
                                 />
                             </div>
                              <div className="flex gap-2">
                                 <input 
-                                    type="text" placeholder="Bairro" className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none"
+                                    type="text" placeholder="Bairro" className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brandLight outline-none"
                                     value={formData.neighborhood} onChange={e => setFormData({...formData, neighborhood: e.target.value})} required
                                 />
                                 <input 
-                                    type="text" placeholder="Cidade" className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none"
+                                    type="text" placeholder="Cidade" className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brandLight outline-none"
                                     value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} required
                                 />
                             </div>
@@ -590,7 +590,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
                 <button 
                     type="submit" 
                     disabled={loading}
-                    className="w-full bg-red-600 text-white font-bold py-4 rounded-xl hover:bg-red-700 transition-all shadow-lg shadow-red-200 flex items-center justify-center gap-2"
+                    className="w-full bg-brand text-white font-bold py-4 rounded-xl hover:bg-brandHover transition-all shadow-lg shadow-red-200 flex items-center justify-center gap-2"
                 >
                     {loading ? <Loader2 className="animate-spin" /> : (
                         <>
@@ -611,7 +611,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
                 <button 
                     type="button" 
                     onClick={() => setIsRegistering(!isRegistering)}
-                    className="text-gray-600 font-medium hover:text-red-600 transition-colors"
+                    className="text-gray-600 font-medium hover:text-brand transition-colors"
                 >
                     {isRegistering ? 'Já tem uma conta? Faça Login' : 'Não tem conta? Cadastre-se'}
                 </button>
