@@ -1,0 +1,7 @@
+{
+  "name": "Chegoou Delivery SaaS",
+  "description": "Plataforma completa de delivery com gestão para Admin, Parceiros, Entregadores e Clientes, com IA integrada.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
