@@ -15,6 +15,11 @@ export const generateSalesForecast = async (history: SalesHistoryItem[], product
     insight: "Dados insuficientes para previsão. Continue vendendo para gerar histórico."
   };
 
+  if (!process.env.API_KEY) {
+      console.warn("Gemini API Key missing.");
+      return fallbackData;
+  }
+
   try {
     // 1. Prepare Context
     const productNames = products.map(p => p.name).join(", ");
@@ -108,6 +113,8 @@ export const generateSalesForecast = async (history: SalesHistoryItem[], product
 export const enhanceProductImage = async (originalBase64: string, productName: string, productCategory: string): Promise<string | null> => {
   const model = "gemini-2.5-flash-image";
 
+  if (!process.env.API_KEY) return null;
+
   try {
     // 1. Prepare Base64 (remove data:image/png;base64, prefix if present)
     const matches = originalBase64.match(/^data:(.+);base64,(.+)$/);
@@ -167,6 +174,8 @@ export const enhanceProductImage = async (originalBase64: string, productName: s
 export const parseWhatsAppMessage = async (message: string, menu: Product[]) => {
   const model = "gemini-3-flash-preview";
   
+  if (!process.env.API_KEY) return { items: [], reply: "Erro de configuração de IA." };
+
   try {
       const menuContext = menu.map(p => `${p.name} (R$ ${p.price})`).join("\n");
       const prompt = `
