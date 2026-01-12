@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Product, SalesHistoryItem, ForecastData } from "../types";
 
+// Initialize Gemini Client using process.env.API_KEY as per guidelines
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // Forecast Logic (Real AI Implementation)
