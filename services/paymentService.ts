@@ -46,7 +46,20 @@ export const PaymentService = {
       // 3. Tratamento de Erros de Infraestrutura (Supabase/Rede)
       if (error) {
         console.error("[PaymentService] Erro na Edge Function:", error);
-        throw new Error(error.message || "Erro de comunicação com o servidor de pagamento.");
+        
+        let msg = "Erro de comunicação com o servidor de pagamento.";
+        let technicalDetail = error.message || 'Erro 500/400';
+
+        // Diagnóstico Específico para o Usuário
+        if (technicalDetail.includes("non-2xx")) {
+            msg = "Falha na Configuração do Mercado Pago (Erro 500).";
+            technicalDetail = "Provavelmente o TOKEN de acesso (MP_ACCESS_TOKEN) não foi configurado nos Secrets do Supabase, ou está inválido.";
+        } else if (technicalDetail.includes("Function not found")) {
+            msg = "Servidor de pagamento não encontrado.";
+            technicalDetail = "A função 'create-payment' não foi implantada (deploy).";
+        }
+
+        throw new Error(`${msg} \n\nDiagnóstico: ${technicalDetail}`);
       }
 
       // 4. Tratamento de Erros de Negócio (Mercado Pago recusou)
@@ -73,45 +86,6 @@ export const PaymentService = {
         status: 'rejected', 
         message: e.message || "Erro desconhecido no processamento."
       };
-    }
-  },
-
-  /**
-   * Creates a Preference ID for the Mercado Pago Wallet Brick
-   */
-  async createPreference(
-    amount: number,
-    user: User,
-    description: string,
-    items: any[]
-  ): Promise<string | null> {
-    try {
-        console.log(`[PaymentService] Criando Preferência MP para ${user.email}`);
-        
-        // Call backend to create preference
-        // const { data, error } = await supabase.functions.invoke('create-preference', {
-        //   body: {
-        //     title: description,
-        //     quantity: 1,
-        //     price: amount,
-        //     payerEmail: user.email
-        //   }
-        // });
-
-        // if (error || !data?.preferenceId) {
-        //    console.error("Erro ao criar preferência:", error);
-        //    return null;
-        // }
-        // return data.preferenceId;
-
-        // MOCK RETURN FOR DEMO (Replace with actual backend call above)
-        // Without a real backend returning a real ID, the Wallet component will error.
-        // Returning a placeholder to show logic structure.
-        return "YOUR_PREFERENCE_ID"; 
-
-    } catch (e) {
-        console.error("Erro no createPreference:", e);
-        return null;
     }
   }
 };

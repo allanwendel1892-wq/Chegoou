@@ -1,18 +1,13 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Company, Product, User, ProductGroup, ProductOption, Order, ChatMessage, Address, CreditCard as CreditCardType } from '../types';
-import { PaymentService } from '../services/paymentService'; // Import Service
-import { initMercadoPago, Wallet } from '@mercadopago/sdk-react'; // Mercado Pago SDK
-import { Search, MapPin, Star, ShoppingBag, Plus, Minus, CreditCard, ChevronRight, Clock, Heart, LogOut, CheckCircle, X, AlertTriangle, Bike, Store, Home, FileText, User as UserIcon, Wallet as WalletIcon, MessageCircle, Send, ArrowLeft, Trash2, Edit2, Lock, Mail, Phone, Settings, CircleDashed, Loader2, Navigation, Check, MousePointer2, Map as MapIcon, Crosshair, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, Zap, Tag, DollarSign, QrCode, Copy, Timer } from 'lucide-react';
+import { Company, Product, Order, ChatMessage, Address, CreditCard as CreditCardType, ProductOption, User } from '../types';
+import { PaymentService } from '../services/paymentService';
+import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, Timer, Settings, LogOut } from 'lucide-react';
 
-// Declaration to avoid TS errors with Google Maps
 declare global {
   interface Window {
     google: any;
   }
 }
-
-// INITIALIZE MERCADO PAGO
-initMercadoPago('YOUR_PUBLIC_KEY', { locale: 'pt-BR' });
 
 interface ClientViewProps {
   user: User;
@@ -22,68 +17,31 @@ interface ClientViewProps {
   onPlaceOrder: (items: any[], companyId: string, total: number, deliveryMethod: 'delivery' | 'pickup', serviceFee: number, deliveryFee: number, subtotal: number, paymentMethod: 'cash' | 'card' | 'pix', changeFor?: number) => Promise<boolean>;
   onLogout: () => void;
   onUpdateUser: (user: User) => void;
-  // Chat Props
   chats: Record<string, ChatMessage[]>;
   onSendMessage: (orderId: string, text: string, senderId: string, role: 'client' | 'partner') => void;
-  // Management Props
   onAddAddress: (address: Address) => void;
   onRemoveAddress: (index: number) => void;
   onAddCard: (card: CreditCardType) => void;
   onRemoveCard: (index: number) => void;
 }
 
-// --- UTILS FOR SEARCH ---
-
-const normalizeText = (text: string) => {
-  return text
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim();
-};
-
-const levenshteinDistance = (a: string, b: string) => {
-  if (a.length === 0) return b.length;
-  if (b.length === 0) return a.length;
-
-  const matrix = [];
-  for (let i = 0; i <= b.length; i++) { matrix[i] = [i]; }
-  for (let j = 0; j <= a.length; j++) { matrix[0][j] = j; }
-
-  for (let i = 1; i <= b.length; i++) {
-    for (let j = 1; j <= a.length; j++) {
-      if (b.charAt(i - 1) === a.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1));
-      }
-    }
-  }
-  return matrix[b.length][a.length];
-};
+// --- UTILS ---
+const normalizeText = (text: string) => text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
 const isMatch = (sourceText: string, searchTerm: string) => {
     if (!sourceText || !searchTerm) return false;
     const normSource = normalizeText(sourceText);
     const normSearch = normalizeText(searchTerm);
-
-    if (normSource.includes(normSearch)) return true;
-
-    const sourceWords = normSource.split(' ');
-    const searchWords = normSearch.split(' ');
-
-    return searchWords.some(sWord => {
-        if (sWord.length < 3) return false; 
-        return sourceWords.some(tWord => {
-            const distance = levenshteinDistance(sWord, tWord);
-            const allowedErrors = sWord.length > 5 ? 2 : 1;
-            return distance <= allowedErrors;
-        });
-    });
+    return normSource.includes(normSearch);
 };
 
 const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-  if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
+  if (!Number.isFinite(lat1) || !Number.isFinite(lon1) || !Number.isFinite(lat2) || !Number.isFinite(lon2)) return Infinity;
+  // Check for default SP coordinates or 0,0
+  const isDefault = (lat: number, lng: number) => (Math.abs(lat) < 0.0001 && Math.abs(lng) < 0.0001) || (Math.abs(lat - (-23.550520)) < 0.0001 && Math.abs(lng - (-46.633308)) < 0.0001);
+  
+  if (isDefault(lat1, lon1) || isDefault(lat2, lon2)) return Infinity;
+
   const R = 6371; 
   const dLat = (lat2 - lat1) * (Math.PI / 180);
   const dLon = (lon2 - lon1) * (Math.PI / 180);
@@ -92,7 +50,6 @@ const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon
   return R * c;
 };
 
-// --- CATEGORY ICONS MAP ---
 const CATEGORIES = [
     { name: "Tudo", icon: Store },
     { name: "Lanches", icon: Utensils },
@@ -132,11 +89,14 @@ const ClientView: React.FC<ClientViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>("Tudo");
   const [specialFilter, setSpecialFilter] = useState<'none' | 'free' | 'fast'>('none');
   
-  // Payment State Update for Mercado Pago
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'mercadopago'>('mercadopago');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'pix'>('card');
   const [changeAmount, setChangeAmount] = useState<string>('');
-  const [preferenceId, setPreferenceId] = useState<string | null>(null);
-  const [isCreatingPreference, setIsCreatingPreference] = useState(false);
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+
+  // PIX MODAL STATE
+  const [showPixModal, setShowPixModal] = useState(false);
+  const [pixData, setPixData] = useState<{qrCode: string, copyPaste: string} | null>(null);
+  const [pixTimer, setPixTimer] = useState(600); 
 
   const [customizingProduct, setCustomizingProduct] = useState<Product | null>(null);
   const [selections, setSelections] = useState<Record<string, ProductOption[]>>({});
@@ -151,7 +111,22 @@ const ClientView: React.FC<ClientViewProps> = ({
   const [isMapDragging, setIsMapDragging] = useState(false);
   const [mapError, setMapError] = useState(false);
 
-  // ... (Map and Location Logic) ...
+  // Pix Timer
+  useEffect(() => {
+    let interval: any;
+    if (showPixModal && pixTimer > 0) {
+        interval = setInterval(() => setPixTimer(prev => prev - 1), 1000);
+    }
+    return () => clearInterval(interval);
+  }, [showPixModal, pixTimer]);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Map Initialization
   useEffect(() => {
     let map: any;
     const initMap = () => {
@@ -241,15 +216,16 @@ const ClientView: React.FC<ClientViewProps> = ({
 
   const filteredCompanies = useMemo(() => {
       if (!user.address) return [];
+
       return companies
         .map(c => {
-            const dist = getDistanceFromLatLonInKm(user.address!.lat, user.address!.lng, c.address?.lat || 0, c.address?.lng || 0);
-            const fee = c.deliveryType === 'own' ? (c.ownDeliveryFee||0) : (c.customPlatformFee && c.customPlatformFee>0 ? c.customPlatformFee : 5.00+(dist*1.5));
+            const dist = getDistanceFromLatLonInKm(Number(user.address!.lat), Number(user.address!.lng), Number(c.address?.lat), Number(c.address?.lng));
+            const fee = c.deliveryType === 'own' ? (c.ownDeliveryFee||0) : (c.customPlatformFee && c.customPlatformFee > 0 ? c.customPlatformFee : 5.00 + (dist * 1.5));
             return { ...c, distanceCalc: dist, deliveryFeeCalc: fee };
         })
         .filter(c => {
             if (c.status !== 'open') return false;
-            if (c.distanceCalc > c.deliveryRadiusKm) return false;
+            if (c.distanceCalc > c.deliveryRadiusKm || c.distanceCalc === Infinity) return false;
             if (specialFilter === 'free' && c.deliveryFeeCalc > 0) return false;
             if (specialFilter === 'fast' && c.distanceCalc > 5) return false; 
             if (selectedCategory !== 'Tudo' && c.category !== selectedCategory) return false;
@@ -266,78 +242,49 @@ const ClientView: React.FC<ClientViewProps> = ({
   const activeCompanyData = selectedCompany ? filteredCompanies.find(c => c.id === selectedCompany.id) : null;
   const productTotal = cart.reduce((acc, item) => acc + (item.finalPrice * item.quantity), 0); 
   const activeDeliveryFee = deliveryMethod === 'pickup' ? 0 : (activeCompanyData ? activeCompanyData.deliveryFeeCalc : 0);
-  const serviceFeePercentage = activeCompanyData ? activeCompanyData.serviceFeePercentage : 0;
-  const serviceFeeValue = productTotal * (serviceFeePercentage / 100);
+  const serviceFeeValue = productTotal * ((activeCompanyData ? activeCompanyData.serviceFeePercentage : 0) / 100);
   const finalTotal = productTotal + activeDeliveryFee + serviceFeeValue;
 
-  const handleCashOrder = async () => {
+  const handleFinalizeOrder = async () => {
       let changeForValue = 0;
       if (paymentMethod === 'cash') {
           changeForValue = parseFloat(changeAmount.replace(',','.'));
-          if (changeForValue < finalTotal && changeAmount) { alert("Troco deve ser maior que o total."); return; }
+          if (changeForValue < finalTotal) { alert("Troco deve ser maior que o total."); return; }
       }
-
-      const success = await onPlaceOrder(
-          cart, 
-          cart[0].product.companyId, 
-          finalTotal, 
-          deliveryMethod, 
-          serviceFeeValue, 
-          activeDeliveryFee, 
-          productTotal,
-          'cash',
-          changeForValue
-      ); 
-
-      if (success) {
-          setIsCartOpen(false); 
-          setCart([]); 
-          setSelectedCompany(null);
-          setChangeAmount('');
-          alert("Pedido realizado com sucesso!");
-          setActiveTab('orders');
-      }
-  };
-
-  const finalizeSystemOrder = async (changeValue: number = 0) => {
-      const success = await onPlaceOrder(
-          cart, 
-          cart[0].product.companyId, 
-          finalTotal, 
-          deliveryMethod, 
-          serviceFeeValue, 
-          activeDeliveryFee, 
-          productTotal,
-          'card', 
-          changeValue
-      ); 
-
-      if (success) {
-          setIsCartOpen(false); 
-          setCart([]); 
-          setSelectedCompany(null);
-          setChangeAmount('');
-          setPreferenceId(null);
-          alert("Pedido realizado com sucesso!");
-          setActiveTab('orders');
-      }
-  };
-
-  const handleGeneratePreference = async () => {
-      setIsCreatingPreference(true);
-      const id = await PaymentService.createPreference(
-          finalTotal,
-          user,
-          `Pedido ${selectedCompany?.name}`,
-          cart
-      );
+      setIsProcessingPayment(true);
+      const paymentResult = await PaymentService.processPayment(finalTotal, paymentMethod, user, `Pedido na loja ${selectedCompany?.name}`);
       
-      if (id) {
-          setPreferenceId(id);
-      } else {
-          alert("Erro ao conectar com Mercado Pago. Tente novamente ou pague na entrega.");
+      if (paymentMethod === 'pix' && paymentResult.success && paymentResult.qrCode) {
+          setPixData({ qrCode: paymentResult.qrCode, copyPaste: paymentResult.copyPaste || '' });
+          setPixTimer(600);
+          setShowPixModal(true);
+          setIsProcessingPayment(false);
+          return;
       }
-      setIsCreatingPreference(false);
+      if (!paymentResult.success && paymentMethod !== 'cash') {
+          alert(`Erro no Pagamento: ${paymentResult.message}`);
+          setIsProcessingPayment(false);
+          return;
+      }
+      await finalizeSystemOrder(changeForValue);
+  };
+
+  const finalizeSystemOrder = async (changeForValue: number) => {
+      const success = await onPlaceOrder(cart, cart[0].product.companyId, finalTotal, deliveryMethod, serviceFeeValue, activeDeliveryFee, productTotal, paymentMethod, changeForValue); 
+      setIsProcessingPayment(false);
+      setShowPixModal(false);
+      if (success) {
+          setIsCartOpen(false); setCart([]); setSelectedCompany(null); setChangeAmount('');
+          alert("Pedido realizado com sucesso!");
+          setActiveTab('orders');
+      }
+  };
+
+  const copyPixCode = () => {
+      if (pixData?.copyPaste) {
+          navigator.clipboard.writeText(pixData.copyPaste);
+          alert("Código Pix copiado!");
+      }
   };
 
   const openProductModal = (product: Product) => {
@@ -367,14 +314,12 @@ const ClientView: React.FC<ClientViewProps> = ({
         setCart([]);
     }
     setCart([...cart, {product, quantity: 1, selectedOptions, finalPrice}]);
-    setIsCartOpen(true);
-    setPreferenceId(null); // Reset preference when cart changes
+    setIsCartOpen(true); 
   };
   const removeFromCart = (index: number) => {
     const newCart = [...cart];
     if (newCart[index].quantity > 1) newCart[index].quantity--; else newCart.splice(index, 1);
     setCart(newCart);
-    setPreferenceId(null); // Reset preference
   };
   const openChat = (orderId: string) => { setChatOrderId(orderId); setSubView('chat'); };
   const handleSendMessage = () => { if(chatInput.trim() && chatOrderId) { onSendMessage(chatOrderId, chatInput, user.id, 'client'); setChatInput(''); }};
@@ -390,6 +335,7 @@ const ClientView: React.FC<ClientViewProps> = ({
       setIsAddingCard(false); setNewCardForm({});
   };
 
+  // --- RENDERERS ---
   const renderHome = () => {
       if (selectedCompany) {
         const feeDisplay = filteredCompanies.find(c => c.id === selectedCompany.id)?.deliveryFeeCalc || 0;
@@ -495,7 +441,7 @@ const ClientView: React.FC<ClientViewProps> = ({
     <div className="pb-24 bg-gray-50 min-h-screen">
         <div className="bg-white p-6 border-b border-gray-100 flex items-center gap-4"><div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center text-xl font-bold text-gray-600">{user.name.charAt(0)}</div><div><h2 className="text-xl font-bold text-gray-900">{user.name}</h2><p className="text-sm text-gray-500">{user.email}</p></div></div>
         <div className="p-4 space-y-4">
-             <button onClick={() => setSubView('wallet')} className="w-full bg-white p-4 rounded-xl border border-gray-100 flex items-center justify-between hover:bg-gray-50"><div className="flex items-center gap-3"><div className="bg-orange-100 p-2 rounded-lg text-orange-600"><WalletIcon className="w-5 h-5"/></div><span className="font-bold text-gray-700">Carteira</span></div><ChevronRight className="w-5 h-5 text-gray-300"/></button>
+             <button onClick={() => setSubView('wallet')} className="w-full bg-white p-4 rounded-xl border border-gray-100 flex items-center justify-between hover:bg-gray-50"><div className="flex items-center gap-3"><div className="bg-orange-100 p-2 rounded-lg text-orange-600"><Wallet className="w-5 h-5"/></div><span className="font-bold text-gray-700">Carteira</span></div><ChevronRight className="w-5 h-5 text-gray-300"/></button>
              <button onClick={() => setSubView('addresses')} className="w-full bg-white p-4 rounded-xl border border-gray-100 flex items-center justify-between hover:bg-gray-50"><div className="flex items-center gap-3"><div className="bg-brandLight p-2 rounded-lg text-brand"><MapPin className="w-5 h-5"/></div><span className="font-bold text-gray-700">Endereços</span></div><ChevronRight className="w-5 h-5 text-gray-300"/></button>
              <button onClick={() => setSubView('settings')} className="w-full bg-white p-4 rounded-xl border border-gray-100 flex items-center justify-between hover:bg-gray-50"><div className="flex items-center gap-3"><div className="bg-blue-100 p-2 rounded-lg text-blue-600"><Settings className="w-5 h-5"/></div><span className="font-bold text-gray-700">Meus Dados</span></div><ChevronRight className="w-5 h-5 text-gray-300"/></button>
              <button onClick={onLogout} className="w-full bg-white p-4 rounded-xl border border-gray-100 flex items-center justify-between hover:bg-red-50 group mt-4"><div className="flex items-center gap-3"><div className="bg-gray-100 p-2 rounded-lg text-gray-500 group-hover:bg-red-200 group-hover:text-red-700 transition-colors"><LogOut className="w-5 h-5"/></div><span className="font-bold text-gray-500 group-hover:text-brand transition-colors">Sair da Conta</span></div></button>
@@ -503,19 +449,115 @@ const ClientView: React.FC<ClientViewProps> = ({
     </div>
   );
 
+  const renderAddressesView = () => {
+      return (
+        <div className="fixed inset-0 bg-gray-50 z-50 overflow-y-auto animate-slide-up">
+            <div className="bg-white p-4 border-b border-gray-100 sticky top-0 flex items-center gap-3">
+                <button onClick={() => setSubView('none')} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft className="w-5 h-5"/></button>
+                <h2 className="font-bold text-lg">Endereços</h2>
+            </div>
+            <div className="p-4 space-y-4">
+                {(user.savedAddresses||[]).map((a,i)=>(
+                    <div key={i} className="bg-white p-4 rounded-xl border flex justify-between items-center" onClick={()=>handleSelectAddress(a)}>
+                        <div className="flex items-center gap-3">
+                            <MapPin className="text-gray-500"/>
+                            <div><p className="font-bold">{a.name}</p><p className="text-xs">{a.street}</p></div>
+                        </div>
+                        <button onClick={(e)=>{e.stopPropagation();onRemoveAddress(i)}} className="text-red-500"><Trash2/></button>
+                    </div>
+                ))}
+                
+                {!isAddingAddress ? (
+                    <button onClick={()=>setIsAddingAddress(true)} className="w-full py-4 border-2 border-dashed rounded-xl flex items-center justify-center gap-2 text-gray-500 font-bold hover:bg-gray-50 hover:border-gray-300 transition-all">
+                        <Plus/> Novo Endereço
+                    </button>
+                ) : (
+                    <div className="bg-white p-4 rounded-xl border space-y-3 shadow-sm animate-fade-in">
+                        <div className="flex justify-between items-center mb-2">
+                            <h3 className="font-bold text-gray-700 text-sm uppercase">Novo Endereço</h3>
+                            <button onClick={() => setIsAddingAddress(false)} className="p-1 hover:bg-gray-100 rounded text-gray-400"><X className="w-4 h-4" /></button>
+                        </div>
+                        
+                        <div className="flex gap-2">
+                            <div className="relative w-1/3">
+                                <input 
+                                    placeholder="CEP" 
+                                    className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brandLight outline-none" 
+                                    value={newAddressForm.zipCode || ''} 
+                                    onChange={handleCepChange}
+                                    maxLength={8}
+                                />
+                                {loadingCep && <Loader2 className="absolute right-2 top-2.5 w-4 h-4 animate-spin text-brand" />}
+                            </div>
+                            <button onClick={()=>setShowMapModal(true)} className="flex-1 bg-brandLight text-brand font-bold rounded-lg text-xs flex items-center justify-center gap-2 border border-red-100 hover:bg-red-100">
+                                <MapPin className="w-4 h-4" /> Abrir no Mapa
+                            </button>
+                        </div>
+
+                        <div className="flex gap-2">
+                            <input placeholder="Rua" className="flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brandLight outline-none" value={newAddressForm.street||''} onChange={e=>setNewAddressForm({...newAddressForm,street:e.target.value})}/>
+                            <input placeholder="Nº" className="w-20 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brandLight outline-none" value={newAddressForm.number||''} onChange={e=>setNewAddressForm({...newAddressForm,number:e.target.value})}/>
+                        </div>
+
+                        <div className="flex gap-2">
+                            <input placeholder="Bairro" className="flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brandLight outline-none" value={newAddressForm.neighborhood||''} onChange={e=>setNewAddressForm({...newAddressForm,neighborhood:e.target.value})}/>
+                            <input placeholder="Cidade" className="flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brandLight outline-none" value={newAddressForm.city||''} onChange={e=>setNewAddressForm({...newAddressForm,city:e.target.value})}/>
+                        </div>
+
+                        <input placeholder="Nome (ex: Casa, Trabalho)" className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brandLight outline-none" value={newAddressForm.name||''} onChange={e=>setNewAddressForm({...newAddressForm,name:e.target.value})}/>
+
+                        <button onClick={confirmAddAddress} className="bg-brand text-white w-full py-3 rounded-xl font-bold shadow-lg shadow-red-200 mt-2 hover:bg-brandHover transition-colors">
+                            Salvar Endereço
+                        </button>
+                    </div>
+                )}
+            </div>
+        </div>
+      );
+  };
+
   return (
     <div className="bg-gray-50 min-h-screen">
-       {subView !== 'none' && (
-           subView === 'addresses' ? (
-                <div className="fixed inset-0 bg-gray-50 z-50 overflow-y-auto animate-slide-up"><div className="bg-white p-4 border-b border-gray-100 sticky top-0 flex items-center gap-3"><button onClick={() => setSubView('none')} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft className="w-5 h-5"/></button><h2 className="font-bold text-lg">Endereços</h2></div><div className="p-4 space-y-4">{(user.savedAddresses||[]).map((a,i)=>(<div key={i} className="bg-white p-4 rounded-xl border flex justify-between items-center" onClick={()=>handleSelectAddress(a)}><div className="flex items-center gap-3"><MapPin className="text-gray-500"/><div><p className="font-bold">{a.name}</p><p className="text-xs">{a.street}</p></div></div><button onClick={(e)=>{e.stopPropagation();onRemoveAddress(i)}} className="text-red-500"><Trash2/></button></div>))}{!isAddingAddress?<button onClick={()=>setIsAddingAddress(true)} className="w-full py-4 border-2 border-dashed rounded-xl flex items-center justify-center gap-2"><Plus/> Novo</button>:(<div className="bg-white p-4 rounded-xl border"><button onClick={()=>setShowMapModal(true)} className="bg-brandLight text-brand p-2 rounded mb-2 w-full text-xs font-bold">Abrir Mapa</button><input placeholder="Rua" className="w-full border p-2 mb-2 rounded" value={newAddressForm.street||''} onChange={e=>setNewAddressForm({...newAddressForm,street:e.target.value})}/><input placeholder="Nº" className="w-full border p-2 mb-2 rounded" value={newAddressForm.number||''} onChange={e=>setNewAddressForm({...newAddressForm,number:e.target.value})}/><button onClick={confirmAddAddress} className="bg-brand text-white w-full py-2 rounded font-bold">Salvar</button></div>)}</div></div>
-           ) : subView === 'wallet' ? (
-                <div className="fixed inset-0 bg-gray-50 z-50 overflow-y-auto animate-slide-up"><div className="bg-white p-4 border-b border-gray-100 sticky top-0 flex items-center gap-3"><button onClick={() => setSubView('none')} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft className="w-5 h-5"/></button><h2 className="font-bold text-lg">Carteira</h2></div><div className="p-4"><div className="bg-gray-900 text-white p-6 rounded-2xl mb-6 shadow-xl"><p className="text-xs opacity-70">Saldo</p><h3 className="text-3xl font-bold">R$ 0,00</h3></div>{(user.savedCards||[]).map((c,i)=>(<div key={i} className="bg-white p-4 rounded-xl border mb-2 flex justify-between"><div className="flex items-center gap-2"><CreditCard/><p>•••• {c.last4}</p></div><Trash2 className="text-red-500 cursor-pointer" onClick={()=>onRemoveCard(i)}/></div>))}{!isAddingCard?<button onClick={()=>setIsAddingCard(true)} className="text-brand font-bold text-sm">+ Adicionar Cartão</button>:(<div className="bg-white p-4 rounded-xl border mt-2"><input placeholder="Número" className="w-full border p-2 mb-2 rounded" value={newCardForm.number||''} onChange={e=>setNewCardForm({...newCardForm,number:e.target.value})}/><button onClick={confirmAddCard} className="bg-brand text-white w-full py-2 rounded font-bold">Salvar</button></div>)}</div></div>
-           ) : subView === 'chat' && chatOrderId ? (
-                <div className="fixed inset-0 bg-gray-50 z-[60] flex flex-col animate-slide-up"><div className="bg-white p-4 border-b flex items-center gap-3"><button onClick={()=>setSubView('none')}><ArrowLeft/></button><h2 className="font-bold">Chat</h2></div><div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#E5DDD5]">{(chats[chatOrderId]||[]).map(m=>(<div key={m.id} className={`flex ${m.senderRole==='client'?'justify-end':'justify-start'}`}><div className={`p-3 rounded-xl text-sm max-w-[80%] ${m.senderRole==='client'?'bg-[#DCF8C6]':'bg-white'}`}>{m.text}</div></div>))}<div ref={messagesEndRef}/></div><div className="p-3 bg-white border-t flex gap-2"><input value={chatInput} onChange={e=>setChatInput(e.target.value)} className="flex-1 bg-gray-100 rounded-full px-4 py-3 outline-none" /><button onClick={handleSendMessage} className="bg-brand text-white p-3 rounded-full"><Send/></button></div></div>
-           ) : null
+       {subView === 'addresses' && renderAddressesView()}
+       
+       {subView === 'wallet' && (
+            <div className="fixed inset-0 bg-gray-50 z-50 overflow-y-auto animate-slide-up"><div className="bg-white p-4 border-b border-gray-100 sticky top-0 flex items-center gap-3"><button onClick={() => setSubView('none')} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft className="w-5 h-5"/></button><h2 className="font-bold text-lg">Carteira</h2></div><div className="p-4"><div className="bg-gray-900 text-white p-6 rounded-2xl mb-6 shadow-xl"><p className="text-xs opacity-70">Saldo</p><h3 className="text-3xl font-bold">R$ 0,00</h3></div>{(user.savedCards||[]).map((c,i)=>(<div key={i} className="bg-white p-4 rounded-xl border mb-2 flex justify-between"><div className="flex items-center gap-2"><CreditCard/><p>•••• {c.last4}</p></div><Trash2 className="text-red-500 cursor-pointer" onClick={()=>onRemoveCard(i)}/></div>))}{!isAddingCard?<button onClick={()=>setIsAddingCard(true)} className="text-brand font-bold text-sm">+ Adicionar Cartão</button>:(<div className="bg-white p-4 rounded-xl border mt-2"><input placeholder="Número" className="w-full border p-2 mb-2 rounded" value={newCardForm.number||''} onChange={e=>setNewCardForm({...newCardForm,number:e.target.value})}/><button onClick={confirmAddCard} className="bg-brand text-white w-full py-2 rounded font-bold">Salvar</button></div>)}</div></div>
        )}
 
-       {/* CART WITH MERCADO PAGO INTEGRATION */}
+       {subView === 'chat' && chatOrderId && (
+            <div className="fixed inset-0 bg-gray-50 z-[60] flex flex-col animate-slide-up"><div className="bg-white p-4 border-b flex items-center gap-3"><button onClick={()=>setSubView('none')}><ArrowLeft/></button><h2 className="font-bold">Chat</h2></div><div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#E5DDD5]">{(chats[chatOrderId]||[]).map(m=>(<div key={m.id} className={`flex ${m.senderRole==='client'?'justify-end':'justify-start'}`}><div className={`p-3 rounded-xl text-sm max-w-[80%] ${m.senderRole==='client'?'bg-[#DCF8C6]':'bg-white'}`}>{m.text}</div></div>))}<div ref={messagesEndRef}/></div><div className="p-3 bg-white border-t flex gap-2"><input value={chatInput} onChange={e=>setChatInput(e.target.value)} className="flex-1 bg-gray-100 rounded-full px-4 py-3 outline-none" /><button onClick={handleSendMessage} className="bg-brand text-white p-3 rounded-full"><Send/></button></div></div>
+       )}
+       
+       {showPixModal && pixData && (
+           <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+               <div className="bg-white w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl relative">
+                   <div className="bg-green-600 p-4 text-center text-white">
+                       <h3 className="font-bold text-lg">Pagamento via Pix</h3>
+                       <div className="flex items-center justify-center gap-1 text-sm mt-1 opacity-90">
+                           <Timer className="w-4 h-4" /> Expira em {formatTime(pixTimer)}
+                       </div>
+                   </div>
+                   <div className="p-6 flex flex-col items-center text-center space-y-4">
+                       <p className="text-sm text-gray-500">Escaneie o QR Code ou copie o código abaixo para pagar.</p>
+                       <div className="p-4 border-2 border-green-100 rounded-xl bg-white shadow-sm">
+                           <img src={pixData.qrCode} alt="QR Code Pix" className="w-48 h-48 mix-blend-multiply" />
+                       </div>
+                       
+                       <div className="w-full">
+                           <p className="text-xs font-bold text-gray-400 uppercase mb-1 text-left">Pix Copia e Cola</p>
+                           <div className="flex gap-2">
+                               <input readOnly value={pixData.copyPaste} className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 text-xs text-gray-500 truncate" />
+                               <button onClick={copyPixCode} className="bg-green-100 text-green-700 p-2 rounded-lg hover:bg-green-200 transition-colors"><Copy className="w-5 h-5"/></button>
+                           </div>
+                       </div>
+                       
+                       <button onClick={() => finalizeSystemOrder(0)} className="w-full bg-green-600 text-white font-bold py-3 rounded-xl hover:bg-green-700 shadow-lg shadow-green-200 flex items-center justify-center gap-2 mt-2"><CheckCircle className="w-5 h-5" /> Já realizei o pagamento</button>
+                       <button onClick={() => setShowPixModal(false)} className="text-gray-400 text-xs font-bold hover:text-red-500 underline">Cancelar Pagamento</button>
+                   </div>
+               </div>
+           </div>
+       )}
+
        {isCartOpen && (
            <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4">
                <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl animate-slide-up flex flex-col max-h-[90vh]">
@@ -523,76 +565,9 @@ const ClientView: React.FC<ClientViewProps> = ({
                     <div className="flex bg-gray-100 p-1 rounded-xl mb-4"><button onClick={() => setDeliveryMethod('delivery')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${deliveryMethod === 'delivery' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Entrega</button><button onClick={() => setDeliveryMethod('pickup')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${deliveryMethod === 'pickup' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Retirada</button></div>
                     <div className="flex-1 overflow-y-auto mb-4">{cart.map((i, idx) => (<div key={idx} className="flex justify-between border-b py-2"><div>{i.quantity}x {i.product.name}</div><div className="flex gap-2 font-bold">R$ {i.finalPrice.toFixed(2)} <Trash2 onClick={() => removeFromCart(idx)} className="w-4 h-4 text-red-500"/></div></div>))}</div>
                     <div className="space-y-2 border-t pt-4 text-sm text-gray-600"><div className="flex justify-between"><span>Subtotal</span><span>R$ {productTotal.toFixed(2)}</span></div><div className="flex justify-between"><span>Entrega</span><span className={activeDeliveryFee === 0 ? 'text-green-600 font-bold' : ''}>{activeDeliveryFee === 0 ? 'Grátis' : `R$ ${activeDeliveryFee.toFixed(2)}`}</span></div></div>
-                    
-                    <div className="mt-4 border-t pt-4">
-                        <p className="text-xs font-bold text-gray-500 mb-2 uppercase">Forma de Pagamento</p>
-                        <div className="flex gap-2 mb-4">
-                            <button 
-                                onClick={() => { setPaymentMethod('mercadopago'); setPreferenceId(null); }} 
-                                className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${paymentMethod === 'mercadopago' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-100 text-gray-400'}`}
-                            >
-                                <div className="text-xl font-black mb-1">MP</div>
-                                <span className="text-[10px] font-bold">Online</span>
-                            </button>
-                            <button 
-                                onClick={() => { setPaymentMethod('cash'); setPreferenceId(null); }} 
-                                className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${paymentMethod === 'cash' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-100 text-gray-400'}`}
-                            >
-                                <DollarSign className="w-6 h-6 mb-1"/>
-                                <span className="text-[10px] font-bold">Entrega</span>
-                            </button>
-                        </div>
-
-                        {/* CASH OPTIONS */}
-                        {paymentMethod === 'cash' && (
-                            <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200 mb-4 animate-fade-in">
-                                <label className="text-xs font-bold text-yellow-800 block mb-1">Troco para quanto?</label>
-                                <input type="number" placeholder="Ex: 50.00 (Deixe vazio se não precisar)" value={changeAmount} onChange={e => setChangeAmount(e.target.value)} className="w-full py-2 outline-none text-gray-800 font-bold bg-transparent border-b border-yellow-300"/>
-                            </div>
-                        )}
-                        
-                        {/* MERCADO PAGO WALLET */}
-                        {paymentMethod === 'mercadopago' && (
-                            <div className="mb-4">
-                                {!preferenceId ? (
-                                    <button 
-                                        onClick={handleGeneratePreference}
-                                        disabled={isCreatingPreference}
-                                        className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700"
-                                    >
-                                        {isCreatingPreference ? <Loader2 className="animate-spin w-5 h-5"/> : <CheckCircle className="w-5 h-5" />}
-                                        {isCreatingPreference ? 'Gerando Pagamento...' : 'Gerar Pagamento (Online)'}
-                                    </button>
-                                ) : (
-                                    <div className="animate-fade-in-up">
-                                        <Wallet 
-                                            initialization={{ preferenceId: preferenceId }} 
-                                            customization={{ visual: { buttonBackground: 'black', borderRadius: '16px' } }}
-                                            onSubmit={() => {
-                                                // Hypothetical callback after successful payment flow in Wallet
-                                                // In real scenarios, standard MP Checkout redirects or handles it.
-                                                // If "onSubmit" is triggered, we can assume success for this demo.
-                                                finalizeSystemOrder(0);
-                                            }}
-                                        />
-                                        <p className="text-[10px] text-center text-gray-400 mt-2">Ambiente Seguro Mercado Pago</p>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                    
+                    <div className="mt-4 border-t pt-4"><p className="text-xs font-bold text-gray-500 mb-2 uppercase">Pagamento</p><div className="flex gap-2 mb-4"><button onClick={() => setPaymentMethod('cash')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'cash' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-100'}`}><DollarSign/><span className="text-xs font-bold">Dinheiro</span></button><button onClick={() => setPaymentMethod('card')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'card' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-100'}`}><CreditCard/><span className="text-xs font-bold">Cartão</span></button><button onClick={() => setPaymentMethod('pix')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'pix' ? 'border-teal-500 bg-teal-50 text-teal-700' : 'border-gray-100'}`}><QrCode/><span className="text-xs font-bold">Pix</span></button></div>{paymentMethod === 'cash' && (<div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200 mb-4"><label className="text-xs font-bold text-yellow-800 block mb-1">Troco para quanto?</label><input type="number" placeholder="Ex: 50.00" value={changeAmount} onChange={e => setChangeAmount(e.target.value)} className="w-full py-2 outline-none text-gray-800 font-bold bg-transparent border-b border-yellow-300"/></div>)}</div>
                     <div className="mt-2 flex justify-between font-bold text-xl text-gray-900 border-t pt-2"><span>Total</span><span>R$ {finalTotal.toFixed(2)}</span></div>
-                    
-                    {/* ONLY SHOW MAIN BUTTON IF NOT MERCADO PAGO (MP has its own button) */}
-                    {paymentMethod === 'cash' && (
-                        <button 
-                            onClick={handleCashOrder} 
-                            className="w-full bg-green-600 text-white font-bold py-3.5 rounded-xl mt-4 transition-colors flex items-center justify-center gap-2 hover:bg-green-700 shadow-lg shadow-green-200"
-                        >
-                            <CheckCircle className="w-5 h-5"/> Finalizar Pedido
-                        </button>
-                    )}
+                    <button onClick={handleFinalizeOrder} disabled={isProcessingPayment} className={`w-full text-white font-bold py-3.5 rounded-xl mt-4 transition-colors flex items-center justify-center gap-2 ${isProcessingPayment ? 'bg-gray-400' : 'bg-brand hover:bg-brandHover'}`}>{isProcessingPayment && <Loader2 className="w-5 h-5 animate-spin" />}{isProcessingPayment ? 'Processando...' : (paymentMethod === 'cash' ? 'Finalizar Pedido' : 'Pagar Agora')}</button>
                </div>
            </div>
        )}
@@ -605,7 +580,7 @@ const ClientView: React.FC<ClientViewProps> = ({
        {cart.length > 0 && !isCartOpen && (<div className="fixed bottom-20 left-0 right-0 px-4 z-20 flex justify-center animate-fade-in-up pointer-events-none"><button onClick={() => setIsCartOpen(true)} className="bg-brand text-white w-full max-w-md shadow-xl shadow-red-200/50 rounded-xl p-3 flex justify-between items-center font-bold pointer-events-auto transform active:scale-95 transition-all"><div className="flex items-center gap-3"><div className="bg-white/20 w-8 h-8 rounded-full flex items-center justify-center text-sm">{cart.reduce((acc, i) => acc + i.quantity, 0)}</div><span className="text-sm">Ver Sacola</span></div><div className="flex items-center gap-2"><span className="text-sm">R$ {productTotal.toFixed(2)}</span><ShoppingBag className="w-5 h-5 fill-white/20" /></div></button></div>)}
        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 py-2 px-6 flex justify-between items-center z-30"><button onClick={() => { setActiveTab('home'); setSubView('none'); }} className={`flex flex-col items-center gap-1 ${activeTab === 'home' ? 'text-brand' : 'text-gray-400'}`}><Home className={`w-6 h-6 ${activeTab === 'home' ? 'fill-current' : ''}`} /><span className="text-[10px] font-bold">Início</span></button><button onClick={() => { setActiveTab('orders'); setSubView('none'); }} className={`flex flex-col items-center gap-1 ${activeTab === 'orders' ? 'text-brand' : 'text-gray-400'}`}><FileText className={`w-6 h-6 ${activeTab === 'orders' ? 'fill-current' : ''}`} /><span className="text-[10px] font-bold">Pedidos</span></button><button onClick={() => { setActiveTab('profile'); setSubView('none'); }} className={`flex flex-col items-center gap-1 ${activeTab === 'profile' ? 'text-brand' : 'text-gray-400'}`}><UserIcon className={`w-6 h-6 ${activeTab === 'profile' ? 'fill-current' : ''}`} /><span className="text-[10px] font-bold">Perfil</span></button></div>
        
-       {showMapModal && (<div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in h-full"><div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl flex flex-col h-[90%] relative"><div className="absolute top-0 left-0 right-0 p-4 z-10 flex justify-between items-start pointer-events-none"><div className="bg-white/95 backdrop-blur px-4 py-2 rounded-xl shadow-md border border-gray-100 pointer-events-auto"><h3 className="font-bold text-gray-800 flex items-center gap-2"><Navigation className="w-4 h-4 text-brand" /> Definir Localização</h3><p className="text-xs text-gray-500">Mova o pin para o endereço correto.</p></div><button onClick={() => setShowMapModal(false)} className="bg-white p-2 rounded-full shadow-md hover:bg-gray-100 pointer-events-auto"><X className="w-6 h-6 text-gray-500" /></button></div><div className="flex-1 bg-gray-100 relative group overflow-hidden">{mapError ? (<div className="w-full h-full flex flex-col items-center justify-center text-center p-8"><MapIcon className="w-16 h-16 text-gray-300"/><p>Erro no Mapa</p></div>) : (<><div ref={mapContainerRef} className="w-full h-full" /><div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-20 pointer-events-none transition-all duration-300 ease-out ${isMapDragging ? '-mt-16 scale-110' : '-mt-8'}`}><div className="w-12 h-12 bg-brand rounded-full flex items-center justify-center shadow-2xl border-[3px] border-white"><MapPin className="w-6 h-6 text-white fill-current" /></div><div className={`w-2 h-8 bg-black/80 rounded-full -mt-2 blur-[1px] transition-opacity duration-300 ${isMapDragging ? 'opacity-0' : 'opacity-20'}`}></div></div>{!isMapDragging && <div className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-3 py-1.5 rounded-full pointer-events-none flex items-center gap-2 animate-pulse"><MousePointer2 className="w-3 h-3" /> Arraste o mapa</div>}</>)}</div><div className="p-6 bg-white border-t border-gray-100 rounded-t-3xl -mt-6 relative z-30 shadow-[0_-5px_20px_rgba(0,0,0,0.05)]"><div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"><div className="flex items-start gap-3 mb-6"><div className="p-2 bg-brandLight rounded-lg shrink-0"><MapPin className="w-6 h-6 text-brand" /></div><div className="flex-1"><p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Endereço Selecionado</p><h4 className="font-bold text-gray-900 text-lg leading-tight line-clamp-2">{mapAddress || 'Carregando endereço...'}</h4></div></div><button onClick={() => setShowMapModal(false)} className="w-full bg-brand text-white font-bold py-3.5 rounded-xl hover:bg-brandHover shadow-lg flex items-center justify-center gap-2"><CheckCircle className="w-5 h-5" /> Confirmar</button></div></div></div></div>)}
+       {showMapModal && (<div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in h-full"><div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl flex flex-col h-[90%] relative"><div className="absolute top-0 left-0 right-0 p-4 z-10 flex justify-between items-start pointer-events-none"><div className="bg-white/95 backdrop-blur px-4 py-2 rounded-xl shadow-md border border-gray-100 pointer-events-auto"><h3 className="font-bold text-gray-800 flex items-center gap-2"><Navigation className="w-4 h-4 text-brand" /> Definir Localização</h3><p className="text-xs text-gray-500">Mova o pin para o endereço correto.</p></div><button onClick={() => setShowMapModal(false)} className="bg-white p-2 rounded-full shadow-md hover:bg-gray-100 pointer-events-auto"><X className="w-6 h-6 text-gray-500" /></button></div><div className="flex-1 bg-gray-100 relative group overflow-hidden">{mapError ? (<div className="w-full h-full flex flex-col items-center justify-center text-center p-8"><MapIcon className="w-16 h-16 text-gray-300"/><p>Erro no Mapa</p></div>) : (<><div ref={mapContainerRef} className="w-full h-full" /><div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-20 pointer-events-none transition-all duration-300 ease-out ${isMapDragging ? '-mt-16 scale-110' : '-mt-8'}`}><div className="w-12 h-12 bg-brand rounded-full flex items-center justify-center shadow-2xl border-[3px] border-white"><MapPin className="w-6 h-6 text-white fill-current" /></div><div className={`w-2 h-8 bg-black/80 rounded-full -mt-2 blur-[1px] transition-opacity duration-300 ${isMapDragging ? 'opacity-0' : 'opacity-20'}`}></div></div>{!isMapDragging && <div className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-3 py-1.5 rounded-full pointer-events-none flex items-center gap-2 animate-pulse"><MousePointer2 className="w-3 h-3" /> Arraste o mapa</div>}</>)}</div><div className="p-6 bg-white border-t border-gray-100 rounded-t-3xl -mt-6 relative z-30 shadow-[0_-5px_20px_rgba(0,0,0,0.05)]"><div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"><div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"></div><div className="flex items-start gap-3 mb-6"><div className="p-2 bg-brandLight rounded-lg shrink-0"><MapPin className="w-6 h-6 text-brand" /></div><div className="flex-1"><p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Endereço Selecionado</p><h4 className="font-bold text-gray-900 text-lg leading-tight line-clamp-2">{mapAddress || 'Carregando endereço...'}</h4></div></div><button onClick={() => setShowMapModal(false)} className="w-full bg-brand text-white font-bold py-3.5 rounded-xl hover:bg-brandHover shadow-lg flex items-center justify-center gap-2"><CheckCircle className="w-5 h-5" /> Confirmar</button></div></div></div></div>)}
     </div>
   );
 };
