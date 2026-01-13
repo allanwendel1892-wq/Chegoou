@@ -1,7 +1,8 @@
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Company, Product, Order, ChatMessage, Address, CreditCard as CreditCardType, ProductOption, User } from '../types';
 import { PaymentService } from '../services/paymentService';
-import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, Timer, Settings, LogOut } from 'lucide-react';
+import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, Timer, Settings, LogOut, Crosshair } from 'lucide-react';
 
 declare global {
   interface Window {
@@ -478,6 +479,18 @@ const ClientView: React.FC<ClientViewProps> = ({
                             <button onClick={() => setIsAddingAddress(false)} className="p-1 hover:bg-gray-100 rounded text-gray-400"><X className="w-4 h-4" /></button>
                         </div>
                         
+                        <div className="flex justify-end mb-2">
+                             <button 
+                                type="button" 
+                                onClick={handleGetCurrentLocation}
+                                disabled={loadingLocation}
+                                className="text-xs text-brand font-bold hover:text-brandHover flex items-center gap-1 bg-red-50 px-3 py-1.5 rounded-lg transition-colors"
+                            >
+                                {loadingLocation ? <Loader2 className="w-3 h-3 animate-spin"/> : <Crosshair className="w-3 h-3" />}
+                                Usar minha localização
+                            </button>
+                        </div>
+
                         <div className="flex gap-2">
                             <div className="relative w-1/3">
                                 <input 
