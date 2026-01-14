@@ -484,10 +484,10 @@ const ClientView: React.FC<ClientViewProps> = ({
                                 type="button" 
                                 onClick={handleGetCurrentLocation}
                                 disabled={loadingLocation}
-                                className="text-xs text-brand font-bold hover:text-brandHover flex items-center gap-1 bg-red-50 px-3 py-1.5 rounded-lg transition-colors"
+                                className="text-xs text-brand font-bold hover:text-brandHover flex items-center gap-1 bg-white px-2 py-1 rounded transition-colors border border-gray-100"
                             >
                                 {loadingLocation ? <Loader2 className="w-3 h-3 animate-spin"/> : <Crosshair className="w-3 h-3" />}
-                                Usar minha localização
+                                Usar localização atual
                             </button>
                         </div>
 
