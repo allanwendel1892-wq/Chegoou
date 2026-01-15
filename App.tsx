@@ -1,3 +1,5 @@
+
+
 import React, { useState, useEffect } from 'react';
 import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest } from './types';
 import AuthView from './components/AuthView';
@@ -7,6 +9,9 @@ import CourierView from './components/CourierView';
 import ClientView from './components/ClientView';
 import { supabase } from './services/supabaseClient';
 import { Loader2, AlertCircle, Database, Lock } from 'lucide-react';
+
+// PLACEHOLDER N8N WEBHOOK URL - Replace with your actual n8n webhook URL
+const N8N_WEBHOOK_URL = 'https://n8n.webhook.url/order-created'; 
 
 // Helper for Distance Calculation
 const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -48,6 +53,8 @@ const App: React.FC = () => {
     fetchInitialData();
 
     // 1. Real-time subscription for Orders
+    // This ensures that when N8N updates the order status from 'waiting_payment' to 'pending'/'paid',
+    // the UI updates immediately for everyone.
     const ordersSub = supabase
       .channel('public:orders')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload) => {
@@ -358,6 +365,11 @@ const App: React.FC = () => {
     }
 
     const code = currentUser.phone.slice(-4) || '0000';
+    
+    // Determine status based on payment method
+    // If cash, go straight to pending (restaurant sees it).
+    // If online (card/pix), go to waiting_payment (yellow status), then Webhook handles logic.
+    const initialStatus = paymentMethod === 'cash' ? 'pending' : 'waiting_payment';
 
     const newOrder: Order = {
         id: `ord-${Date.now()}`,
@@ -380,7 +392,7 @@ const App: React.FC = () => {
         deliveryMethod: deliveryMethod,
         paymentMethod: paymentMethod,
         changeFor: changeFor,
-        status: 'pending',
+        status: initialStatus,
         timestamp: new Date(),
         deliveryCode: code,
         deliveryAddress: currentUser.address,
@@ -394,6 +406,34 @@ const App: React.FC = () => {
         alert("Erro ao realizar pedido: " + error.message);
         return false;
     }
+
+    // WEBHOOK TRIGGER FOR AUTOMATION (N8N)
+    // Only if it's an online payment that needs processing/confirmation
+    if (paymentMethod !== 'cash') {
+        try {
+            fetch(N8N_WEBHOOK_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    orderId: newOrder.id,
+                    customer: {
+                        id: currentUser.id,
+                        name: currentUser.name,
+                        email: currentUser.email,
+                        phone: currentUser.phone
+                    },
+                    items: newOrder.items,
+                    total: newOrder.total,
+                    paymentMethod: newOrder.paymentMethod,
+                    companyName: newOrder.companyName,
+                    status: newOrder.status
+                })
+            }).catch(err => console.error("Webhook Trigger Error:", err));
+        } catch (e) {
+            console.warn("Failed to trigger N8N Webhook", e);
+        }
+    }
+
     return true;
   };
 

@@ -1,8 +1,8 @@
 
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Company, Product, Order, ChatMessage, Address, CreditCard as CreditCardType, ProductOption, User } from '../types';
-import { PaymentService } from '../services/paymentService';
-import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, Timer, Settings, LogOut, Crosshair } from 'lucide-react';
+import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, Timer, Settings, LogOut, Crosshair, AlertCircle } from 'lucide-react';
 
 declare global {
   interface Window {
@@ -94,11 +94,6 @@ const ClientView: React.FC<ClientViewProps> = ({
   const [changeAmount, setChangeAmount] = useState<string>('');
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
-  // PIX MODAL STATE
-  const [showPixModal, setShowPixModal] = useState(false);
-  const [pixData, setPixData] = useState<{qrCode: string, copyPaste: string} | null>(null);
-  const [pixTimer, setPixTimer] = useState(600); 
-
   const [customizingProduct, setCustomizingProduct] = useState<Product | null>(null);
   const [selections, setSelections] = useState<Record<string, ProductOption[]>>({});
   const [chatInput, setChatInput] = useState('');
@@ -111,21 +106,6 @@ const ClientView: React.FC<ClientViewProps> = ({
   const [mapAddress, setMapAddress] = useState('');
   const [isMapDragging, setIsMapDragging] = useState(false);
   const [mapError, setMapError] = useState(false);
-
-  // Pix Timer
-  useEffect(() => {
-    let interval: any;
-    if (showPixModal && pixTimer > 0) {
-        interval = setInterval(() => setPixTimer(prev => prev - 1), 1000);
-    }
-    return () => clearInterval(interval);
-  }, [showPixModal, pixTimer]);
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
 
   // Map Initialization
   useEffect(() => {
@@ -246,45 +226,36 @@ const ClientView: React.FC<ClientViewProps> = ({
   const serviceFeeValue = productTotal * ((activeCompanyData ? activeCompanyData.serviceFeePercentage : 0) / 100);
   const finalTotal = productTotal + activeDeliveryFee + serviceFeeValue;
 
+  // MODIFIED: Simplified handleFinalizeOrder to skip internal payment and use Webhook
   const handleFinalizeOrder = async () => {
       let changeForValue = 0;
       if (paymentMethod === 'cash') {
           changeForValue = parseFloat(changeAmount.replace(',','.'));
           if (changeForValue < finalTotal) { alert("Troco deve ser maior que o total."); return; }
       }
-      setIsProcessingPayment(true);
-      const paymentResult = await PaymentService.processPayment(finalTotal, paymentMethod, user, `Pedido na loja ${selectedCompany?.name}`);
       
-      if (paymentMethod === 'pix' && paymentResult.success && paymentResult.qrCode) {
-          setPixData({ qrCode: paymentResult.qrCode, copyPaste: paymentResult.copyPaste || '' });
-          setPixTimer(600);
-          setShowPixModal(true);
-          setIsProcessingPayment(false);
-          return;
-      }
-      if (!paymentResult.success && paymentMethod !== 'cash') {
-          alert(`Erro no Pagamento: ${paymentResult.message}`);
-          setIsProcessingPayment(false);
-          return;
-      }
-      await finalizeSystemOrder(changeForValue);
-  };
-
-  const finalizeSystemOrder = async (changeForValue: number) => {
+      setIsProcessingPayment(true);
+      
+      // Directly place the order. 
+      // If cash -> status 'pending'
+      // If card/pix -> status 'waiting_payment' + Webhook Trigger (handled in App.tsx)
       const success = await onPlaceOrder(cart, cart[0].product.companyId, finalTotal, deliveryMethod, serviceFeeValue, activeDeliveryFee, productTotal, paymentMethod, changeForValue); 
+      
       setIsProcessingPayment(false);
-      setShowPixModal(false);
+      
       if (success) {
-          setIsCartOpen(false); setCart([]); setSelectedCompany(null); setChangeAmount('');
-          alert("Pedido realizado com sucesso!");
+          setIsCartOpen(false); 
+          setCart([]); 
+          setSelectedCompany(null); 
+          setChangeAmount('');
+          
+          if (paymentMethod === 'cash') {
+            alert("Pedido realizado com sucesso!");
+          } else {
+             // For online payments, inform the user about the next step
+             alert("Pedido realizado! Aguardando confirmação do pagamento pelo sistema.");
+          }
           setActiveTab('orders');
-      }
-  };
-
-  const copyPixCode = () => {
-      if (pixData?.copyPaste) {
-          navigator.clipboard.writeText(pixData.copyPaste);
-          alert("Código Pix copiado!");
       }
   };
 
@@ -426,7 +397,21 @@ const ClientView: React.FC<ClientViewProps> = ({
             <div className="p-4 space-y-4">
                 {myOrders.map(order => (
                     <div key={order.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-                        <div className="flex justify-between items-start mb-3"><h3 className="font-bold text-gray-900">{order.companyName}</h3><span className={`text-[10px] px-2 py-1 rounded font-bold uppercase ${order.status === 'delivered' ? 'bg-gray-100 text-gray-500' : 'bg-green-100 text-green-700'}`}>{order.status === 'delivered' ? 'Concluído' : 'Em Andamento'}</span></div>
+                        <div className="flex justify-between items-start mb-3">
+                            <h3 className="font-bold text-gray-900">{order.companyName}</h3>
+                            <span className={`text-[10px] px-2 py-1 rounded font-bold uppercase 
+                                ${order.status === 'delivered' ? 'bg-gray-100 text-gray-500' : ''}
+                                ${order.status === 'pending' || order.status === 'preparing' ? 'bg-green-100 text-green-700' : ''}
+                                ${order.status === 'waiting_payment' ? 'bg-yellow-100 text-yellow-700' : ''}
+                            `}>
+                                {order.status === 'delivered' ? 'Concluído' : order.status === 'waiting_payment' ? 'Aguardando Pagamento' : 'Em Andamento'}
+                            </span>
+                        </div>
+                        {order.status === 'waiting_payment' && (
+                             <div className="bg-yellow-50 p-2 rounded-lg border border-yellow-200 mb-3 flex items-center gap-2 text-xs text-yellow-800">
+                                 <Clock className="w-4 h-4" /> Aguardando confirmação do banco...
+                             </div>
+                        )}
                         <div className="space-y-1 mb-4">{order.items.map((i, idx) => (<p key={idx} className="text-sm text-gray-600">{i.quantity}x {i.productName}</p>))}</div>
                         <div className="flex justify-between items-center border-t border-gray-50 pt-3">
                             <div><span className="font-bold text-sm block">Total: R$ {order.total.toFixed(2)}</span></div>
@@ -541,36 +526,6 @@ const ClientView: React.FC<ClientViewProps> = ({
             <div className="fixed inset-0 bg-gray-50 z-[60] flex flex-col animate-slide-up"><div className="bg-white p-4 border-b flex items-center gap-3"><button onClick={()=>setSubView('none')}><ArrowLeft/></button><h2 className="font-bold">Chat</h2></div><div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#E5DDD5]">{(chats[chatOrderId]||[]).map(m=>(<div key={m.id} className={`flex ${m.senderRole==='client'?'justify-end':'justify-start'}`}><div className={`p-3 rounded-xl text-sm max-w-[80%] ${m.senderRole==='client'?'bg-[#DCF8C6]':'bg-white'}`}>{m.text}</div></div>))}<div ref={messagesEndRef}/></div><div className="p-3 bg-white border-t flex gap-2"><input value={chatInput} onChange={e=>setChatInput(e.target.value)} className="flex-1 bg-gray-100 rounded-full px-4 py-3 outline-none" /><button onClick={handleSendMessage} className="bg-brand text-white p-3 rounded-full"><Send/></button></div></div>
        )}
        
-       {showPixModal && pixData && (
-           <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
-               <div className="bg-white w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl relative">
-                   <div className="bg-green-600 p-4 text-center text-white">
-                       <h3 className="font-bold text-lg">Pagamento via Pix</h3>
-                       <div className="flex items-center justify-center gap-1 text-sm mt-1 opacity-90">
-                           <Timer className="w-4 h-4" /> Expira em {formatTime(pixTimer)}
-                       </div>
-                   </div>
-                   <div className="p-6 flex flex-col items-center text-center space-y-4">
-                       <p className="text-sm text-gray-500">Escaneie o QR Code ou copie o código abaixo para pagar.</p>
-                       <div className="p-4 border-2 border-green-100 rounded-xl bg-white shadow-sm">
-                           <img src={pixData.qrCode} alt="QR Code Pix" className="w-48 h-48 mix-blend-multiply" />
-                       </div>
-                       
-                       <div className="w-full">
-                           <p className="text-xs font-bold text-gray-400 uppercase mb-1 text-left">Pix Copia e Cola</p>
-                           <div className="flex gap-2">
-                               <input readOnly value={pixData.copyPaste} className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 text-xs text-gray-500 truncate" />
-                               <button onClick={copyPixCode} className="bg-green-100 text-green-700 p-2 rounded-lg hover:bg-green-200 transition-colors"><Copy className="w-5 h-5"/></button>
-                           </div>
-                       </div>
-                       
-                       <button onClick={() => finalizeSystemOrder(0)} className="w-full bg-green-600 text-white font-bold py-3 rounded-xl hover:bg-green-700 shadow-lg shadow-green-200 flex items-center justify-center gap-2 mt-2"><CheckCircle className="w-5 h-5" /> Já realizei o pagamento</button>
-                       <button onClick={() => setShowPixModal(false)} className="text-gray-400 text-xs font-bold hover:text-red-500 underline">Cancelar Pagamento</button>
-                   </div>
-               </div>
-           </div>
-       )}
-
        {isCartOpen && (
            <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4">
                <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl animate-slide-up flex flex-col max-h-[90vh]">

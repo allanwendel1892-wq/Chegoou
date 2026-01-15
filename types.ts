@@ -1,4 +1,5 @@
 
+
 export type UserRole = 'admin' | 'partner' | 'courier' | 'client';
 
 export interface Address {
@@ -118,7 +119,7 @@ export interface Order {
   subtotal: number; // Product Sum
   deliveryFee: number; // Part of Calculation A
   serviceFee: number; // Calculation B
-  status: 'pending' | 'preparing' | 'ready' | 'waiting_courier' | 'delivering' | 'delivered' | 'cancelled';
+  status: 'waiting_payment' | 'pending' | 'preparing' | 'ready' | 'waiting_courier' | 'delivering' | 'delivered' | 'cancelled';
   paymentMethod: 'cash' | 'card' | 'pix'; // Updated payment methods
   changeFor?: number; // Needed for cash payments
   timestamp: Date;

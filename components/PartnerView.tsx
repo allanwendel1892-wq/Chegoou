@@ -1,3 +1,5 @@
+
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
@@ -128,6 +130,12 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                               <DollarSign className="w-3 h-3"/>
                               Dinheiro {order.changeFor ? `(Troco p/ R$ ${order.changeFor.toFixed(2)})` : ''}
                           </div>
+                      )}
+                      {order.status === 'waiting_payment' && (
+                           <div className="bg-yellow-100 text-yellow-800 text-[10px] font-bold px-2 py-1 rounded mb-2 flex items-center gap-1 border border-yellow-200">
+                               <Clock className="w-3 h-3"/>
+                               Aguardando Pagamento
+                           </div>
                       )}
 
                       <div className="flex justify-between items-center pt-2 border-t border-gray-50 mt-2">
@@ -649,6 +657,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 onChange={e => setEditingOrder({...editingOrder, status: e.target.value as any})}
                                 className="w-full border rounded-lg px-3 py-2 bg-white"
                              >
+                                 <option value="waiting_payment">Aguardando Pagamento</option>
                                  <option value="pending">Pendente</option>
                                  <option value="preparing">Preparando</option>
                                  <option value="ready">Pronto</option>
@@ -755,10 +764,20 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                     <div className="flex-1 overflow-x-auto pb-4">
                         <div className="flex gap-4 h-full min-w-max px-1">
                             <KanbanColumn 
+                                title="Aguardando Pagamento" 
+                                status="waiting_payment" 
+                                items={orders.filter(o => o.status === 'waiting_payment')} 
+                                color="border-yellow-200"
+                                onClickOrder={setEditingOrder}
+                                onDrop={handleDragDropOrder}
+                                chats={chats}
+                                onOpenChat={setActiveChatOrder}
+                            />
+                            <KanbanColumn 
                                 title="Pendentes" 
                                 status="pending" 
                                 items={orders.filter(o => o.status === 'pending')} 
-                                color="border-yellow-200"
+                                color="border-orange-200"
                                 onClickOrder={setEditingOrder}
                                 onDrop={handleDragDropOrder}
                                 chats={chats}
