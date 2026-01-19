@@ -599,7 +599,13 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO anon;`}
         return <CourierView 
             courier={currentUser} 
             availableOrders={orders} 
-            acceptOrder={(id) => updateOrderStatus(id, 'delivering')}
+            acceptOrder={async (id) => {
+                 // Update BOTH status and courierId so the courier "owns" the order
+                 const updates = { status: 'delivering', courierId: currentUser.id };
+                 await supabase.from('orders').update(updates).eq('id', id);
+                 // Optimistic update for UI responsiveness
+                 setOrders(prev => prev.map(o => o.id === id ? { ...o, ...updates } as Order : o));
+            }}
             confirmDelivery={(id, code) => updateOrderStatus(id, 'delivered')}
             onLogout={handleLogout}
         />;

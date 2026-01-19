@@ -47,13 +47,37 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
       // In a real backend scenario, we would also check if order.courierId === courier.id
       const inProgressOrder = availableOrders.find(o => 
           o.status === 'delivering' && 
-          o.deliveryType === 'chegoou'
+          o.deliveryType === 'chegoou' &&
+          (o.courierId === courier.id || !o.courierId) // Handle legacy active orders or optimistic updates
       );
 
       if (inProgressOrder) {
           setActiveOrder(inProgressOrder);
       }
-  }, [availableOrders]);
+  }, [availableOrders, courier.id]);
+
+  // --- STATISTICS CALCULATION ---
+  const stats = useMemo(() => {
+    let balance = 0;
+    let ridesToday = 0;
+    const todayStr = new Date().toDateString();
+
+    availableOrders.forEach(order => {
+        // Count earnings if:
+        // 1. Order is delivered
+        // 2. Assigned to this courier
+        if (order.status === 'delivered' && order.courierId === courier.id) {
+            balance += (order.deliveryFee || 0);
+
+            // Check if it was today (using timestamp)
+            if (new Date(order.timestamp).toDateString() === todayStr) {
+                ridesToday++;
+            }
+        }
+    });
+
+    return { balance, ridesToday };
+  }, [availableOrders, courier.id]);
 
   // --- GEOLOCATION TRACKING ---
   useEffect(() => {
@@ -207,7 +231,7 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
             <div className="bg-white p-4 rounded-xl shadow-sm col-span-2 md:col-span-1 flex justify-between items-center">
                 <div>
                     <p className="text-xs text-gray-500">Saldo a Receber</p>
-                    <h3 className="text-xl font-bold text-gray-800">R$ 145,00</h3>
+                    <h3 className="text-xl font-bold text-gray-800">R$ {stats.balance.toFixed(2)}</h3>
                 </div>
                 <button 
                     onClick={handleWithdrawRequest}
@@ -222,7 +246,7 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
             </div>
             <div className="bg-white p-4 rounded-xl shadow-sm col-span-2 md:col-span-1">
                 <p className="text-xs text-gray-500">Corridas Hoje</p>
-                <h3 className="text-xl font-bold text-gray-800">8</h3>
+                <h3 className="text-xl font-bold text-gray-800">{stats.ridesToday}</h3>
             </div>
         </div>
 
