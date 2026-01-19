@@ -1,3 +1,5 @@
+
+
 import React, { useState, useRef, useEffect } from 'react';
 import { User, Company, Order, WithdrawalRequest, UserRole, Address } from '../types';
 import { Users, Building2, DollarSign, Settings, Trash2, CheckCircle, Ban, TrendingUp, Search, Lock, Unlock, Edit, X, Save, Bike, LogOut, MapPin, Truck, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair } from 'lucide-react';
@@ -848,6 +850,23 @@ const AdminView: React.FC<AdminViewProps> = ({
                                 <option value="admin">Admin</option>
                             </select>
                         </div>
+                        
+                        {/* COURIER RADIUS CONFIG (NEW) */}
+                        {editingUser.role === 'courier' && (
+                            <div className="bg-orange-50 p-3 rounded-xl border border-orange-100">
+                                <label className="text-xs font-bold text-orange-800 uppercase flex items-center gap-2">
+                                    <Bike className="w-4 h-4"/> Raio de Operação (Km)
+                                </label>
+                                <input 
+                                    type="number"
+                                    value={editingUser.courierRadiusKm || 15}
+                                    onChange={e => setEditingUser({...editingUser, courierRadiusKm: Number(e.target.value)})}
+                                    className="w-full border border-orange-200 rounded-lg px-3 py-2 mt-1"
+                                    placeholder="Ex: 15"
+                                />
+                                <p className="text-[10px] text-gray-500 mt-1">Define a área onde o entregador vê pedidos.</p>
+                            </div>
+                        )}
                       </div>
 
                       {/* Address Info */}

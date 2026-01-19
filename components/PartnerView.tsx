@@ -191,7 +191,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       isAvailable: true,
       price: 0,
       pricingMode: 'default',
-      groups: []
+      groups: [],
+      preparationTime: 15 // Default prep time
   });
   
   // UI State for Group Management
@@ -507,7 +508,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   };
 
   const handleCancelEdit = () => {
-      setNewProduct({ isAvailable: true, price: 0, pricingMode: 'default', groups: [] });
+      setNewProduct({ isAvailable: true, price: 0, pricingMode: 'default', groups: [], preparationTime: 15 });
       setProductImagePreview('');
       setEditingProductId(null);
   };
@@ -525,7 +526,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           image: productImagePreview || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c',
           isAvailable: true,
           pricingMode: newProduct.pricingMode || 'default',
-          groups: newProduct.groups || []
+          groups: newProduct.groups || [],
+          preparationTime: newProduct.preparationTime || 15
       };
 
       if (editingProductId) {
@@ -890,7 +892,17 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                         placeholder="0.00" 
                                     />
                                 </div>
-                                {/* UPDATED PRODUCT CATEGORY SELECT */}
+                                {/* PREPARATION TIME INPUT (NEW) */}
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 uppercase ml-1">Preparo (min)</label>
+                                    <input 
+                                        type="number"
+                                        value={newProduct.preparationTime || 15} 
+                                        onChange={e => setNewProduct({...newProduct, preparationTime: parseInt(e.target.value)})}
+                                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 mt-1 focus:ring-2 focus:ring-red-500 outline-none" 
+                                        placeholder="Minutos" 
+                                    />
+                                </div>
                                 <div>
                                     <label className="text-xs font-bold text-gray-500 uppercase ml-1">Categoria</label>
                                     <select 

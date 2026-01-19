@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest } from './types';
 import AuthView from './components/AuthView';
@@ -333,9 +332,14 @@ const App: React.FC = () => {
       deliveryFee: number, 
       subtotal: number, 
       paymentMethod: 'cash' | 'card' | 'pix',
-      changeFor?: number
+      changeFor?: number,
+      address?: Address // NEW: Explicit address from ClientView
   ): Promise<boolean> => {
-    if (!currentUser || !currentUser.address) {
+    
+    // Fallback to currentUser address if not provided (should be provided by ClientView now)
+    const targetAddress = address || currentUser?.address;
+
+    if (!targetAddress) {
         alert("Erro: Você precisa selecionar um endereço de entrega.");
         return false;
     }
@@ -354,7 +358,7 @@ const App: React.FC = () => {
     // Distance check only if delivery
     if (deliveryMethod === 'delivery' && company.address) {
         const distance = getDistanceFromLatLonInKm(
-            currentUser.address.lat, currentUser.address.lng,
+            targetAddress.lat, targetAddress.lng,
             company.address.lat, company.address.lng
         );
 
@@ -364,20 +368,19 @@ const App: React.FC = () => {
         }
     }
 
-    const code = currentUser.phone.slice(-4) || '0000';
+    const code = currentUser?.phone.slice(-4) || '0000';
     
     // Determine status based on payment method
-    // If cash, go straight to pending (restaurant sees it).
-    // If online (card/pix), go to waiting_payment (yellow status), then Webhook handles logic.
+    // FIX: Cash orders must ALWAYS be 'pending' immediately.
     const initialStatus = paymentMethod === 'cash' ? 'pending' : 'waiting_payment';
 
     const newOrder: Order = {
         id: `ord-${Date.now()}`,
         companyId,
         companyName: company.name,
-        customerId: currentUser.id,
-        customerName: currentUser.name,
-        customerPhone: currentUser.phone,
+        customerId: currentUser?.id || 'unknown',
+        customerName: currentUser?.name || 'Cliente',
+        customerPhone: currentUser?.phone || '',
         items: cartItems.map((i: any) => ({
             productId: i.product.id,
             productName: i.product.name,
@@ -395,8 +398,8 @@ const App: React.FC = () => {
         status: initialStatus,
         timestamp: new Date(),
         deliveryCode: code,
-        deliveryAddress: currentUser.address,
-        pickupAddress: company.address || { street: '', number: '', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0 },
+        deliveryAddress: targetAddress, // Use the explicit address
+        pickupAddress: company.address || { street: 'Endereço da Loja', number: 'S/N', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0 },
         deliveryType: company.deliveryType
     };
 
@@ -417,10 +420,10 @@ const App: React.FC = () => {
                 body: JSON.stringify({
                     orderId: newOrder.id,
                     customer: {
-                        id: currentUser.id,
-                        name: currentUser.name,
-                        email: currentUser.email,
-                        phone: currentUser.phone
+                        id: currentUser?.id,
+                        name: currentUser?.name,
+                        email: currentUser?.email,
+                        phone: currentUser?.phone
                     },
                     items: newOrder.items,
                     total: newOrder.total,

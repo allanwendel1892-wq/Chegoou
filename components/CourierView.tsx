@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Order, User, Address } from '../types';
 import { Navigation, Bike, CheckCircle, MapPin, DollarSign, LogOut, ArrowRight, Store, Loader2, Crosshair } from 'lucide-react';
@@ -35,8 +36,8 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
   );
   const [locationStatus, setLocationStatus] = useState<'locating' | 'found' | 'error'>('locating');
 
-  // OPERATIONAL RADIUS FOR COURIER (e.g., 15km)
-  const COURIER_OPERATIONAL_RADIUS_KM = 15;
+  // OPERATIONAL RADIUS FOR COURIER (Dynamic)
+  const COURIER_OPERATIONAL_RADIUS_KM = courier.courierRadiusKm || 15;
 
   // --- PERSISTENCE LOGIC ---
   // Ensure that if an order is currently 'delivering', it remains as the active order
@@ -110,7 +111,7 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
         })
         .filter(o => o.distToPickup <= COURIER_OPERATIONAL_RADIUS_KM) // Only show nearby orders
         .sort((a, b) => a.distToPickup - b.distToPickup); // Closest first
-  }, [availableOrders, currentLocation]);
+  }, [availableOrders, currentLocation, COURIER_OPERATIONAL_RADIUS_KM]);
 
 
   const handleAccept = (order: Order) => {
@@ -137,13 +138,17 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
 
   // Helper to open Google Maps with Route
   const openNavigation = (destination: Address, origin?: {lat: number, lng: number}) => {
-      // If we have GPS, use it as start point
-      const destQuery = destination.lat && destination.lng !== 0 
-        ? `${destination.lat},${destination.lng}` 
-        : `${destination.street}, ${destination.number}, ${destination.city}`;
-      
-      const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destQuery)}&travelmode=driving`;
-      window.open(url, '_blank');
+      // Use coordinates if they are valid (not 0,0)
+      if (destination.lat !== 0 && destination.lng !== 0) {
+          const destQuery = `${destination.lat},${destination.lng}`;
+          const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destQuery)}&travelmode=driving`;
+          window.open(url, '_blank');
+      } else {
+          // Fallback to text address search if GPS is missing in the object
+          const addressQuery = `${destination.street}, ${destination.number} - ${destination.neighborhood}, ${destination.city}`;
+          const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addressQuery)}&travelmode=driving`;
+          window.open(url, '_blank');
+      }
   };
 
   // Calculate distances for active order
@@ -177,7 +182,7 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
                          <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500'}`}></span>
                          {isOnline ? 'Online' : 'Offline'}
                          {locationStatus === 'locating' && <span className="text-orange-500 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin"/> Buscando GPS...</span>}
-                         {locationStatus === 'found' && <span className="text-green-600 flex items-center gap-1"><Crosshair className="w-3 h-3"/> GPS Ativo</span>}
+                         {locationStatus === 'found' && <span className="text-green-600 flex items-center gap-1"><Crosshair className="w-3 h-3"/> GPS Ativo (Raio {COURIER_OPERATIONAL_RADIUS_KM}km)</span>}
                     </div>
                 </div>
             </div>
@@ -253,7 +258,7 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
                     <div className="relative pl-6 border-l-2 border-gray-200 pb-6">
                         <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-blue-500 border-2 border-white"></div>
                         <h4 className="font-bold text-gray-800 text-sm">Coleta: {activeOrder.companyName}</h4>
-                        <p className="text-xs text-gray-500 mb-2">{activeOrder.pickupAddress?.street}, {activeOrder.pickupAddress?.number}</p>
+                        <p className="text-xs text-gray-500 mb-2">{activeOrder.pickupAddress?.street}, {activeOrder.pickupAddress?.number} - {activeOrder.pickupAddress?.neighborhood}</p>
                         <div className="flex items-center gap-2">
                             <span className="text-xs font-bold bg-blue-50 text-blue-700 px-2 py-1 rounded">
                                 {activeDistances.toPickup.toFixed(1)} km de você
@@ -272,7 +277,10 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
                          <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-orange-500 border-2 border-white animate-ping"></div>
                          <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-orange-500 border-2 border-white"></div>
                         <h4 className="font-bold text-gray-800 text-sm">Entrega: {activeOrder.customerName}</h4>
-                        <p className="text-xs text-gray-500 mb-2">{activeOrder.deliveryAddress.street}, {activeOrder.deliveryAddress.number}</p>
+                        <p className="text-xs text-gray-500 mb-2">
+                            {activeOrder.deliveryAddress.street}, {activeOrder.deliveryAddress.number} <br/>
+                            <span className="opacity-80">{activeOrder.deliveryAddress.neighborhood} - {activeOrder.deliveryAddress.city}</span>
+                        </p>
                         
                         {/* PAYMENT ALERT FOR CASH */}
                         {activeOrder.paymentMethod === 'cash' && (
@@ -364,7 +372,7 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
 
                         <div className="flex items-center justify-between mt-4">
                             <div className="bg-green-100 text-green-700 font-bold px-3 py-1.5 rounded-lg text-sm">
-                                + R$ {order.deliveryFee.toFixed(2)}
+                                Taxa: R$ {order.deliveryFee.toFixed(2)}
                             </div>
                             <button 
                                 onClick={() => handleAccept(order)}

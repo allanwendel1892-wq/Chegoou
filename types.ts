@@ -34,6 +34,7 @@ export interface User {
   vehiclePlate?: string; // For couriers
   vehicleType?: 'moto' | 'bike' | 'car';
   isOnline?: boolean; // For couriers
+  courierRadiusKm?: number; // NEW: Customizable radius for couriers
   savedAddresses?: Address[]; // List of saved addresses for clients
   savedCards?: CreditCard[]; // Mock payments
 }
@@ -95,6 +96,7 @@ export interface Product {
   pricingMode: 'default' | 'average' | 'highest'; // Pizza Logic
   groups: ProductGroup[]; // Complements/Toppings
   stock?: number;
+  preparationTime?: number; // NEW: Estimated preparation time in minutes
 }
 
 export interface OrderItem {
