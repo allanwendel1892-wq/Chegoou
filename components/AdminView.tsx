@@ -15,8 +15,8 @@ interface AdminViewProps {
   withdrawals: WithdrawalRequest[];
   onUpdateWithdrawal: (id: string, status: 'paid' | 'rejected') => void;
   // Settings Props
-  globalSettings: { platformFee: number; minWithdrawal: number; maintenanceMode: boolean };
-  onUpdateSettings: (settings: { platformFee: number; minWithdrawal: number; maintenanceMode: boolean }) => void;
+  globalSettings: { platformFee: number; minWithdrawal: number; maintenanceMode: boolean; courierRangeKm: number };
+  onUpdateSettings: (settings: { platformFee: number; minWithdrawal: number; maintenanceMode: boolean; courierRangeKm: number }) => void;
   
   // PERSISTENCE HANDLERS (SUPABASE)
   onUpdateUser: (user: User) => Promise<void>;
@@ -787,6 +787,16 @@ const AdminView: React.FC<AdminViewProps> = ({
                             className="w-full mt-1 border border-gray-200 rounded-lg px-4 py-2"
                           />
                       </div>
+                      <div>
+                          <label className="text-sm font-bold text-gray-700 flex items-center gap-2"><Bike className="w-4 h-4"/> Raio de Operação Global Entregadores (Km)</label>
+                          <input 
+                            type="number" 
+                            value={localSettingsForm.courierRangeKm || 15}
+                            onChange={(e) => setLocalSettingsForm({...localSettingsForm, courierRangeKm: Number(e.target.value)})}
+                            className="w-full mt-1 border border-gray-200 rounded-lg px-4 py-2"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Define até que distância os entregadores veem os pedidos das lojas.</p>
+                      </div>
                       <div className="flex items-center gap-3 p-4 bg-yellow-50 rounded-xl border border-yellow-100">
                            <input 
                                 type="checkbox" 
@@ -850,23 +860,6 @@ const AdminView: React.FC<AdminViewProps> = ({
                                 <option value="admin">Admin</option>
                             </select>
                         </div>
-                        
-                        {/* COURIER RADIUS CONFIG (NEW) */}
-                        {editingUser.role === 'courier' && (
-                            <div className="bg-orange-50 p-3 rounded-xl border border-orange-100">
-                                <label className="text-xs font-bold text-orange-800 uppercase flex items-center gap-2">
-                                    <Bike className="w-4 h-4"/> Raio de Operação (Km)
-                                </label>
-                                <input 
-                                    type="number"
-                                    value={editingUser.courierRadiusKm || 15}
-                                    onChange={e => setEditingUser({...editingUser, courierRadiusKm: Number(e.target.value)})}
-                                    className="w-full border border-orange-200 rounded-lg px-3 py-2 mt-1"
-                                    placeholder="Ex: 15"
-                                />
-                                <p className="text-[10px] text-gray-500 mt-1">Define a área onde o entregador vê pedidos.</p>
-                            </div>
-                        )}
                       </div>
 
                       {/* Address Info */}

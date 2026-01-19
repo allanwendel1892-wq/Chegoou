@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
-import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag } from 'lucide-react';
+import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike } from 'lucide-react';
 import DashboardView from './DashboardView';
 import ForecastView from './ForecastView';
 import WhatsAppBotView from './WhatsAppBotView';
@@ -102,13 +102,27 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                       onClick={() => onClickOrder(order)}
                       className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all cursor-grab active:cursor-grabbing group select-none relative"
                   >
-                      <div className="flex justify-between items-start mb-3">
+                      <div className="flex justify-between items-start mb-2">
                           <span className="font-bold text-gray-900 group-hover:text-red-600 transition-colors">#{order.id.slice(-4)}</span>
                           <span className="text-xs text-gray-400 flex items-center gap-1">
                               <Clock className="w-3 h-3" />
                               {new Date(order.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                           </span>
                       </div>
+                      
+                      {/* DELIVERY METHOD INDICATOR */}
+                      <div className="mb-3">
+                          {order.deliveryMethod === 'pickup' ? (
+                              <span className="inline-flex items-center gap-1.5 bg-purple-50 text-purple-700 border border-purple-100 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide">
+                                  <Store className="w-3 h-3" /> Retirada
+                              </span>
+                          ) : (
+                              <span className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 border border-blue-100 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide">
+                                  <Bike className="w-3 h-3" /> Entrega
+                              </span>
+                          )}
+                      </div>
+
                       <div className="flex items-center gap-2 mb-3">
                           <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center font-bold text-gray-600 text-xs">
                               {order.customerName.charAt(0)}
@@ -192,7 +206,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       price: 0,
       pricingMode: 'default',
       groups: [],
-      preparationTime: 15 // Default prep time
+      estimatedTime: '30-45 min'
   });
   
   // UI State for Group Management
@@ -508,7 +522,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   };
 
   const handleCancelEdit = () => {
-      setNewProduct({ isAvailable: true, price: 0, pricingMode: 'default', groups: [], preparationTime: 15 });
+      setNewProduct({ isAvailable: true, price: 0, pricingMode: 'default', groups: [], estimatedTime: '30-45 min' });
       setProductImagePreview('');
       setEditingProductId(null);
   };
@@ -527,7 +541,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           isAvailable: true,
           pricingMode: newProduct.pricingMode || 'default',
           groups: newProduct.groups || [],
-          preparationTime: newProduct.preparationTime || 15
+          estimatedTime: newProduct.estimatedTime || '30-45 min'
       };
 
       if (editingProductId) {
@@ -892,18 +906,19 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                         placeholder="0.00" 
                                     />
                                 </div>
-                                {/* PREPARATION TIME INPUT (NEW) */}
+                                {/* Estimated Time */}
                                 <div>
-                                    <label className="text-xs font-bold text-gray-500 uppercase ml-1">Preparo (min)</label>
+                                    <label className="text-xs font-bold text-gray-500 uppercase ml-1">Tempo Est. (Min)</label>
                                     <input 
-                                        type="number"
-                                        value={newProduct.preparationTime || 15} 
-                                        onChange={e => setNewProduct({...newProduct, preparationTime: parseInt(e.target.value)})}
+                                        type="text"
+                                        value={newProduct.estimatedTime || ''} 
+                                        onChange={e => setNewProduct({...newProduct, estimatedTime: e.target.value})}
                                         className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 mt-1 focus:ring-2 focus:ring-red-500 outline-none" 
-                                        placeholder="Minutos" 
+                                        placeholder="Ex: 30-45 min" 
                                     />
                                 </div>
-                                <div>
+                                {/* UPDATED PRODUCT CATEGORY SELECT */}
+                                <div className="col-span-2">
                                     <label className="text-xs font-bold text-gray-500 uppercase ml-1">Categoria</label>
                                     <select 
                                         value={newProduct.category || ''} 
@@ -1006,6 +1021,9 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                                 <span className="text-xs font-bold bg-gray-100 text-gray-600 px-2 py-0.5 rounded uppercase">{product.category}</span>
                                             </div>
                                             <p className="text-xs text-gray-500 mt-1 line-clamp-2">{product.description}</p>
+                                            <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
+                                                <Clock className="w-3 h-3" /> {product.estimatedTime || '30-45 min'}
+                                            </div>
                                         </div>
                                         <div className="flex justify-between items-end mt-2">
                                             <span className="font-bold text-lg text-gray-900">R$ {product.price.toFixed(2)}</span>
@@ -1259,19 +1277,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                     )}
                 </div>
                 <div className="p-6 bg-white border-t border-gray-100 rounded-t-3xl -mt-6 relative z-30 shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
-                    <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"></div>
-                    <div className="flex items-start gap-3 mb-6">
-                        <div className="p-2 bg-red-50 rounded-lg shrink-0"><MapPin className="w-6 h-6 text-red-600" /></div>
-                        <div className="flex-1">
-                            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Endereço Selecionado</p>
-                            <h4 className="font-bold text-gray-900 text-lg leading-tight line-clamp-2">{mapAddress || 'Carregando endereço...'}</h4>
-                        </div>
-                    </div>
-                    <button onClick={() => setShowMapModal(false)} className="w-full bg-red-600 text-white font-bold py-3.5 rounded-xl hover:bg-red-700 shadow-lg flex items-center justify-center gap-2"><CheckCircle className="w-5 h-5" /> Confirmar</button>
-                </div>
-            </div>
-        </div>
-      )}
+                    <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"><div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"></div><div className="flex items-start gap-3 mb-6"><div className="p-2 bg-red-50 rounded-lg shrink-0"><MapPin className="w-6 h-6 text-red-600" /></div><div className="flex-1"><p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Endereço Selecionado</p><h4 className="font-bold text-gray-900 text-lg leading-tight line-clamp-2">{mapAddress || 'Carregando endereço...'}</h4></div></div><button onClick={() => setShowMapModal(false)} className="w-full bg-red-600 text-white font-bold py-3.5 rounded-xl hover:bg-red-700 shadow-lg flex items-center justify-center gap-2"><CheckCircle className="w-5 h-5" /> Confirmar</button></div></div></div></div>)}
     </div>
   );
 };

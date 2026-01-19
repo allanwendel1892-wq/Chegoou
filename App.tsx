@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest } from './types';
 import AuthView from './components/AuthView';
@@ -44,7 +45,8 @@ const App: React.FC = () => {
   const [globalSettings, setGlobalSettings] = useState({
       platformFee: 10,
       minWithdrawal: 50,
-      maintenanceMode: false
+      maintenanceMode: false,
+      courierRangeKm: 15 // Default Global Courier Radius
   });
 
   // --- INITIAL DATA FETCHING ---
@@ -332,14 +334,9 @@ const App: React.FC = () => {
       deliveryFee: number, 
       subtotal: number, 
       paymentMethod: 'cash' | 'card' | 'pix',
-      changeFor?: number,
-      address?: Address // NEW: Explicit address from ClientView
+      changeFor?: number
   ): Promise<boolean> => {
-    
-    // Fallback to currentUser address if not provided (should be provided by ClientView now)
-    const targetAddress = address || currentUser?.address;
-
-    if (!targetAddress) {
+    if (!currentUser || !currentUser.address) {
         alert("Erro: Você precisa selecionar um endereço de entrega.");
         return false;
     }
@@ -358,7 +355,7 @@ const App: React.FC = () => {
     // Distance check only if delivery
     if (deliveryMethod === 'delivery' && company.address) {
         const distance = getDistanceFromLatLonInKm(
-            targetAddress.lat, targetAddress.lng,
+            currentUser.address.lat, currentUser.address.lng,
             company.address.lat, company.address.lng
         );
 
@@ -368,19 +365,23 @@ const App: React.FC = () => {
         }
     }
 
-    const code = currentUser?.phone.slice(-4) || '0000';
+    const code = currentUser.phone.slice(-4) || '0000';
     
     // Determine status based on payment method
-    // FIX: Cash orders must ALWAYS be 'pending' immediately.
+    // If cash, go straight to pending (restaurant sees it).
+    // If online (card/pix), go to waiting_payment (yellow status), then Webhook handles logic.
     const initialStatus = paymentMethod === 'cash' ? 'pending' : 'waiting_payment';
+
+    // Get Estimated Time from the first product or default
+    const estTime = cartItems.length > 0 ? (cartItems[0].product.estimatedTime || '30-45 min') : '30-45 min';
 
     const newOrder: Order = {
         id: `ord-${Date.now()}`,
         companyId,
         companyName: company.name,
-        customerId: currentUser?.id || 'unknown',
-        customerName: currentUser?.name || 'Cliente',
-        customerPhone: currentUser?.phone || '',
+        customerId: currentUser.id,
+        customerName: currentUser.name,
+        customerPhone: currentUser.phone,
         items: cartItems.map((i: any) => ({
             productId: i.product.id,
             productName: i.product.name,
@@ -394,12 +395,13 @@ const App: React.FC = () => {
         serviceFee: serviceFee,
         deliveryMethod: deliveryMethod,
         paymentMethod: paymentMethod,
+        estimatedTime: estTime, // Capture time at order creation
         changeFor: changeFor,
         status: initialStatus,
         timestamp: new Date(),
         deliveryCode: code,
-        deliveryAddress: targetAddress, // Use the explicit address
-        pickupAddress: company.address || { street: 'Endereço da Loja', number: 'S/N', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0 },
+        deliveryAddress: currentUser.address,
+        pickupAddress: company.address || { street: '', number: '', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0 },
         deliveryType: company.deliveryType
     };
 
@@ -420,10 +422,10 @@ const App: React.FC = () => {
                 body: JSON.stringify({
                     orderId: newOrder.id,
                     customer: {
-                        id: currentUser?.id,
-                        name: currentUser?.name,
-                        email: currentUser?.email,
-                        phone: currentUser?.phone
+                        id: currentUser.id,
+                        name: currentUser.name,
+                        email: currentUser.email,
+                        phone: currentUser.phone
                     },
                     items: newOrder.items,
                     total: newOrder.total,
@@ -440,8 +442,19 @@ const App: React.FC = () => {
     return true;
   };
 
-  const updateOrderStatus = async (orderId: string, status: Order['status']) => {
-    await supabase.from('orders').update({ status }).eq('id', orderId);
+  const updateOrderStatus = async (orderId: string, status: Order['status'], additionalData?: Partial<Order>) => {
+    // If courier accepts, we also need to set courierId. 
+    // This is often handled by 'additionalData' or explicit update logic.
+    // However, usually courier assignment happens when status becomes 'delivering' via CourierView.
+    // We'll update the order object locally and in DB.
+    
+    // For Courier accepting:
+    if (status === 'delivering' && currentUser?.role === 'courier') {
+        await supabase.from('orders').update({ status, courierId: currentUser.id }).eq('id', orderId);
+        setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status, courierId: currentUser.id } : o));
+    } else {
+        await supabase.from('orders').update({ status }).eq('id', orderId);
+    }
   };
   
   const handleUpdateFullOrder = async (updatedOrder: Order) => {
@@ -596,18 +609,20 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO anon;`}
         />;
 
     case 'courier':
+        // Calculate Earnings for Courier
+        // Sum of deliveryFee for orders assigned to this courier and marked as 'delivered'
+        const courierEarnings = orders
+            .filter(o => o.courierId === currentUser.id && o.status === 'delivered')
+            .reduce((total, order) => total + order.deliveryFee, 0);
+
         return <CourierView 
             courier={currentUser} 
             availableOrders={orders} 
-            acceptOrder={async (id) => {
-                 // Update BOTH status and courierId so the courier "owns" the order
-                 const updates = { status: 'delivering', courierId: currentUser.id };
-                 await supabase.from('orders').update(updates).eq('id', id);
-                 // Optimistic update for UI responsiveness
-                 setOrders(prev => prev.map(o => o.id === id ? { ...o, ...updates } as Order : o));
-            }}
+            acceptOrder={(id) => updateOrderStatus(id, 'delivering')}
             confirmDelivery={(id, code) => updateOrderStatus(id, 'delivered')}
             onLogout={handleLogout}
+            globalSettings={globalSettings} // Pass global settings
+            courierEarnings={courierEarnings} // Pass real earnings
         />;
 
     case 'client':

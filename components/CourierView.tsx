@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Order, User, Address } from '../types';
 import { Navigation, Bike, CheckCircle, MapPin, DollarSign, LogOut, ArrowRight, Store, Loader2, Crosshair } from 'lucide-react';
@@ -9,6 +10,8 @@ interface CourierViewProps {
   acceptOrder: (orderId: string) => void;
   confirmDelivery: (orderId: string, code: string) => void;
   onLogout: () => void;
+  globalSettings: { courierRangeKm: number };
+  courierEarnings: number;
 }
 
 // Haversine Formula (Copied locally to ensure autonomy of the component)
@@ -24,7 +27,7 @@ const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon
   return R * c;
 };
 
-const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acceptOrder, confirmDelivery, onLogout }) => {
+const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acceptOrder, confirmDelivery, onLogout, globalSettings, courierEarnings }) => {
   const [isOnline, setIsOnline] = useState(true);
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [deliveryCodeInput, setDeliveryCodeInput] = useState('');
@@ -36,8 +39,8 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
   );
   const [locationStatus, setLocationStatus] = useState<'locating' | 'found' | 'error'>('locating');
 
-  // OPERATIONAL RADIUS FOR COURIER (Dynamic)
-  const COURIER_OPERATIONAL_RADIUS_KM = courier.courierRadiusKm || 15;
+  // OPERATIONAL RADIUS FROM SETTINGS
+  const COURIER_OPERATIONAL_RADIUS_KM = globalSettings.courierRangeKm || 15;
 
   // --- PERSISTENCE LOGIC ---
   // Ensure that if an order is currently 'delivering', it remains as the active order
@@ -48,35 +51,12 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
       const inProgressOrder = availableOrders.find(o => 
           o.status === 'delivering' && 
           o.deliveryType === 'chegoou' &&
-          (o.courierId === courier.id || !o.courierId) // Handle legacy active orders or optimistic updates
+          o.courierId === courier.id // Only pick up MY active orders
       );
 
       if (inProgressOrder) {
           setActiveOrder(inProgressOrder);
       }
-  }, [availableOrders, courier.id]);
-
-  // --- STATISTICS CALCULATION ---
-  const stats = useMemo(() => {
-    let balance = 0;
-    let ridesToday = 0;
-    const todayStr = new Date().toDateString();
-
-    availableOrders.forEach(order => {
-        // Count earnings if:
-        // 1. Order is delivered
-        // 2. Assigned to this courier
-        if (order.status === 'delivered' && order.courierId === courier.id) {
-            balance += (order.deliveryFee || 0);
-
-            // Check if it was today (using timestamp)
-            if (new Date(order.timestamp).toDateString() === todayStr) {
-                ridesToday++;
-            }
-        }
-    });
-
-    return { balance, ridesToday };
   }, [availableOrders, courier.id]);
 
   // --- GEOLOCATION TRACKING ---
@@ -133,7 +113,7 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
             );
             return { ...o, distToPickup };
         })
-        .filter(o => o.distToPickup <= COURIER_OPERATIONAL_RADIUS_KM) // Only show nearby orders
+        .filter(o => o.distToPickup <= COURIER_OPERATIONAL_RADIUS_KM) // Only show nearby orders based on Global Setting
         .sort((a, b) => a.distToPickup - b.distToPickup); // Closest first
   }, [availableOrders, currentLocation, COURIER_OPERATIONAL_RADIUS_KM]);
 
@@ -148,7 +128,7 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
         confirmDelivery(activeOrder.id, deliveryCodeInput);
         setActiveOrder(null);
         setDeliveryCodeInput('');
-        alert("Entrega confirmada com sucesso!");
+        alert("Entrega confirmada com sucesso! O valor foi adicionado ao seu saldo.");
     } else {
         alert("Código incorreto! Peça os 4 últimos dígitos do celular do cliente.");
     }
@@ -162,17 +142,13 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
 
   // Helper to open Google Maps with Route
   const openNavigation = (destination: Address, origin?: {lat: number, lng: number}) => {
-      // Use coordinates if they are valid (not 0,0)
-      if (destination.lat !== 0 && destination.lng !== 0) {
-          const destQuery = `${destination.lat},${destination.lng}`;
-          const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destQuery)}&travelmode=driving`;
-          window.open(url, '_blank');
-      } else {
-          // Fallback to text address search if GPS is missing in the object
-          const addressQuery = `${destination.street}, ${destination.number} - ${destination.neighborhood}, ${destination.city}`;
-          const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addressQuery)}&travelmode=driving`;
-          window.open(url, '_blank');
-      }
+      // If we have GPS, use it as start point
+      const destQuery = destination.lat && destination.lng !== 0 
+        ? `${destination.lat},${destination.lng}` 
+        : `${destination.street}, ${destination.number}, ${destination.city}`;
+      
+      const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destQuery)}&travelmode=driving`;
+      window.open(url, '_blank');
   };
 
   // Calculate distances for active order
@@ -206,7 +182,7 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
                          <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500'}`}></span>
                          {isOnline ? 'Online' : 'Offline'}
                          {locationStatus === 'locating' && <span className="text-orange-500 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin"/> Buscando GPS...</span>}
-                         {locationStatus === 'found' && <span className="text-green-600 flex items-center gap-1"><Crosshair className="w-3 h-3"/> GPS Ativo (Raio {COURIER_OPERATIONAL_RADIUS_KM}km)</span>}
+                         {locationStatus === 'found' && <span className="text-green-600 flex items-center gap-1"><Crosshair className="w-3 h-3"/> GPS Ativo</span>}
                     </div>
                 </div>
             </div>
@@ -231,7 +207,7 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
             <div className="bg-white p-4 rounded-xl shadow-sm col-span-2 md:col-span-1 flex justify-between items-center">
                 <div>
                     <p className="text-xs text-gray-500">Saldo a Receber</p>
-                    <h3 className="text-xl font-bold text-gray-800">R$ {stats.balance.toFixed(2)}</h3>
+                    <h3 className="text-xl font-bold text-gray-800">R$ {courierEarnings.toFixed(2)}</h3>
                 </div>
                 <button 
                     onClick={handleWithdrawRequest}
@@ -246,7 +222,9 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
             </div>
             <div className="bg-white p-4 rounded-xl shadow-sm col-span-2 md:col-span-1">
                 <p className="text-xs text-gray-500">Corridas Hoje</p>
-                <h3 className="text-xl font-bold text-gray-800">{stats.ridesToday}</h3>
+                <h3 className="text-xl font-bold text-gray-800">
+                    {availableOrders.filter(o => o.courierId === courier.id && o.status === 'delivered' && new Date(o.timestamp).getDate() === new Date().getDate()).length}
+                </h3>
             </div>
         </div>
 
@@ -282,7 +260,7 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
                     <div className="relative pl-6 border-l-2 border-gray-200 pb-6">
                         <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-blue-500 border-2 border-white"></div>
                         <h4 className="font-bold text-gray-800 text-sm">Coleta: {activeOrder.companyName}</h4>
-                        <p className="text-xs text-gray-500 mb-2">{activeOrder.pickupAddress?.street}, {activeOrder.pickupAddress?.number} - {activeOrder.pickupAddress?.neighborhood}</p>
+                        <p className="text-xs text-gray-500 mb-2">{activeOrder.pickupAddress?.street}, {activeOrder.pickupAddress?.number}</p>
                         <div className="flex items-center gap-2">
                             <span className="text-xs font-bold bg-blue-50 text-blue-700 px-2 py-1 rounded">
                                 {activeDistances.toPickup.toFixed(1)} km de você
@@ -301,10 +279,7 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
                          <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-orange-500 border-2 border-white animate-ping"></div>
                          <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-orange-500 border-2 border-white"></div>
                         <h4 className="font-bold text-gray-800 text-sm">Entrega: {activeOrder.customerName}</h4>
-                        <p className="text-xs text-gray-500 mb-2">
-                            {activeOrder.deliveryAddress.street}, {activeOrder.deliveryAddress.number} <br/>
-                            <span className="opacity-80">{activeOrder.deliveryAddress.neighborhood} - {activeOrder.deliveryAddress.city}</span>
-                        </p>
+                        <p className="text-xs text-gray-500 mb-2">{activeOrder.deliveryAddress.street}, {activeOrder.deliveryAddress.number}</p>
                         
                         {/* PAYMENT ALERT FOR CASH */}
                         {activeOrder.paymentMethod === 'cash' && (
@@ -358,7 +333,7 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
                     <h3 className="font-bold text-gray-600">Pedidos Próximos</h3>
                     {currentLocation && (
                         <span className="text-[10px] bg-gray-200 text-gray-600 px-2 py-1 rounded-full">
-                            Raio de {COURIER_OPERATIONAL_RADIUS_KM}km
+                            Raio Global de {COURIER_OPERATIONAL_RADIUS_KM}km
                         </span>
                     )}
                 </div>
@@ -396,7 +371,7 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
 
                         <div className="flex items-center justify-between mt-4">
                             <div className="bg-green-100 text-green-700 font-bold px-3 py-1.5 rounded-lg text-sm">
-                                Taxa: R$ {order.deliveryFee.toFixed(2)}
+                                + R$ {order.deliveryFee.toFixed(2)}
                             </div>
                             <button 
                                 onClick={() => handleAccept(order)}
