@@ -90,7 +90,6 @@ export interface Product {
   description: string;
   category: string;
   price: number; // Base price. If 0, price is calculated from required groups.
-  estimatedTime?: string; // NEW: Estimated preparation/delivery time
   image: string;
   isAvailable: boolean; 
   pricingMode: 'default' | 'average' | 'highest'; // Pizza Logic
@@ -120,7 +119,6 @@ export interface Order {
   subtotal: number; // Product Sum
   deliveryFee: number; // Part of Calculation A
   serviceFee: number; // Calculation B
-  estimatedTime?: string; // NEW: Snapshot from product or company
   status: 'waiting_payment' | 'pending' | 'preparing' | 'ready' | 'waiting_courier' | 'delivering' | 'delivered' | 'cancelled';
   paymentMethod: 'cash' | 'card' | 'pix'; // Updated payment methods
   changeFor?: number; // Needed for cash payments

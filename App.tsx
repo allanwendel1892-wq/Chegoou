@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest } from './types';
 import AuthView from './components/AuthView';
@@ -26,6 +25,25 @@ const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon
   return R * c;
 };
 
+// --- HELPER: SANITIZAÇÃO DE PAYLOAD ---
+// Garante que enviamos apenas campos que existem no banco e limpa referências circulares
+const prepareProductPayload = (product: Product) => {
+    return {
+        id: product.id,
+        companyId: product.companyId,
+        name: product.name,
+        description: product.description || '',
+        category: product.category,
+        price: product.price,
+        image: product.image,
+        isAvailable: product.isAvailable,
+        pricingMode: product.pricingMode || 'default',
+        // Clona e limpa o array de grupos para garantir JSON válido
+        groups: product.groups ? JSON.parse(JSON.stringify(product.groups)) : [],
+        stock: product.stock !== undefined ? product.stock : null
+    };
+};
+
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -45,8 +63,7 @@ const App: React.FC = () => {
   const [globalSettings, setGlobalSettings] = useState({
       platformFee: 10,
       minWithdrawal: 50,
-      maintenanceMode: false,
-      courierRangeKm: 15 // Default Global Courier Radius
+      maintenanceMode: false
   });
 
   // --- INITIAL DATA FETCHING ---
@@ -54,8 +71,6 @@ const App: React.FC = () => {
     fetchInitialData();
 
     // 1. Real-time subscription for Orders
-    // This ensures that when N8N updates the order status from 'waiting_payment' to 'pending'/'paid',
-    // the UI updates immediately for everyone.
     const ordersSub = supabase
       .channel('public:orders')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload) => {
@@ -163,7 +178,6 @@ const App: React.FC = () => {
           let title = "Erro de Conexão";
           let message = error.message || "Erro desconhecido ao conectar com Supabase";
 
-          // DETECT RLS/PERMISSION ERROR (Code 42501 usually means Permission Denied/RLS)
           if (error.code === '42501' || (error.message && error.message.toLowerCase().includes('permission denied'))) {
               errorType = 'permission';
               title = "Acesso Bloqueado (RLS)";
@@ -186,14 +200,13 @@ const App: React.FC = () => {
   };
 
   const handleLogin = async (userAttempt: User) => {
-    // 1. Explicit Login Action (AuthView sends id: 'login_action')
     if (userAttempt.id === 'login_action') {
         try {
             const { data, error } = await supabase
                 .from('users')
                 .select('*')
                 .eq('email', userAttempt.email)
-                .eq('password', userAttempt.password) // Plaintext for MVP
+                .eq('password', userAttempt.password)
                 .single();
 
             if (error) {
@@ -208,7 +221,6 @@ const App: React.FC = () => {
 
             if (data) {
                 setCurrentUser(data);
-                // Also update local list if stale
                 if (!users.find(u => u.id === data.id)) {
                     setUsers([...users, data]);
                 }
@@ -217,10 +229,7 @@ const App: React.FC = () => {
             alert("Erro fatal no login: " + e.message);
         }
     } 
-    // 2. Registration Action (AuthView sends a specific ID starting with 'u-')
-    // We only Insert if we are sure it's a new user (not 'login_action')
     else if (userAttempt.id.startsWith('u-')) {
-        // Registration
         const { data, error } = await supabase.from('users').insert([userAttempt]).select();
         if (error) {
             console.error("Registration Error:", error);
@@ -245,7 +254,6 @@ const App: React.FC = () => {
       
       if (!error) {
         setUsers(users.map(u => u.id === updatedUser.id ? updatedUser : u));
-        // Only update currentUser if it's the one logged in
         if (currentUser && currentUser.id === updatedUser.id) {
             setCurrentUser(updatedUser);
         }
@@ -287,18 +295,14 @@ const App: React.FC = () => {
       }
   };
 
-  // --- GLOBAL SETTINGS HANDLER ---
   const handleUpdateGlobalSettings = (newSettings: typeof globalSettings) => {
       setGlobalSettings(newSettings);
-      // Batch update companies
       companies.forEach(async (c) => {
           await supabase.from('companies').update({ serviceFeePercentage: newSettings.platformFee }).eq('id', c.id);
       });
-      // Optimistic update
       setCompanies(prev => prev.map(c => ({ ...c, serviceFeePercentage: newSettings.platformFee })));
   };
 
-  // --- CHAT HANDLER (PERSISTENT) ---
   const handleSendMessage = async (orderId: string, text: string, senderId: string, role: 'client' | 'partner') => {
       const newMessage = {
           id: `msg-${Date.now()}`,
@@ -306,23 +310,17 @@ const App: React.FC = () => {
           senderId,
           senderRole: role,
           text,
-          timestamp: new Date().toISOString() // Send as ISO string for DB
+          timestamp: new Date().toISOString()
       };
-      
       const { error } = await supabase.from('messages').insert([newMessage]);
-      if (error) {
-          console.error("Error sending message:", error);
-      }
-      // UI update handled by subscription
+      if (error) console.error("Error sending message:", error);
   };
 
-  // --- WITHDRAWAL HANDLER ---
   const handleUpdateWithdrawal = async (id: string, status: 'paid' | 'rejected') => {
       const { error } = await supabase.from('withdrawal_requests').update({ status }).eq('id', id);
       if (error) {
           alert("Erro ao atualizar saque: " + error.message);
       }
-      // UI update handled by subscription
   };
 
   const handlePlaceOrder = async (
@@ -352,7 +350,6 @@ const App: React.FC = () => {
         return false;
     }
 
-    // Distance check only if delivery
     if (deliveryMethod === 'delivery' && company.address) {
         const distance = getDistanceFromLatLonInKm(
             currentUser.address.lat, currentUser.address.lng,
@@ -366,14 +363,7 @@ const App: React.FC = () => {
     }
 
     const code = currentUser.phone.slice(-4) || '0000';
-    
-    // Determine status based on payment method
-    // If cash, go straight to pending (restaurant sees it).
-    // If online (card/pix), go to waiting_payment (yellow status), then Webhook handles logic.
     const initialStatus = paymentMethod === 'cash' ? 'pending' : 'waiting_payment';
-
-    // Get Estimated Time from the first product or default
-    const estTime = cartItems.length > 0 ? (cartItems[0].product.estimatedTime || '30-45 min') : '30-45 min';
 
     const newOrder: Order = {
         id: `ord-${Date.now()}`,
@@ -395,7 +385,6 @@ const App: React.FC = () => {
         serviceFee: serviceFee,
         deliveryMethod: deliveryMethod,
         paymentMethod: paymentMethod,
-        estimatedTime: estTime, // Capture time at order creation
         changeFor: changeFor,
         status: initialStatus,
         timestamp: new Date(),
@@ -412,8 +401,6 @@ const App: React.FC = () => {
         return false;
     }
 
-    // WEBHOOK TRIGGER FOR AUTOMATION (N8N)
-    // Only if it's an online payment that needs processing/confirmation
     if (paymentMethod !== 'cash') {
         try {
             fetch(N8N_WEBHOOK_URL, {
@@ -442,19 +429,8 @@ const App: React.FC = () => {
     return true;
   };
 
-  const updateOrderStatus = async (orderId: string, status: Order['status'], additionalData?: Partial<Order>) => {
-    // If courier accepts, we also need to set courierId. 
-    // This is often handled by 'additionalData' or explicit update logic.
-    // However, usually courier assignment happens when status becomes 'delivering' via CourierView.
-    // We'll update the order object locally and in DB.
-    
-    // For Courier accepting:
-    if (status === 'delivering' && currentUser?.role === 'courier') {
-        await supabase.from('orders').update({ status, courierId: currentUser.id }).eq('id', orderId);
-        setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status, courierId: currentUser.id } : o));
-    } else {
-        await supabase.from('orders').update({ status }).eq('id', orderId);
-    }
+  const updateOrderStatus = async (orderId: string, status: Order['status']) => {
+    await supabase.from('orders').update({ status }).eq('id', orderId);
   };
   
   const handleUpdateFullOrder = async (updatedOrder: Order) => {
@@ -467,26 +443,31 @@ const App: React.FC = () => {
 
   // --- CRUD WRAPPERS ---
   const handleAddProduct = async (newProduct: Product) => {
-      // FIX: Remove ID generated by frontend (timestamp string) to allow Supabase to generate a valid UUID.
-      // Sending a string like "171..." to a UUID column causes a silent failure or 22P02 error.
-      const { id, ...productPayload } = newProduct;
-      
-      const { data, error } = await supabase.from('products').insert([productPayload]).select();
+      // Usar a função de sanitização para evitar erros de colunas inexistentes ou loops
+      const payload = prepareProductPayload(newProduct);
+
+      const { data, error } = await supabase.from('products').insert([payload]).select();
       
       if (error) {
-          console.error("Erro ao adicionar produto:", error);
-          alert(`Erro ao salvar produto: ${error.message}\nVerifique se todas as colunas existem no banco de dados.`);
+          console.error("Erro ao salvar produto:", error);
+          if (error.code === '42703') {
+              alert("Erro de Coluna (42703): Verifique se há Triggers no banco exigindo colunas antigas.");
+          } else {
+              alert(`Erro ao salvar: ${error.message} (Código: ${error.code})`);
+          }
       } else if (data) {
           setProducts([...products, data[0]]);
       }
   };
 
   const handleUpdateProduct = async (updatedProduct: Product) => {
-      const { error } = await supabase.from('products').update(updatedProduct).eq('id', updatedProduct.id);
+      const payload = prepareProductPayload(updatedProduct);
+      
+      const { error } = await supabase.from('products').update(payload).eq('id', updatedProduct.id);
       
       if (error) {
           console.error("Erro ao atualizar produto:", error);
-          alert(`Erro ao atualizar produto: ${error.message}`);
+          alert(`Erro ao atualizar: ${error.message}`);
       } else {
           setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
       }
@@ -494,11 +475,8 @@ const App: React.FC = () => {
 
   const handleDeleteProduct = async (productId: string) => {
       const { error } = await supabase.from('products').delete().eq('id', productId);
-      if (!error) {
-          setProducts(prev => prev.filter(p => p.id !== productId));
-      } else {
-          alert("Erro ao excluir produto: " + error.message);
-      }
+      if (!error) setProducts(prev => prev.filter(p => p.id !== productId));
+      else alert("Erro ao excluir: " + error.message);
   };
   
   const handleUpdateCompany = async (companyId: string, data: Partial<Company>) => {
@@ -577,20 +555,17 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO anon;`}
     return <AuthView onLogin={handleLogin} existingUsers={users} />;
   }
 
-  // ROUTING
   switch (currentUser.role) {
     case 'admin':
         return <AdminView 
             users={users} setUsers={setUsers} 
             companies={companies} setCompanies={setCompanies} 
             orders={orders} 
-            // Pass Withdrawals and Handler to Admin
             withdrawals={withdrawals}
             onUpdateWithdrawal={handleUpdateWithdrawal}
             onLogout={handleLogout}
             globalSettings={globalSettings} 
             onUpdateSettings={handleUpdateGlobalSettings}
-            // PASS CRUD HANDLERS
             onUpdateUser={handleUpdateUser}
             onDeleteUser={handleDeleteUser}
             onUpsertCompany={handleUpsertCompany}
@@ -629,20 +604,12 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO anon;`}
         />;
 
     case 'courier':
-        // Calculate Earnings for Courier
-        // Sum of deliveryFee for orders assigned to this courier and marked as 'delivered'
-        const courierEarnings = orders
-            .filter(o => o.courierId === currentUser.id && o.status === 'delivered')
-            .reduce((total, order) => total + order.deliveryFee, 0);
-
         return <CourierView 
             courier={currentUser} 
             availableOrders={orders} 
             acceptOrder={(id) => updateOrderStatus(id, 'delivering')}
             confirmDelivery={(id, code) => updateOrderStatus(id, 'delivered')}
             onLogout={handleLogout}
-            globalSettings={globalSettings} // Pass global settings
-            courierEarnings={courierEarnings} // Pass real earnings
         />;
 
     case 'client':

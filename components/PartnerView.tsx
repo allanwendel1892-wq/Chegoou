@@ -205,8 +205,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       isAvailable: true,
       price: 0,
       pricingMode: 'default',
-      groups: [],
-      estimatedTime: '30-45 min'
+      groups: []
   });
   
   // UI State for Group Management
@@ -522,7 +521,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   };
 
   const handleCancelEdit = () => {
-      setNewProduct({ isAvailable: true, price: 0, pricingMode: 'default', groups: [], estimatedTime: '30-45 min' });
+      setNewProduct({ isAvailable: true, price: 0, pricingMode: 'default', groups: [] });
       setProductImagePreview('');
       setEditingProductId(null);
   };
@@ -540,8 +539,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           image: productImagePreview || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c',
           isAvailable: true,
           pricingMode: newProduct.pricingMode || 'default',
-          groups: newProduct.groups || [],
-          estimatedTime: newProduct.estimatedTime || '30-45 min'
+          groups: newProduct.groups || []
       };
 
       if (editingProductId) {
@@ -906,19 +904,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                         placeholder="0.00" 
                                     />
                                 </div>
-                                {/* Estimated Time */}
-                                <div>
-                                    <label className="text-xs font-bold text-gray-500 uppercase ml-1">Tempo Est. (Min)</label>
-                                    <input 
-                                        type="text"
-                                        value={newProduct.estimatedTime || ''} 
-                                        onChange={e => setNewProduct({...newProduct, estimatedTime: e.target.value})}
-                                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 mt-1 focus:ring-2 focus:ring-red-500 outline-none" 
-                                        placeholder="Ex: 30-45 min" 
-                                    />
-                                </div>
                                 {/* UPDATED PRODUCT CATEGORY SELECT */}
-                                <div className="col-span-2">
+                                <div>
                                     <label className="text-xs font-bold text-gray-500 uppercase ml-1">Categoria</label>
                                     <select 
                                         value={newProduct.category || ''} 
@@ -1021,9 +1008,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                                 <span className="text-xs font-bold bg-gray-100 text-gray-600 px-2 py-0.5 rounded uppercase">{product.category}</span>
                                             </div>
                                             <p className="text-xs text-gray-500 mt-1 line-clamp-2">{product.description}</p>
-                                            <div className="flex items-center gap-1 mt-1 text-xs text-gray-400">
-                                                <Clock className="w-3 h-3" /> {product.estimatedTime || '30-45 min'}
-                                            </div>
                                         </div>
                                         <div className="flex justify-between items-end mt-2">
                                             <span className="font-bold text-lg text-gray-900">R$ {product.price.toFixed(2)}</span>

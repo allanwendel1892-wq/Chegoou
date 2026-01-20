@@ -1,8 +1,7 @@
 
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Company, Product, Order, ChatMessage, Address, CreditCard as CreditCardType, ProductOption, User } from '../types';
-import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, Timer, Settings, LogOut, Crosshair, AlertCircle } from 'lucide-react';
+import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, Timer, Settings, LogOut, Crosshair, AlertCircle, Keypad } from 'lucide-react';
 
 declare global {
   interface Window {
@@ -226,7 +225,6 @@ const ClientView: React.FC<ClientViewProps> = ({
   const serviceFeeValue = productTotal * ((activeCompanyData ? activeCompanyData.serviceFeePercentage : 0) / 100);
   const finalTotal = productTotal + activeDeliveryFee + serviceFeeValue;
 
-  // MODIFIED: Simplified handleFinalizeOrder to skip internal payment and use Webhook
   const handleFinalizeOrder = async () => {
       let changeForValue = 0;
       if (paymentMethod === 'cash') {
@@ -236,9 +234,6 @@ const ClientView: React.FC<ClientViewProps> = ({
       
       setIsProcessingPayment(true);
       
-      // Directly place the order. 
-      // If cash -> status 'pending'
-      // If card/pix -> status 'waiting_payment' + Webhook Trigger (handled in App.tsx)
       const success = await onPlaceOrder(cart, cart[0].product.companyId, finalTotal, deliveryMethod, serviceFeeValue, activeDeliveryFee, productTotal, paymentMethod, changeForValue); 
       
       setIsProcessingPayment(false);
@@ -252,7 +247,6 @@ const ClientView: React.FC<ClientViewProps> = ({
           if (paymentMethod === 'cash') {
             alert("Pedido realizado com sucesso!");
           } else {
-             // For online payments, inform the user about the next step
              alert("Pedido realizado! Aguardando confirmação do pagamento pelo sistema.");
           }
           setActiveTab('orders');
@@ -395,69 +389,70 @@ const ClientView: React.FC<ClientViewProps> = ({
         <div className="pb-24 bg-gray-50 min-h-screen">
             <div className="bg-white p-4 border-b border-gray-200 sticky top-0 z-10"><h1 className="text-xl font-bold">Meus Pedidos</h1></div>
             <div className="p-4 space-y-4">
-                {myOrders.map(order => (
-                    <div key={order.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-                        <div className="flex justify-between items-start mb-3">
-                            <h3 className="font-bold text-gray-900">{order.companyName}</h3>
-                            <div className="flex flex-col items-end gap-1">
-                                <span className={`text-[10px] px-2 py-1 rounded font-bold uppercase 
-                                    ${order.status === 'delivered' ? 'bg-gray-100 text-gray-500' : ''}
-                                    ${order.status === 'pending' || order.status === 'preparing' ? 'bg-green-100 text-green-700' : ''}
-                                    ${order.status === 'waiting_payment' ? 'bg-yellow-100 text-yellow-700' : ''}
-                                `}>
-                                    {order.status === 'delivered' ? 'Concluído' : order.status === 'waiting_payment' ? 'Aguardando Pagamento' : 'Em Andamento'}
-                                </span>
-                                {/* Delivery Method Badge */}
-                                <span className={`text-[9px] px-2 py-0.5 rounded font-bold uppercase border 
-                                    ${order.deliveryMethod === 'delivery' ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-purple-50 text-purple-600 border-purple-100'}
-                                `}>
-                                    {order.deliveryMethod === 'delivery' ? 'Entrega' : 'Retirada'}
-                                </span>
+                {myOrders.map(order => {
+                    // Estimated time logic: Order time + 45 mins
+                    const estimateTime = new Date(new Date(order.timestamp).getTime() + 45*60000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+
+                    return (
+                        <div key={order.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                            <div className="flex justify-between items-start mb-3">
+                                <div>
+                                    <h3 className="font-bold text-gray-900">{order.companyName}</h3>
+                                    <div className="flex items-center mt-1">
+                                        <span className={`text-[10px] px-2 py-1 rounded font-bold uppercase 
+                                            ${order.status === 'delivered' ? 'bg-gray-100 text-gray-500' : ''}
+                                            ${order.status === 'pending' || order.status === 'preparing' ? 'bg-green-100 text-green-700' : ''}
+                                            ${order.status === 'waiting_payment' ? 'bg-yellow-100 text-yellow-700' : ''}
+                                        `}>
+                                            {order.status === 'delivered' ? 'Concluído' : order.status === 'waiting_payment' ? 'Aguardando Pagamento' : 'Em Andamento'}
+                                        </span>
+                                        <span className={`text-[10px] px-2 py-1 rounded font-bold uppercase ml-2 ${order.deliveryMethod === 'pickup' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                                            {order.deliveryMethod === 'pickup' ? 'Retirada' : 'Entrega'}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* ESTIMATE & DELIVERY CODE */}
+                            <div className="flex justify-between items-center mb-3 text-xs text-gray-500 bg-gray-50 p-2 rounded-lg">
+                                <div className="flex items-center gap-1">
+                                    <Clock className="w-3 h-3"/> Previsão: {estimateTime}
+                                </div>
+                                {order.status !== 'delivered' && order.status !== 'cancelled' && (
+                                    <div className="flex flex-col items-end">
+                                        <span className="text-[10px] font-bold uppercase">Código de Entrega</span>
+                                        <span className="text-sm font-mono font-bold tracking-widest text-gray-900 bg-white px-1 rounded border border-gray-200">
+                                            {order.deliveryCode}
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* RESTAURANT ADDRESS FOR PICKUP */}
+                            {order.deliveryMethod === 'pickup' && order.pickupAddress && (
+                                <div className="bg-purple-50 p-2 rounded-lg border border-purple-100 mb-3 text-xs">
+                                    <p className="font-bold text-purple-800 flex items-center gap-1 mb-1">
+                                        <Store className="w-3 h-3"/> Retirar em:
+                                    </p>
+                                    <p className="text-gray-700">
+                                        {order.pickupAddress.street}, {order.pickupAddress.number} - {order.pickupAddress.neighborhood}
+                                    </p>
+                                </div>
+                            )}
+
+                            {order.status === 'waiting_payment' && (
+                                <div className="bg-yellow-50 p-2 rounded-lg border border-yellow-200 mb-3 flex items-center gap-2 text-xs text-yellow-800">
+                                    <Clock className="w-4 h-4" /> Aguardando confirmação do banco...
+                                </div>
+                            )}
+                            <div className="space-y-1 mb-4">{order.items.map((i, idx) => (<p key={idx} className="text-sm text-gray-600">{i.quantity}x {i.productName}</p>))}</div>
+                            <div className="flex justify-between items-center border-t border-gray-50 pt-3">
+                                <div><span className="font-bold text-sm block">Total: R$ {order.total.toFixed(2)}</span></div>
+                                <button onClick={() => openChat(order.id)} className="text-brand font-bold text-sm flex items-center gap-1 bg-brandLight px-3 py-1.5 rounded-lg border border-red-100 hover:bg-red-100"><MessageCircle className="w-4 h-4" /> Chat</button>
                             </div>
                         </div>
-
-                        {order.status === 'waiting_payment' && (
-                             <div className="bg-yellow-50 p-2 rounded-lg border border-yellow-200 mb-3 flex items-center gap-2 text-xs text-yellow-800">
-                                 <Clock className="w-4 h-4" /> Aguardando confirmação do banco...
-                             </div>
-                        )}
-
-                        <div className="space-y-1 mb-4">
-                            {order.items.map((i, idx) => (<p key={idx} className="text-sm text-gray-600">{i.quantity}x {i.productName}</p>))}
-                        </div>
-
-                        {/* Order Details: Address, Code, Time */}
-                        <div className="bg-gray-50 p-3 rounded-lg text-xs space-y-2 mb-3 border border-gray-100">
-                             <div className="flex items-center gap-2 text-gray-500">
-                                 <Store className="w-3 h-3" />
-                                 <span>
-                                     <span className="font-bold">Loja:</span> {order.pickupAddress.street}, {order.pickupAddress.number} - {order.pickupAddress.neighborhood}
-                                 </span>
-                             </div>
-                             
-                             {/* VISIBLE ESTIMATED TIME */}
-                             {order.estimatedTime && (
-                                 <div className="flex items-center gap-2 bg-white p-2 rounded border border-gray-200 text-gray-800 shadow-sm">
-                                     <Clock className="w-4 h-4 text-brand" />
-                                     <span><span className="font-bold">Tempo Estimado:</span> {order.estimatedTime}</span>
-                                 </div>
-                             )}
-
-                             {/* VISIBLE DELIVERY CODE */}
-                             {order.status !== 'delivered' && order.status !== 'cancelled' && (
-                                 <div className="flex items-center gap-2 text-gray-800 bg-white p-2 rounded border border-gray-200 shadow-sm">
-                                     <CheckCircle className="w-4 h-4 text-green-600" />
-                                     <span><span className="font-bold">Código de Confirmação:</span> <span className="text-lg font-mono ml-1 font-bold text-green-700">{order.deliveryCode}</span></span>
-                                 </div>
-                             )}
-                        </div>
-
-                        <div className="flex justify-between items-center border-t border-gray-50 pt-3">
-                            <div><span className="font-bold text-sm block">Total: R$ {order.total.toFixed(2)}</span></div>
-                            <button onClick={() => openChat(order.id)} className="text-brand font-bold text-sm flex items-center gap-1 bg-brandLight px-3 py-1.5 rounded-lg border border-red-100 hover:bg-red-100"><MessageCircle className="w-4 h-4" /> Chat</button>
-                        </div>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
         </div>
     );
@@ -570,6 +565,21 @@ const ClientView: React.FC<ClientViewProps> = ({
                <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl animate-slide-up flex flex-col max-h-[90vh]">
                     <div className="flex justify-between items-center mb-6"><h2 className="font-bold text-xl text-gray-800">Sacola</h2><button onClick={() => setIsCartOpen(false)}><X/></button></div>
                     <div className="flex bg-gray-100 p-1 rounded-xl mb-4"><button onClick={() => setDeliveryMethod('delivery')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${deliveryMethod === 'delivery' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Entrega</button><button onClick={() => setDeliveryMethod('pickup')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${deliveryMethod === 'pickup' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Retirada</button></div>
+                    
+                    {/* RESTAURANT ADDRESS FOR PICKUP (Inside Cart) */}
+                    {deliveryMethod === 'pickup' && activeCompanyData?.address && (
+                        <div className="bg-orange-50 p-3 rounded-xl border border-orange-100 mb-4 text-sm animate-fade-in">
+                            <p className="font-bold text-orange-800 flex items-center gap-1 mb-1">
+                                <Store className="w-4 h-4"/> Retirar em:
+                            </p>
+                            <p className="text-gray-700">
+                                {activeCompanyData.address.street}, {activeCompanyData.address.number}
+                                <br/>
+                                <span className="text-xs">{activeCompanyData.address.neighborhood} - {activeCompanyData.address.city}</span>
+                            </p>
+                        </div>
+                    )}
+
                     <div className="flex-1 overflow-y-auto mb-4">{cart.map((i, idx) => (<div key={idx} className="flex justify-between border-b py-2"><div>{i.quantity}x {i.product.name}</div><div className="flex gap-2 font-bold">R$ {i.finalPrice.toFixed(2)} <Trash2 onClick={() => removeFromCart(idx)} className="w-4 h-4 text-red-500"/></div></div>))}</div>
                     <div className="space-y-2 border-t pt-4 text-sm text-gray-600">
                         <div className="flex justify-between">

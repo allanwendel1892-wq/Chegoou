@@ -1,5 +1,3 @@
-
-
 import React, { useState, useRef, useEffect } from 'react';
 import { User, Company, Order, WithdrawalRequest, UserRole, Address } from '../types';
 import { Users, Building2, DollarSign, Settings, Trash2, CheckCircle, Ban, TrendingUp, Search, Lock, Unlock, Edit, X, Save, Bike, LogOut, MapPin, Truck, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair } from 'lucide-react';
@@ -15,8 +13,8 @@ interface AdminViewProps {
   withdrawals: WithdrawalRequest[];
   onUpdateWithdrawal: (id: string, status: 'paid' | 'rejected') => void;
   // Settings Props
-  globalSettings: { platformFee: number; minWithdrawal: number; maintenanceMode: boolean; courierRangeKm: number };
-  onUpdateSettings: (settings: { platformFee: number; minWithdrawal: number; maintenanceMode: boolean; courierRangeKm: number }) => void;
+  globalSettings: { platformFee: number; minWithdrawal: number; maintenanceMode: boolean };
+  onUpdateSettings: (settings: { platformFee: number; minWithdrawal: number; maintenanceMode: boolean }) => void;
   
   // PERSISTENCE HANDLERS (SUPABASE)
   onUpdateUser: (user: User) => Promise<void>;
@@ -786,16 +784,6 @@ const AdminView: React.FC<AdminViewProps> = ({
                             onChange={(e) => setLocalSettingsForm({...localSettingsForm, minWithdrawal: Number(e.target.value)})}
                             className="w-full mt-1 border border-gray-200 rounded-lg px-4 py-2"
                           />
-                      </div>
-                      <div>
-                          <label className="text-sm font-bold text-gray-700 flex items-center gap-2"><Bike className="w-4 h-4"/> Raio de Operação Global Entregadores (Km)</label>
-                          <input 
-                            type="number" 
-                            value={localSettingsForm.courierRangeKm || 15}
-                            onChange={(e) => setLocalSettingsForm({...localSettingsForm, courierRangeKm: Number(e.target.value)})}
-                            className="w-full mt-1 border border-gray-200 rounded-lg px-4 py-2"
-                          />
-                          <p className="text-xs text-gray-500 mt-1">Define até que distância os entregadores veem os pedidos das lojas.</p>
                       </div>
                       <div className="flex items-center gap-3 p-4 bg-yellow-50 rounded-xl border border-yellow-100">
                            <input 
