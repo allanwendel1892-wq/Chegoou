@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
-import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike } from 'lucide-react';
+import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet } from 'lucide-react';
 import DashboardView from './DashboardView';
 import ForecastView from './ForecastView';
 import WhatsAppBotView from './WhatsAppBotView';
@@ -1114,6 +1114,42 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                     className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5 h-24 resize-none" 
                                 />
                             </div>
+                        </div>
+
+                        {/* FINANCE SECTION (NEW) */}
+                        <div className="border-t border-gray-100 pt-6">
+                             <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                                <Wallet className="w-5 h-5 text-gray-500" /> Dados Financeiros (Recebimento)
+                            </h3>
+                            <div className="grid grid-cols-3 gap-4">
+                                 <div>
+                                    <label className="text-sm font-bold text-gray-700">Tipo Chave Pix</label>
+                                    <select 
+                                        value={localCompany.pixKeyType || 'email'} 
+                                        onChange={e => setLocalCompany({...localCompany, pixKeyType: e.target.value as any})}
+                                        className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5 bg-white" 
+                                    >
+                                        <option value="cpf">CPF</option>
+                                        <option value="cnpj">CNPJ</option>
+                                        <option value="email">E-mail</option>
+                                        <option value="phone">Celular</option>
+                                        <option value="random">Chave Aleatória</option>
+                                    </select>
+                                </div>
+                                <div className="col-span-2">
+                                    <label className="text-sm font-bold text-gray-700">Chave Pix</label>
+                                    <input 
+                                        type="text"
+                                        placeholder="Chave para receber repasses"
+                                        value={localCompany.pixKey || ''} 
+                                        onChange={e => setLocalCompany({...localCompany, pixKey: e.target.value})}
+                                        className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5 font-mono" 
+                                    />
+                                </div>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-2">
+                                * Seus pagamentos online serão transferidos automaticamente para esta chave.
+                            </p>
                         </div>
 
                         {/* ADDRESS CONFIGURATION */}

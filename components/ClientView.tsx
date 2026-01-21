@@ -1,7 +1,6 @@
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Company, Product, Order, ChatMessage, Address, CreditCard as CreditCardType, ProductOption, User } from '../types';
-import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, Timer, Settings, LogOut, Crosshair, AlertCircle, Keypad } from 'lucide-react';
+import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, Timer, Settings, LogOut, Crosshair, AlertCircle, ClipboardCheck } from 'lucide-react';
 
 declare global {
   interface Window {
@@ -97,6 +96,9 @@ const ClientView: React.FC<ClientViewProps> = ({
   const [selections, setSelections] = useState<Record<string, ProductOption[]>>({});
   const [chatInput, setChatInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // New State for Pix Feedback
+  const [copiedPix, setCopiedPix] = useState<string | null>(null);
 
   const [showMapModal, setShowMapModal] = useState(false);
   const [loadingCep, setLoadingCep] = useState(false);
@@ -247,7 +249,8 @@ const ClientView: React.FC<ClientViewProps> = ({
           if (paymentMethod === 'cash') {
             alert("Pedido realizado com sucesso!");
           } else {
-             alert("Pedido realizado! Aguardando confirmação do pagamento pelo sistema.");
+             // alert("Pedido realizado! Aguardando confirmação do pagamento pelo sistema.");
+             // UX: Silent redirect to Orders tab to see the QR Code
           }
           setActiveTab('orders');
       }
@@ -299,6 +302,12 @@ const ClientView: React.FC<ClientViewProps> = ({
       if (!newCardForm.number) return;
       onAddCard({...newCardForm, id:Date.now().toString(), brand:'mastercard', last4:newCardForm.number.slice(-4)} as CreditCardType);
       setIsAddingCard(false); setNewCardForm({});
+  };
+
+  const handleCopyPix = (code: string) => {
+      navigator.clipboard.writeText(code);
+      setCopiedPix(code);
+      setTimeout(() => setCopiedPix(null), 2000); // Reset feedback after 2s
   };
 
   // --- RENDERERS ---
@@ -387,76 +396,169 @@ const ClientView: React.FC<ClientViewProps> = ({
     const myOrders = orders.filter(o => o.customerId === user.id).sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return (
         <div className="pb-24 bg-gray-50 min-h-screen">
-            <div className="bg-white p-4 border-b border-gray-200 sticky top-0 z-10"><h1 className="text-xl font-bold">Meus Pedidos</h1></div>
-            <div className="p-4 space-y-4">
-                {myOrders.map(order => {
-                    // Estimated time logic: Order time + 45 mins
-                    const estimateTime = new Date(new Date(order.timestamp).getTime() + 45*60000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            <div className="bg-white p-4 border-b border-gray-200 sticky top-0 z-10 shadow-sm flex justify-between items-center">
+                <h1 className="text-lg font-bold text-gray-800">Meus Pedidos</h1>
+            </div>
+            
+            {myOrders.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-[60vh] text-gray-400 p-8 text-center">
+                    <ShoppingBag className="w-16 h-16 mb-4 opacity-20" />
+                    <p className="font-medium text-lg text-gray-600">Nenhum pedido ainda</p>
+                    <p className="text-sm">Que tal experimentar algo novo hoje?</p>
+                    <button onClick={() => setActiveTab('home')} className="mt-6 bg-red-600 text-white px-6 py-3 rounded-full font-bold shadow-lg shadow-red-200 hover:bg-red-700 transition-all">
+                        Ver Cardápio
+                    </button>
+                </div>
+            ) : (
+                <div className="p-4 space-y-4">
+                    {myOrders.map(order => {
+                        // Estimated time logic: Order time + 45 mins
+                        const estimateTime = new Date(new Date(order.timestamp).getTime() + 45*60000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
 
-                    return (
-                        <div key={order.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-                            <div className="flex justify-between items-start mb-3">
-                                <div>
-                                    <h3 className="font-bold text-gray-900">{order.companyName}</h3>
-                                    <div className="flex items-center mt-1">
-                                        <span className={`text-[10px] px-2 py-1 rounded font-bold uppercase 
-                                            ${order.status === 'delivered' ? 'bg-gray-100 text-gray-500' : ''}
-                                            ${order.status === 'pending' || order.status === 'preparing' ? 'bg-green-100 text-green-700' : ''}
-                                            ${order.status === 'waiting_payment' ? 'bg-yellow-100 text-yellow-700' : ''}
-                                        `}>
-                                            {order.status === 'delivered' ? 'Concluído' : order.status === 'waiting_payment' ? 'Aguardando Pagamento' : 'Em Andamento'}
-                                        </span>
-                                        <span className={`text-[10px] px-2 py-1 rounded font-bold uppercase ml-2 ${order.deliveryMethod === 'pickup' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
-                                            {order.deliveryMethod === 'pickup' ? 'Retirada' : 'Entrega'}
-                                        </span>
+                        return (
+                            <div key={order.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 transition-all hover:shadow-md">
+                                <div className="flex justify-between items-start mb-4">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center text-gray-500">
+                                            <Store className="w-5 h-5"/>
+                                        </div>
+                                        <div>
+                                            <h3 className="font-bold text-gray-900 text-base">{order.companyName}</h3>
+                                            <p className="text-xs text-gray-400">Pedido #{order.id.slice(-4)}</p>
+                                        </div>
                                     </div>
+                                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide
+                                        ${order.status === 'delivered' ? 'bg-gray-100 text-gray-500' : ''}
+                                        ${order.status === 'pending' || order.status === 'preparing' ? 'bg-green-100 text-green-700' : ''}
+                                        ${order.status === 'waiting_payment' ? 'bg-yellow-100 text-yellow-700' : ''}
+                                        ${order.status === 'cancelled' ? 'bg-red-100 text-red-700' : ''}
+                                    `}>
+                                        {order.status === 'waiting_payment' ? 'Aguardando Pagamento' : 
+                                         order.status === 'pending' ? 'Confirmado' :
+                                         order.status === 'preparing' ? 'Preparando' :
+                                         order.status === 'delivering' ? 'Saiu para Entrega' :
+                                         order.status === 'delivered' ? 'Concluído' : 'Cancelado'}
+                                    </span>
                                 </div>
-                            </div>
 
-                            {/* ESTIMATE & DELIVERY CODE */}
-                            <div className="flex justify-between items-center mb-3 text-xs text-gray-500 bg-gray-50 p-2 rounded-lg">
-                                <div className="flex items-center gap-1">
-                                    <Clock className="w-3 h-3"/> Previsão: {estimateTime}
-                                </div>
+                                {/* ESTIMATE & DELIVERY CODE */}
                                 {order.status !== 'delivered' && order.status !== 'cancelled' && (
-                                    <div className="flex flex-col items-end">
-                                        <span className="text-[10px] font-bold uppercase">Código de Entrega</span>
-                                        <span className="text-sm font-mono font-bold tracking-widest text-gray-900 bg-white px-1 rounded border border-gray-200">
-                                            {order.deliveryCode}
-                                        </span>
+                                    <div className="flex justify-between items-center mb-4 p-3 bg-gray-50 rounded-xl border border-gray-100">
+                                        <div className="flex flex-col">
+                                            <span className="text-[10px] text-gray-400 font-bold uppercase">Previsão</span>
+                                            <span className="text-sm font-bold text-gray-800 flex items-center gap-1">
+                                                <Clock className="w-3 h-3 text-gray-400"/> {estimateTime}
+                                            </span>
+                                        </div>
+                                        <div className="flex flex-col items-end">
+                                            <span className="text-[10px] text-gray-400 font-bold uppercase">Código de Entrega</span>
+                                            <span className="text-sm font-mono font-bold tracking-widest text-gray-900">
+                                                {order.deliveryCode}
+                                            </span>
+                                        </div>
                                     </div>
                                 )}
-                            </div>
 
-                            {/* RESTAURANT ADDRESS FOR PICKUP */}
-                            {order.deliveryMethod === 'pickup' && order.pickupAddress && (
-                                <div className="bg-purple-50 p-2 rounded-lg border border-purple-100 mb-3 text-xs">
-                                    <p className="font-bold text-purple-800 flex items-center gap-1 mb-1">
-                                        <Store className="w-3 h-3"/> Retirar em:
-                                    </p>
-                                    <p className="text-gray-700">
-                                        {order.pickupAddress.street}, {order.pickupAddress.number} - {order.pickupAddress.neighborhood}
-                                    </p>
-                                </div>
-                            )}
+                                {/* --- PAYMENT AREA (PIX) --- */}
+                                {order.status === 'waiting_payment' && (
+                                    <div className="mb-5 animate-slide-up">
+                                        {order.paymentMethod === 'pix' ? (
+                                            order.paymentPixCode ? (
+                                                <div className="bg-gradient-to-b from-green-50 to-white border border-green-200 rounded-2xl p-5 shadow-sm">
+                                                    <div className="flex items-center justify-between mb-4">
+                                                        <h4 className="font-bold text-green-800 text-sm flex items-center gap-2">
+                                                            <div className="p-1.5 bg-green-100 rounded-lg">
+                                                                <QrCode className="w-4 h-4 text-green-700"/>
+                                                            </div>
+                                                            Pagamento Pix
+                                                        </h4>
+                                                        <div className="text-right">
+                                                            <p className="text-[10px] text-gray-500 font-bold uppercase">Valor Total</p>
+                                                            <p className="text-sm font-bold text-gray-900">R$ {order.total.toFixed(2)}</p>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <div className="relative mb-4">
+                                                        <div className="bg-white border-2 border-dashed border-green-300 rounded-xl p-3 text-xs text-gray-500 font-mono break-all leading-relaxed select-all">
+                                                            {order.paymentPixCode}
+                                                        </div>
+                                                        <div className="absolute inset-0 bg-gradient-to-b from-transparent to-white/10 pointer-events-none rounded-xl"></div>
+                                                    </div>
 
-                            {order.status === 'waiting_payment' && (
-                                <div className="bg-yellow-50 p-2 rounded-lg border border-yellow-200 mb-3 flex items-center gap-2 text-xs text-yellow-800">
-                                    <Clock className="w-4 h-4" /> Aguardando confirmação do banco...
+                                                    <button 
+                                                        onClick={() => handleCopyPix(order.paymentPixCode!)}
+                                                        className={`w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all duration-300 shadow-lg 
+                                                            ${copiedPix === order.paymentPixCode 
+                                                                ? 'bg-green-700 text-white shadow-green-200 scale-[0.98]' 
+                                                                : 'bg-green-600 text-white hover:bg-green-700 shadow-green-200 hover:-translate-y-0.5'
+                                                            }
+                                                        `}
+                                                    >
+                                                        {copiedPix === order.paymentPixCode ? (
+                                                            <><ClipboardCheck className="w-4 h-4" /> Código Copiado!</>
+                                                        ) : (
+                                                            <><Copy className="w-4 h-4" /> Copiar Código Pix</>
+                                                        )}
+                                                    </button>
+                                                    
+                                                    <div className="mt-3 flex items-start gap-2">
+                                                        <div className="w-4 h-4 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-[10px] font-bold mt-0.5">i</div>
+                                                        <p className="text-[10px] text-gray-500 leading-tight">
+                                                            Cole este código na área "Pix Copia e Cola" do app do seu banco. A aprovação é automática em segundos.
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 flex flex-col items-center justify-center text-gray-500 gap-3 text-center">
+                                                    <div className="relative">
+                                                        <Loader2 className="w-8 h-8 animate-spin text-green-600"/>
+                                                        <div className="absolute inset-0 flex items-center justify-center">
+                                                            <div className="w-2 h-2 bg-white rounded-full"></div>
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-sm font-bold text-gray-700">Gerando seu Pix...</p>
+                                                        <p className="text-xs mt-1">Conectando com o banco para gerar o QR Code.</p>
+                                                    </div>
+                                                </div>
+                                            )
+                                        ) : (
+                                            <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 flex items-center gap-3 text-sm text-yellow-800">
+                                                <Clock className="w-5 h-5 shrink-0" /> 
+                                                <div>
+                                                    <p className="font-bold">Aguardando Pagamento</p>
+                                                    <p className="text-xs opacity-80">Realize o pagamento para o restaurante iniciar o preparo.</p>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                <div className="space-y-1 pl-3 border-l-2 border-gray-100 py-1 mb-4">
+                                    {order.items.map((i, idx) => (
+                                        <p key={idx} className="text-sm text-gray-600 flex justify-between">
+                                            <span><span className="font-bold text-gray-800">{i.quantity}x</span> {i.productName}</span>
+                                        </p>
+                                    ))}
                                 </div>
-                            )}
-                            <div className="space-y-1 mb-4">{order.items.map((i, idx) => (<p key={idx} className="text-sm text-gray-600">{i.quantity}x {i.productName}</p>))}</div>
-                            <div className="flex justify-between items-center border-t border-gray-50 pt-3">
-                                <div><span className="font-bold text-sm block">Total: R$ {order.total.toFixed(2)}</span></div>
-                                <button onClick={() => openChat(order.id)} className="text-brand font-bold text-sm flex items-center gap-1 bg-brandLight px-3 py-1.5 rounded-lg border border-red-100 hover:bg-red-100"><MessageCircle className="w-4 h-4" /> Chat</button>
+                                
+                                <div className="flex justify-between items-center border-t border-gray-50 pt-4">
+                                    <button className="text-xs font-bold text-gray-400 hover:text-red-600 transition-colors">
+                                        Ajuda
+                                    </button>
+                                    <button onClick={() => openChat(order.id)} className="text-red-600 font-bold text-sm flex items-center gap-1.5 bg-red-50 px-4 py-2 rounded-xl border border-red-100 hover:bg-red-100 transition-colors">
+                                        <MessageCircle className="w-4 h-4" /> Chat com Loja
+                                    </button>
+                                </div>
                             </div>
-                        </div>
-                    );
-                })}
-            </div>
+                        );
+                    })}
+                </div>
+            )}
         </div>
     );
   };
+
   const renderProfile = () => (
     <div className="pb-24 bg-gray-50 min-h-screen">
         <div className="bg-white p-6 border-b border-gray-100 flex items-center gap-4"><div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center text-xl font-bold text-gray-600">{user.name.charAt(0)}</div><div><h2 className="text-xl font-bold text-gray-900">{user.name}</h2><p className="text-sm text-gray-500">{user.email}</p></div></div>

@@ -1,3 +1,5 @@
+
+
 import React, { useState, useRef, useEffect } from 'react';
 import { User, Company, Order, WithdrawalRequest, UserRole, Address } from '../types';
 import { Users, Building2, DollarSign, Settings, Trash2, CheckCircle, Ban, TrendingUp, Search, Lock, Unlock, Edit, X, Save, Bike, LogOut, MapPin, Truck, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair } from 'lucide-react';
@@ -1071,6 +1073,30 @@ const AdminView: React.FC<AdminViewProps> = ({
                                 <option value="closed">Fechado</option>
                             </select>
                           </div>
+                      </div>
+                      
+                      {/* NEW: PIX FIELDS FOR ADMIN */}
+                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                            <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Dados Bancários (Pix)</label>
+                            <div className="flex gap-2 mb-2">
+                                <select 
+                                    className="w-1/3 text-xs border rounded p-1"
+                                    value={editingCompany.pixKeyType || 'email'}
+                                    onChange={e => setEditingCompany({...editingCompany, pixKeyType: e.target.value as any})}
+                                >
+                                    <option value="cpf">CPF</option>
+                                    <option value="cnpj">CNPJ</option>
+                                    <option value="email">Email</option>
+                                    <option value="phone">Tel</option>
+                                    <option value="random">Aleatório</option>
+                                </select>
+                                <input 
+                                    className="flex-1 text-xs border rounded p-1 font-mono"
+                                    placeholder="Chave Pix"
+                                    value={editingCompany.pixKey || ''}
+                                    onChange={e => setEditingCompany({...editingCompany, pixKey: e.target.value})}
+                                />
+                            </div>
                       </div>
 
                       {/* DELIVERY CONFIG IN COMPANY MODAL */}

@@ -64,6 +64,10 @@ export interface Company {
   openingDays: string[]; // Changed to required array
   address?: Address; // Added address for company
   isSuspended?: boolean; // Block access
+  
+  // --- NOVOS CAMPOS FINANCEIROS (PIX DO RESTAURANTE) ---
+  pixKey?: string;
+  pixKeyType?: 'cpf' | 'cnpj' | 'email' | 'phone' | 'random';
 }
 
 // --- PRODUCT STRUCTURE UPDATE FOR PIZZA LOGIC ---
@@ -115,7 +119,7 @@ export interface Order {
   customerPhone: string; // Used for delivery code (last 4 digits)
   courierId?: string;
   items: OrderItem[];
-  total: number; // Calculation C (Final Total)
+  total: number; // Calculation C (Final Total - amount_total)
   subtotal: number; // Product Sum
   deliveryFee: number; // Part of Calculation A
   serviceFee: number; // Calculation B
@@ -128,6 +132,19 @@ export interface Order {
   pickupAddress: Address; // Address of the company
   deliveryType: 'own' | 'chegoou'; // inherited from company at time of order
   deliveryMethod: 'delivery' | 'pickup'; // NEW: Choice of customer
+
+  // --- NOVOS CAMPOS DE CONTROLE FINANCEIRO (N8N) ---
+  
+  // 1. Dados do Pagamento (Mercado Pago)
+  paymentId?: string; // payment_id do MP
+  paymentStatus?: 'pending' | 'approved' | 'rejected' | 'refunded'; // Status real do gateway
+  paymentPixCode?: string; // O Código Copia e Cola gerado pelo n8n
+
+  // 2. Controle do Repasse
+  repasseStatus?: 'pending' | 'ready' | 'paid' | 'blocked'; // repasse_status
+  repasseValue?: number; // Valor líquido para o restaurante
+  repasseDate?: string; // Quando o repasse foi feito
+  waitingFunds?: boolean; // aguardando_fundos (D+1, D+30, etc)
 }
 
 export interface FinancialRecord {

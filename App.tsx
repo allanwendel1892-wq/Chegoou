@@ -9,8 +9,9 @@ import ClientView from './components/ClientView';
 import { supabase } from './services/supabaseClient';
 import { Loader2, AlertCircle, Database, Lock } from 'lucide-react';
 
-// PLACEHOLDER N8N WEBHOOK URL - Replace with your actual n8n webhook URL
-const N8N_WEBHOOK_URL = 'https://n8n.webhook.url/order-created'; 
+// --- CONFIGURAÇÃO DO WEBHOOK N8N ---
+// Link de produção fornecido
+const N8N_WEBHOOK_URL = 'https://n8n-n8n.znzrqn.easypanel.host/webhook-test/chegooupay';
 
 // Helper for Distance Calculation
 const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -26,7 +27,6 @@ const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon
 };
 
 // --- HELPER: SANITIZAÇÃO DE PAYLOAD ---
-// Garante que enviamos apenas campos que existem no banco e limpa referências circulares
 const prepareProductPayload = (product: Product) => {
     return {
         id: product.id,
@@ -38,7 +38,6 @@ const prepareProductPayload = (product: Product) => {
         image: product.image,
         isAvailable: product.isAvailable,
         pricingMode: product.pricingMode || 'default',
-        // Clona e limpa o array de grupos para garantir JSON válido
         groups: product.groups ? JSON.parse(JSON.stringify(product.groups)) : [],
         stock: product.stock !== undefined ? product.stock : null
     };
@@ -49,42 +48,29 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [connectionError, setConnectionError] = useState<{title: string, message: string, type: 'network' | 'permission' | 'unknown'} | null>(null);
   
-  // Shared State (Fetched from Supabase)
+  // Shared State
   const [users, setUsers] = useState<User[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   
-  // New States for Full Integration
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
   const [chats, setChats] = useState<Record<string, ChatMessage[]>>({});
 
-  // GLOBAL SETTINGS STATE (Lifted Up)
   const [globalSettings, setGlobalSettings] = useState({
       platformFee: 10,
       minWithdrawal: 50,
       maintenanceMode: false
   });
 
-  // --- INITIAL DATA FETCHING ---
+  // --- INITIAL DATA FETCHING (Static Data) ---
   useEffect(() => {
     fetchInitialData();
 
-    // 1. Real-time subscription for Orders
-    const ordersSub = supabase
-      .channel('public:orders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload) => {
-          if (payload.eventType === 'INSERT') {
-              setOrders(prev => [...prev, payload.new as Order]);
-          } else if (payload.eventType === 'UPDATE') {
-              setOrders(prev => prev.map(o => o.id === payload.new.id ? payload.new as Order : o));
-          } else if (payload.eventType === 'DELETE') {
-              setOrders(prev => prev.filter(o => o.id !== payload.old.id));
-          }
-      })
-      .subscribe();
-
-    // 2. Real-time subscription for Messages (Chat)
+    // Global Subscriptions (Withdrawals & Messages)
+    // Note: In a production app, these should also be filtered by permission.
+    
+    // 1. Real-time subscription for Messages (Chat)
     const messagesSub = supabase
       .channel('public:messages')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
@@ -96,7 +82,7 @@ const App: React.FC = () => {
       })
       .subscribe();
     
-    // 3. Real-time subscription for Withdrawals
+    // 2. Real-time subscription for Withdrawals
     const withdrawalsSub = supabase
       .channel('public:withdrawal_requests')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'withdrawal_requests' }, (payload) => {
@@ -109,11 +95,60 @@ const App: React.FC = () => {
       .subscribe();
 
     return () => {
-        supabase.removeChannel(ordersSub);
         supabase.removeChannel(messagesSub);
         supabase.removeChannel(withdrawalsSub);
     };
   }, []);
+
+  // --- SMART ORDER SUBSCRIPTION (Based on User Role) ---
+  useEffect(() => {
+      // Se não estiver logado, não escuta pedidos (segurança)
+      if (!currentUser) return;
+
+      // Determina o filtro baseado na Role (A "Opção Recomendada")
+      let filter = undefined;
+      
+      if (currentUser.role === 'client') {
+          // 🔒 Segurança: Clientes só recebem updates dos SEUS pedidos
+          // O Supabase filtra no servidor antes de enviar o WebSocket
+          filter = `customerId=eq.${currentUser.id}`;
+      } else if (currentUser.role === 'partner') {
+          // 🔒 Segurança: Parceiros só recebem updates da SUA loja
+          filter = `companyId=eq.${currentUser.id}`;
+      }
+      // Admin e Courier recebem todos (filter = undefined)
+
+      console.log(`[Realtime] Iniciando canal de pedidos. Filtro: ${filter || 'TODOS (Admin/Courier)'}`);
+
+      const channel = supabase.channel(`orders_user_${currentUser.id}`)
+          .on('postgres_changes', { 
+              event: '*', 
+              schema: 'public', 
+              table: 'orders',
+              filter: filter 
+          }, (payload) => {
+              // Handle Realtime Updates
+              if (payload.eventType === 'INSERT') {
+                  setOrders(prev => {
+                      if (prev.some(o => o.id === payload.new.id)) return prev;
+                      return [payload.new as Order, ...prev]; // Newest first
+                  });
+              } else if (payload.eventType === 'UPDATE') {
+                  setOrders(prev => prev.map(o => o.id === payload.new.id ? payload.new as Order : o));
+              } else if (payload.eventType === 'DELETE') {
+                  setOrders(prev => prev.filter(o => o.id !== payload.old.id));
+              }
+          })
+          .subscribe((status) => {
+              if (status === 'SUBSCRIBED') {
+                  console.log('[Realtime] Conectado com sucesso.');
+              }
+          });
+
+      return () => {
+          supabase.removeChannel(channel);
+      };
+  }, [currentUser]);
 
   const fetchInitialData = async () => {
       setIsLoading(true);
@@ -129,7 +164,8 @@ const App: React.FC = () => {
           if (productsError) throw productsError;
           if (productsData) setProducts(productsData);
 
-          // 3. Fetch Orders
+          // 3. Fetch Orders (Initial Load - In prod, filter this too!)
+          // Nota: Em produção, você deve adicionar .eq('customerId', currentUser.id) aqui também no fetch inicial
           const { data: ordersData, error: ordersError } = await supabase.from('orders').select('*');
           if (ordersError) throw ordersError;
           if (ordersData) {
@@ -365,6 +401,9 @@ const App: React.FC = () => {
     const code = currentUser.phone.slice(-4) || '0000';
     const initialStatus = paymentMethod === 'cash' ? 'pending' : 'waiting_payment';
 
+    // --- CÁLCULO FINANCEIRO PARA O N8N ---
+    const repasseValue = Math.max(0, finalTotal - serviceFee);
+
     const newOrder: Order = {
         id: `ord-${Date.now()}`,
         companyId,
@@ -391,7 +430,13 @@ const App: React.FC = () => {
         deliveryCode: code,
         deliveryAddress: currentUser.address,
         pickupAddress: company.address || { street: '', number: '', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0 },
-        deliveryType: company.deliveryType
+        deliveryType: company.deliveryType,
+        
+        // --- NOVOS CAMPOS FINANCEIROS ---
+        paymentStatus: paymentMethod === 'cash' ? 'pending' : 'pending',
+        repasseStatus: 'pending',
+        repasseValue: repasseValue,
+        waitingFunds: true
     };
 
     const { data, error } = await supabase.from('orders').insert([newOrder]).select();
@@ -401,13 +446,17 @@ const App: React.FC = () => {
         return false;
     }
 
+    // Disparar Webhook para o n8n
     if (paymentMethod !== 'cash') {
         try {
+            console.log("🚀 Enviando para n8n:", N8N_WEBHOOK_URL);
             fetch(N8N_WEBHOOK_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    orderId: newOrder.id,
+                    orderId: newOrder.id, // A CHAVE para o n8n buscar no banco
+                    
+                    // Dados básicos para notificação
                     customer: {
                         id: currentUser.id,
                         name: currentUser.name,
@@ -415,14 +464,28 @@ const App: React.FC = () => {
                         phone: currentUser.phone
                     },
                     items: newOrder.items,
-                    total: newOrder.total,
-                    paymentMethod: newOrder.paymentMethod,
                     companyName: newOrder.companyName,
-                    status: newOrder.status
+                    status: newOrder.status,
+                    paymentMethod: newOrder.paymentMethod,
+                    deliveryMethod: newOrder.deliveryMethod,
+
+                    // DADOS FINANCEIROS (O n8n deve validar isso com o banco)
+                    validationStrategy: 'database_lookup',
+                    total: newOrder.total,
+                    financial: {
+                        subtotal: subtotal,
+                        deliveryFee: deliveryFee,
+                        serviceFee: serviceFee,
+                        repasseValue: repasseValue,
+                        companyPixKey: company.pixKey, 
+                        companyPixType: company.pixKeyType
+                    }
                 })
-            }).catch(err => console.error("Webhook Trigger Error:", err));
+            }).catch(err => {
+                console.error("Erro no Webhook n8n:", err);
+            });
         } catch (e) {
-            console.warn("Failed to trigger N8N Webhook", e);
+            console.warn("Falha ao disparar Webhook n8n", e);
         }
     }
 
