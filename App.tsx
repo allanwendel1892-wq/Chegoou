@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest } from './types';
 import AuthView from './components/AuthView';
@@ -7,11 +8,8 @@ import PartnerView from './components/PartnerView';
 import CourierView from './components/CourierView';
 import ClientView from './components/ClientView';
 import { supabase } from './services/supabaseClient';
+import { PaymentService } from './services/paymentService'; // Importação do Serviço de Pagamento
 import { Loader2, AlertCircle, Database, Lock } from 'lucide-react';
-
-// --- CONFIGURAÇÃO DO WEBHOOK N8N ---
-// Link de produção fornecido
-const N8N_WEBHOOK_URL = 'https://n8n-n8n.znzrqn.easypanel.host/webhook-test/chegooupay';
 
 // Helper for Distance Calculation
 const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -68,9 +66,6 @@ const App: React.FC = () => {
     fetchInitialData();
 
     // Global Subscriptions (Withdrawals & Messages)
-    // Note: In a production app, these should also be filtered by permission.
-    
-    // 1. Real-time subscription for Messages (Chat)
     const messagesSub = supabase
       .channel('public:messages')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
@@ -82,7 +77,6 @@ const App: React.FC = () => {
       })
       .subscribe();
     
-    // 2. Real-time subscription for Withdrawals
     const withdrawalsSub = supabase
       .channel('public:withdrawal_requests')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'withdrawal_requests' }, (payload) => {
@@ -102,21 +96,15 @@ const App: React.FC = () => {
 
   // --- SMART ORDER SUBSCRIPTION (Based on User Role) ---
   useEffect(() => {
-      // Se não estiver logado, não escuta pedidos (segurança)
       if (!currentUser) return;
 
-      // Determina o filtro baseado na Role (A "Opção Recomendada")
       let filter = undefined;
       
       if (currentUser.role === 'client') {
-          // 🔒 Segurança: Clientes só recebem updates dos SEUS pedidos
-          // O Supabase filtra no servidor antes de enviar o WebSocket
           filter = `customerId=eq.${currentUser.id}`;
       } else if (currentUser.role === 'partner') {
-          // 🔒 Segurança: Parceiros só recebem updates da SUA loja
           filter = `companyId=eq.${currentUser.id}`;
       }
-      // Admin e Courier recebem todos (filter = undefined)
 
       console.log(`[Realtime] Iniciando canal de pedidos. Filtro: ${filter || 'TODOS (Admin/Courier)'}`);
 
@@ -127,11 +115,10 @@ const App: React.FC = () => {
               table: 'orders',
               filter: filter 
           }, (payload) => {
-              // Handle Realtime Updates
               if (payload.eventType === 'INSERT') {
                   setOrders(prev => {
                       if (prev.some(o => o.id === payload.new.id)) return prev;
-                      return [payload.new as Order, ...prev]; // Newest first
+                      return [payload.new as Order, ...prev]; 
                   });
               } else if (payload.eventType === 'UPDATE') {
                   setOrders(prev => prev.map(o => o.id === payload.new.id ? payload.new as Order : o));
@@ -154,18 +141,14 @@ const App: React.FC = () => {
       setIsLoading(true);
       setConnectionError(null);
       try {
-          // 1. Fetch Companies
           const { data: companiesData, error: companiesError } = await supabase.from('companies').select('*');
           if (companiesError) throw companiesError;
           if (companiesData) setCompanies(companiesData);
 
-          // 2. Fetch Products
           const { data: productsData, error: productsError } = await supabase.from('products').select('*');
           if (productsError) throw productsError;
           if (productsData) setProducts(productsData);
 
-          // 3. Fetch Orders (Initial Load - In prod, filter this too!)
-          // Nota: Em produção, você deve adicionar .eq('customerId', currentUser.id) aqui também no fetch inicial
           const { data: ordersData, error: ordersError } = await supabase.from('orders').select('*');
           if (ordersError) throw ordersError;
           if (ordersData) {
@@ -176,12 +159,10 @@ const App: React.FC = () => {
               setOrders(formattedOrders);
           }
 
-          // 4. Fetch Users
           const { data: usersData, error: usersError } = await supabase.from('users').select('*');
           if (usersError) throw usersError;
           if (usersData) setUsers(usersData);
 
-          // 5. Fetch Withdrawals
           try {
             const { data: withdrawalData, error: wdError } = await supabase.from('withdrawal_requests').select('*');
             if (!wdError && withdrawalData) setWithdrawals(withdrawalData);
@@ -189,7 +170,6 @@ const App: React.FC = () => {
               console.warn("Table withdrawal_requests might be missing or empty");
           }
 
-          // 6. Fetch Messages & Group by OrderId
           try {
             const { data: messagesData, error: msgError } = await supabase.from('messages').select('*').order('timestamp', { ascending: true });
             if (!msgError && messagesData) {
@@ -401,7 +381,6 @@ const App: React.FC = () => {
     const code = currentUser.phone.slice(-4) || '0000';
     const initialStatus = paymentMethod === 'cash' ? 'pending' : 'waiting_payment';
 
-    // --- CÁLCULO FINANCEIRO PARA O N8N ---
     const repasseValue = Math.max(0, finalTotal - serviceFee);
 
     const newOrder: Order = {
@@ -431,14 +410,13 @@ const App: React.FC = () => {
         deliveryAddress: currentUser.address,
         pickupAddress: company.address || { street: '', number: '', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0 },
         deliveryType: company.deliveryType,
-        
-        // --- NOVOS CAMPOS FINANCEIROS ---
         paymentStatus: paymentMethod === 'cash' ? 'pending' : 'pending',
         repasseStatus: 'pending',
         repasseValue: repasseValue,
         waitingFunds: true
     };
 
+    // 1. Inserir Pedido no Banco (Status Inicial)
     const { data, error } = await supabase.from('orders').insert([newOrder]).select();
     
     if (error) {
@@ -446,46 +424,47 @@ const App: React.FC = () => {
         return false;
     }
 
-    // Disparar Webhook para o n8n
+    // 2. Processar Pagamento Online via PaymentService (Edge Function)
     if (paymentMethod !== 'cash') {
         try {
-            console.log("🚀 Enviando para n8n:", N8N_WEBHOOK_URL);
-            fetch(N8N_WEBHOOK_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    orderId: newOrder.id, // A CHAVE para o n8n buscar no banco
-                    
-                    // Dados básicos para notificação
-                    customer: {
-                        id: currentUser.id,
-                        name: currentUser.name,
-                        email: currentUser.email,
-                        phone: currentUser.phone
-                    },
-                    items: newOrder.items,
-                    companyName: newOrder.companyName,
-                    status: newOrder.status,
-                    paymentMethod: newOrder.paymentMethod,
-                    deliveryMethod: newOrder.deliveryMethod,
+            console.log("🚀 Iniciando pagamento online via Edge Function...");
+            
+            const paymentResponse = await PaymentService.processPayment(
+                finalTotal,
+                paymentMethod,
+                currentUser,
+                `Pedido #${newOrder.id} - ${company.name}`
+            );
 
-                    // DADOS FINANCEIROS (O n8n deve validar isso com o banco)
-                    validationStrategy: 'database_lookup',
-                    total: newOrder.total,
-                    financial: {
-                        subtotal: subtotal,
-                        deliveryFee: deliveryFee,
-                        serviceFee: serviceFee,
-                        repasseValue: repasseValue,
-                        companyPixKey: company.pixKey, 
-                        companyPixType: company.pixKeyType
-                    }
-                })
-            }).catch(err => {
-                console.error("Erro no Webhook n8n:", err);
-            });
-        } catch (e) {
-            console.warn("Falha ao disparar Webhook n8n", e);
+            // A. Redirecionamento (Checkout Pro)
+            if (paymentResponse.ticketUrl && !paymentResponse.copyPaste && !paymentResponse.qrCodeBase64) {
+                console.log("Redirecionando para Mercado Pago:", paymentResponse.ticketUrl);
+                window.location.href = paymentResponse.ticketUrl;
+                return true; 
+            }
+
+            // B. Pix Copia e Cola / QRCode Image
+            if (paymentMethod === 'pix' && (paymentResponse.copyPaste || paymentResponse.qrCodeBase64)) {
+                 // Atualiza o pedido com o código Pix E a imagem
+                 await supabase.from('orders').update({
+                    paymentPixCode: paymentResponse.copyPaste,
+                    paymentPixImage: paymentResponse.qrCodeBase64, // Persist Image Base64
+                    paymentId: paymentResponse.paymentId
+                 }).eq('id', newOrder.id);
+            }
+
+            // C. Erro ou Rejeição
+            if (!paymentResponse.success) {
+                alert("Pagamento não aprovado: " + paymentResponse.message);
+                // Opcional: Cancelar o pedido criado se falhar
+                await supabase.from('orders').update({ status: 'cancelled' }).eq('id', newOrder.id);
+                return false;
+            }
+
+        } catch (e: any) {
+            console.error("Falha no processo de pagamento:", e);
+            alert("Erro ao processar pagamento: " + e.message);
+            return false;
         }
     }
 
@@ -506,9 +485,7 @@ const App: React.FC = () => {
 
   // --- CRUD WRAPPERS ---
   const handleAddProduct = async (newProduct: Product) => {
-      // Usar a função de sanitização para evitar erros de colunas inexistentes ou loops
       const payload = prepareProductPayload(newProduct);
-
       const { data, error } = await supabase.from('products').insert([payload]).select();
       
       if (error) {
@@ -525,7 +502,6 @@ const App: React.FC = () => {
 
   const handleUpdateProduct = async (updatedProduct: Product) => {
       const payload = prepareProductPayload(updatedProduct);
-      
       const { error } = await supabase.from('products').update(payload).eq('id', updatedProduct.id);
       
       if (error) {

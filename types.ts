@@ -139,6 +139,7 @@ export interface Order {
   paymentId?: string; // payment_id do MP
   paymentStatus?: 'pending' | 'approved' | 'rejected' | 'refunded'; // Status real do gateway
   paymentPixCode?: string; // O Código Copia e Cola gerado pelo n8n
+  paymentPixImage?: string; // BASE64 da imagem do QR Code
 
   // 2. Controle do Repasse
   repasseStatus?: 'pending' | 'ready' | 'paid' | 'blocked'; // repasse_status

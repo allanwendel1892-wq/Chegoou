@@ -1,6 +1,8 @@
+
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Company, Product, Order, ChatMessage, Address, CreditCard as CreditCardType, ProductOption, User } from '../types';
-import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, Timer, Settings, LogOut, Crosshair, AlertCircle, ClipboardCheck } from 'lucide-react';
+import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, Timer, Settings, LogOut, Crosshair, AlertCircle, ClipboardCheck, ScanLine } from 'lucide-react';
 
 declare global {
   interface Window {
@@ -477,12 +479,27 @@ const ClientView: React.FC<ClientViewProps> = ({
                                                             <p className="text-sm font-bold text-gray-900">R$ {order.total.toFixed(2)}</p>
                                                         </div>
                                                     </div>
+
+                                                    {/* QR Code Image Display */}
+                                                    {order.paymentPixImage && (
+                                                        <div className="flex justify-center mb-6">
+                                                            <div className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
+                                                                <img 
+                                                                    src={`data:image/png;base64,${order.paymentPixImage}`} 
+                                                                    alt="Pix QR Code" 
+                                                                    className="w-48 h-48 object-contain"
+                                                                />
+                                                                <p className="text-[10px] text-center text-gray-400 mt-2 flex items-center justify-center gap-1">
+                                                                    <ScanLine className="w-3 h-3" /> Escaneie com seu banco
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                     
                                                     <div className="relative mb-4">
-                                                        <div className="bg-white border-2 border-dashed border-green-300 rounded-xl p-3 text-xs text-gray-500 font-mono break-all leading-relaxed select-all">
+                                                        <div className="bg-white border-2 border-dashed border-green-300 rounded-xl p-3 text-xs text-gray-500 font-mono break-all leading-relaxed select-all text-center">
                                                             {order.paymentPixCode}
                                                         </div>
-                                                        <div className="absolute inset-0 bg-gradient-to-b from-transparent to-white/10 pointer-events-none rounded-xl"></div>
                                                     </div>
 
                                                     <button 
@@ -500,12 +517,14 @@ const ClientView: React.FC<ClientViewProps> = ({
                                                             <><Copy className="w-4 h-4" /> Copiar Código Pix</>
                                                         )}
                                                     </button>
-                                                    
-                                                    <div className="mt-3 flex items-start gap-2">
-                                                        <div className="w-4 h-4 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-[10px] font-bold mt-0.5">i</div>
-                                                        <p className="text-[10px] text-gray-500 leading-tight">
-                                                            Cole este código na área "Pix Copia e Cola" do app do seu banco. A aprovação é automática em segundos.
-                                                        </p>
+
+                                                    {/* Polling/Verification Indicator */}
+                                                    <div className="mt-4 flex items-center justify-center gap-2 text-green-700 bg-green-100/50 p-2 rounded-lg border border-green-100">
+                                                        <span className="relative flex h-2.5 w-2.5">
+                                                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                                                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+                                                        </span>
+                                                        <span className="text-xs font-bold animate-pulse">Aguardando confirmação do banco...</span>
                                                     </div>
                                                 </div>
                                             ) : (
