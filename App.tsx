@@ -1,6 +1,6 @@
 
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest } from './types';
 import AuthView from './components/AuthView';
 import AdminView from './components/AdminView';
@@ -61,6 +61,10 @@ const App: React.FC = () => {
       maintenanceMode: false
   });
 
+  // Ref to keep track of orders for polling without triggering effects
+  const ordersRef = useRef<Order[]>([]);
+  useEffect(() => { ordersRef.current = orders; }, [orders]);
+
   // --- INITIAL DATA FETCHING (Static Data) ---
   useEffect(() => {
     fetchInitialData();
@@ -94,7 +98,7 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // --- SMART ORDER SUBSCRIPTION (Based on User Role) ---
+  // --- SMART ORDER SUBSCRIPTION (Realtime) ---
   useEffect(() => {
       if (!currentUser) return;
 
@@ -115,13 +119,21 @@ const App: React.FC = () => {
               table: 'orders',
               filter: filter 
           }, (payload) => {
+              // Realtime handling
               if (payload.eventType === 'INSERT') {
+                  const newOrder = payload.new as Order;
+                  // Format timestamp correctly from ISO string
+                  newOrder.timestamp = new Date(newOrder.timestamp);
+                  
                   setOrders(prev => {
-                      if (prev.some(o => o.id === payload.new.id)) return prev;
-                      return [payload.new as Order, ...prev]; 
+                      if (prev.some(o => o.id === newOrder.id)) return prev;
+                      return [newOrder, ...prev]; 
                   });
               } else if (payload.eventType === 'UPDATE') {
-                  setOrders(prev => prev.map(o => o.id === payload.new.id ? payload.new as Order : o));
+                  const updatedOrder = payload.new as Order;
+                  updatedOrder.timestamp = new Date(updatedOrder.timestamp);
+                  
+                  setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
               } else if (payload.eventType === 'DELETE') {
                   setOrders(prev => prev.filter(o => o.id !== payload.old.id));
               }
@@ -136,6 +148,54 @@ const App: React.FC = () => {
           supabase.removeChannel(channel);
       };
   }, [currentUser]);
+
+  // --- HEARTBEAT POLLING (CORREÇÃO DE SINCRONIZAÇÃO N8N) ---
+  // Este efeito roda a cada 3 segundos para garantir que se o n8n atualizar o banco,
+  // o cliente veja a mudança mesmo se o socket (Realtime) falhar ou demorar.
+  useEffect(() => {
+      if (!currentUser) return;
+
+      const interval = setInterval(async () => {
+          // Só faz polling se houver pedidos "críticos" (aguardando pagamento ou pendentes)
+          // Isso economiza recursos quando não há nada acontecendo.
+          const hasActiveOrders = ordersRef.current.some(o => 
+              o.status === 'waiting_payment' || o.status === 'pending' || o.status === 'preparing'
+          );
+
+          if (!hasActiveOrders && currentUser.role !== 'partner') return;
+
+          // Define query based on role
+          let query = supabase.from('orders').select('*');
+          
+          if (currentUser.role === 'client') {
+              query = query.eq('customerId', currentUser.id).in('status', ['waiting_payment', 'pending', 'preparing', 'ready', 'delivering']);
+          } else if (currentUser.role === 'partner') {
+              query = query.eq('companyId', currentUser.id).in('status', ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering']);
+          } else {
+              return; // Admin/Courier não precisa de polling agressivo
+          }
+
+          const { data, error } = await query;
+
+          if (!error && data && data.length > 0) {
+               setOrders(prevOrders => {
+                   let hasChanges = false;
+                   const updatedList = prevOrders.map(prevOrder => {
+                       const freshOrder = data.find((f: any) => f.id === prevOrder.id);
+                       if (freshOrder && freshOrder.status !== prevOrder.status) {
+                           hasChanges = true;
+                           return { ...prevOrder, status: freshOrder.status, paymentStatus: freshOrder.paymentStatus };
+                       }
+                       return prevOrder;
+                   });
+                   return hasChanges ? updatedList : prevOrders;
+               });
+          }
+      }, 3000); // Roda a cada 3 segundos
+
+      return () => clearInterval(interval);
+  }, [currentUser]); // Dependência apenas do user, usa ref para ordens
+
 
   const fetchInitialData = async () => {
       setIsLoading(true);
@@ -471,16 +531,38 @@ const App: React.FC = () => {
     return true;
   };
 
+  // --- OTIMIZAÇÃO: ATUALIZAÇÃO OTIMISTA NO FRONTEND + SYNC NO BACKEND ---
   const updateOrderStatus = async (orderId: string, status: Order['status']) => {
-    await supabase.from('orders').update({ status }).eq('id', orderId);
+    // 1. Atualiza Frontend imediatamente (Otimista)
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
+
+    // 2. Atualiza Backend
+    const { error } = await supabase.from('orders').update({ status }).eq('id', orderId);
+    
+    if (error) {
+        console.error("Erro ao sincronizar status com Supabase:", error);
+        alert("Erro de conexão. O status pode não ter sido salvo.");
+        // Reverte em caso de erro (opcional)
+        // fetchInitialData(); 
+    }
   };
   
   const handleUpdateFullOrder = async (updatedOrder: Order) => {
-    await supabase.from('orders').update(updatedOrder).eq('id', updatedOrder.id);
+    // 1. Atualiza Frontend
+    setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+
+    // 2. Atualiza Backend
+    const { error } = await supabase.from('orders').update(updatedOrder).eq('id', updatedOrder.id);
+    if (error) console.error("Erro ao atualizar pedido completo:", error);
   };
 
   const handleDeleteOrder = async (orderId: string) => {
-    await supabase.from('orders').delete().eq('id', orderId);
+    // 1. Atualiza Frontend
+    setOrders(prev => prev.filter(o => o.id !== orderId));
+
+    // 2. Atualiza Backend
+    const { error } = await supabase.from('orders').delete().eq('id', orderId);
+    if (error) console.error("Erro ao deletar pedido:", error);
   };
 
   // --- CRUD WRAPPERS ---
