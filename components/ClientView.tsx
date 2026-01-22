@@ -431,15 +431,23 @@ const ClientView: React.FC<ClientViewProps> = ({
                                     </div>
                                     <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide
                                         ${order.status === 'delivered' ? 'bg-gray-100 text-gray-500' : ''}
-                                        ${order.status === 'pending' || order.status === 'preparing' ? 'bg-green-100 text-green-700' : ''}
+                                        ${['pending', 'preparing', 'ready', 'waiting_courier', 'delivering'].includes(order.status) ? 'bg-green-100 text-green-700' : ''}
                                         ${order.status === 'waiting_payment' ? 'bg-yellow-100 text-yellow-700' : ''}
                                         ${order.status === 'cancelled' ? 'bg-red-100 text-red-700' : ''}
                                     `}>
-                                        {order.status === 'waiting_payment' ? 'Aguardando Pagamento' : 
-                                         order.status === 'pending' ? 'Confirmado' :
-                                         order.status === 'preparing' ? 'Preparando' :
-                                         order.status === 'delivering' ? 'Saiu para Entrega' :
-                                         order.status === 'delivered' ? 'Concluído' : 'Cancelado'}
+                                        {(() => {
+                                            switch (order.status) {
+                                                case 'waiting_payment': return 'Aguardando Pagamento';
+                                                case 'pending': return 'Confirmado';
+                                                case 'preparing': return 'Preparando';
+                                                case 'ready': return 'Pronto / Aguardando Retirada';
+                                                case 'waiting_courier': return 'Aguardando Entregador';
+                                                case 'delivering': return 'Saiu para Entrega';
+                                                case 'delivered': return 'Concluído';
+                                                case 'cancelled': return 'Cancelado';
+                                                default: return 'Processando';
+                                            }
+                                        })()}
                                     </span>
                                 </div>
 
