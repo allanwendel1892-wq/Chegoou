@@ -539,7 +539,8 @@ const App: React.FC = () => {
             // A. Redirecionamento (Checkout Pro)
             if (paymentResponse.ticketUrl && !paymentResponse.copyPaste && !paymentResponse.qrCodeBase64) {
                 console.log("Redirecionando para Mercado Pago:", paymentResponse.ticketUrl);
-                window.location.href = paymentResponse.ticketUrl;
+                // Use assign instead of href for better mobile handling
+                window.location.assign(paymentResponse.ticketUrl);
                 return true; 
             }
 
@@ -563,7 +564,7 @@ const App: React.FC = () => {
 
         } catch (e: any) {
             console.error("Falha no processo de pagamento:", e);
-            alert("Erro ao processar pagamento: " + e.message);
+            alert("Erro ao iniciar pagamento: " + (e.message || "Erro desconhecido. Verifique se o Token do MP está configurado."));
             return false;
         }
     }

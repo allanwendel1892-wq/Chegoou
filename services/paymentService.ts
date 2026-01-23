@@ -48,10 +48,12 @@ export const PaymentService = {
       console.log(`[PaymentService] Iniciando transação real via ${method} para ${user.email}`);
 
       // URL base da aplicação (para retorno do Checkout Pro)
-      const currentUrl = window.location.origin;
+      // Remove barra final se existir para evitar urls mal formadas
+      const currentUrl = window.location.origin.replace(/\/$/, "");
+
+      console.log(`[PaymentService] Ambiente: ${currentUrl}`);
 
       // 2. Chamada Real ao Backend
-      // ADIÇÃO IMPORTANTE: Headers explícitos para evitar 401
       const { data, error } = await supabase.functions.invoke('create-payment', {
         body: {
           amount,
@@ -61,13 +63,9 @@ export const PaymentService = {
           token: cardToken,
           orderId: orderId, // Send Order ID to backend
           origin: currentUrl, // Send Origin for dynamic redirect
-          // Fallback legacy config
-          returnUrl: currentUrl,
         },
         headers: {
             // CRÍTICO: FORÇA o envio da Anon Key no cabeçalho Authorization.
-            // Isso sobrescreve o token de usuário logado (que pode causar 401 se a Edge Function não validar o usuário).
-            // A Edge Function aceitará a requisição se 'verify_jwt' estiver ativo mas validando a chave do projeto.
             Authorization: `Bearer ${SUPABASE_ANON_KEY}`
         }
       });
@@ -76,19 +74,21 @@ export const PaymentService = {
       if (error) {
         console.error("[PaymentService] Erro na Edge Function:", error);
         
+        // Mensagem amigável para erro de Configuração (Secrets faltando)
+        if (error.message && error.message.includes("MP_ACCESS_TOKEN")) {
+             throw new Error("Erro de Configuração: O Token do Mercado Pago não foi configurado no Supabase (Secrets).");
+        }
+        
         let msg = "Erro de comunicação com o servidor de pagamento.";
-        let technicalDetail = error.message || 'Erro 500/400';
-
-        // Diagnóstico Específico para o Usuário
-        if (technicalDetail.includes("non-2xx") || technicalDetail.includes("401")) {
-            msg = "Erro 401/500: Falha de Autorização ou Servidor.";
-            technicalDetail = "A Edge Function rejeitou a conexão (401). O app agora está enviando a chave ANON explicitamente. Verifique se o Segredo do Mercado Pago está configurado no painel do Supabase.";
-        } else if (technicalDetail.includes("Function not found")) {
-            msg = "Função não encontrada.";
-            technicalDetail = "A função 'create-payment' não foi implantada no Supabase.";
+        // Tenta extrair o corpo do erro se for um objeto JSON stringificado
+        try {
+            const body = JSON.parse(error.message);
+            if (body.error) msg = body.error;
+        } catch (e) {
+            msg = error.message || "Erro desconhecido.";
         }
 
-        throw new Error(`${msg}\n\nDetalhe Técnico: ${technicalDetail}`);
+        throw new Error(`Falha no Servidor: ${msg}`);
       }
 
       // 4. Tratamento de Erros de Negócio (Mercado Pago recusou)
@@ -96,6 +96,8 @@ export const PaymentService = {
          console.warn("[PaymentService] Recusa do Gateway:", data);
          throw new Error(data?.error || "Pagamento recusado pelo processador.");
       }
+
+      console.log("[PaymentService] Sucesso:", data);
 
       // 5. Sucesso Real
       return {
@@ -110,7 +112,6 @@ export const PaymentService = {
 
     } catch (e: any) {
       console.error("[PaymentService] Falha Crítica:", e);
-      // Repassa o erro para ser exibido no Alert do App.tsx
       throw e; 
     }
   }
