@@ -65,6 +65,50 @@ const App: React.FC = () => {
   const ordersRef = useRef<Order[]>([]);
   useEffect(() => { ordersRef.current = orders; }, [orders]);
 
+  // --- CHECKOUT PRO CALLBACK HANDLER ---
+  // Verifica se o usuário voltou do Mercado Pago com pagamento aprovado
+  useEffect(() => {
+      const handlePaymentReturn = async () => {
+          const query = new URLSearchParams(window.location.search);
+          const collectionStatus = query.get('collection_status');
+          const externalReference = query.get('external_reference'); // This is our Order ID
+
+          // Se tiver status aprovado e ID do pedido
+          if (collectionStatus === 'approved' && externalReference) {
+              console.log("💰 Pagamento Checkout Pro confirmado para pedido:", externalReference);
+
+              try {
+                  // 1. Atualiza Status no Banco
+                  const { error } = await supabase
+                      .from('orders')
+                      .update({ 
+                          status: 'pending', // Confirmado
+                          paymentStatus: 'approved' 
+                      })
+                      .eq('id', externalReference);
+                  
+                  if (error) throw error;
+
+                  // 2. Feedback Visual
+                  alert("Pagamento confirmado com sucesso! Seu pedido foi enviado para a loja.");
+
+                  // 3. Atualiza Estado Local (Otimista)
+                  setOrders(prev => prev.map(o => o.id === externalReference ? { ...o, status: 'pending', paymentStatus: 'approved' } : o));
+
+              } catch (e) {
+                  console.error("Erro ao confirmar pagamento no retorno:", e);
+              } finally {
+                  // 4. Limpa URL para não reprocessar ao recarregar
+                  window.history.replaceState({}, document.title, window.location.pathname);
+              }
+          }
+      };
+
+      if (currentUser) {
+          handlePaymentReturn();
+      }
+  }, [currentUser]); // Run when user is loaded
+
   // --- INITIAL DATA FETCHING (Static Data) ---
   useEffect(() => {
     fetchInitialData();
@@ -150,21 +194,16 @@ const App: React.FC = () => {
   }, [currentUser]);
 
   // --- HEARTBEAT POLLING (CORREÇÃO DE SINCRONIZAÇÃO N8N) ---
-  // Este efeito roda a cada 3 segundos para garantir que se o n8n atualizar o banco,
-  // o cliente veja a mudança mesmo se o socket (Realtime) falhar ou demorar.
   useEffect(() => {
       if (!currentUser) return;
 
       const interval = setInterval(async () => {
-          // Só faz polling se houver pedidos "críticos" (aguardando pagamento ou pendentes)
-          // Isso economiza recursos quando não há nada acontecendo.
           const hasActiveOrders = ordersRef.current.some(o => 
               o.status === 'waiting_payment' || o.status === 'pending' || o.status === 'preparing'
           );
 
           if (!hasActiveOrders && currentUser.role !== 'partner') return;
 
-          // Define query based on role
           let query = supabase.from('orders').select('*');
           
           if (currentUser.role === 'client') {
@@ -172,7 +211,7 @@ const App: React.FC = () => {
           } else if (currentUser.role === 'partner') {
               query = query.eq('companyId', currentUser.id).in('status', ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering']);
           } else {
-              return; // Admin/Courier não precisa de polling agressivo
+              return; 
           }
 
           const { data, error } = await query;
@@ -191,10 +230,10 @@ const App: React.FC = () => {
                    return hasChanges ? updatedList : prevOrders;
                });
           }
-      }, 3000); // Roda a cada 3 segundos
+      }, 3000); 
 
       return () => clearInterval(interval);
-  }, [currentUser]); // Dependência apenas do user, usa ref para ordens
+  }, [currentUser]); 
 
 
   const fetchInitialData = async () => {
@@ -493,7 +532,8 @@ const App: React.FC = () => {
                 finalTotal,
                 paymentMethod,
                 currentUser,
-                `Pedido #${newOrder.id} - ${company.name}`
+                `Pedido #${newOrder.id} - ${company.name}`,
+                newOrder.id // Pass Order ID for Checkout Pro reference
             );
 
             // A. Redirecionamento (Checkout Pro)

@@ -1,4 +1,5 @@
 
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { MercadoPagoConfig, Preference, Payment } from "npm:mercadopago";
 
@@ -24,7 +25,8 @@ serve(async (req) => {
     }
 
     // 2. Parse Request Body
-    const { amount, description, payerEmail, method, back_urls } = await req.json();
+    // UPDATED: Now accepting orderId and origin
+    const { amount, description, payerEmail, method, back_urls, orderId, origin } = await req.json();
 
     // 3. Initialize Mercado Pago
     const client = new MercadoPagoConfig({ accessToken: mpAccessToken });
@@ -42,6 +44,8 @@ serve(async (req) => {
                 transaction_amount: Number(amount),
                 description: description || "Pedido Chegoou Delivery",
                 payment_method_id: 'pix',
+                // Link Pix to Order ID as well
+                external_reference: orderId,
                 payer: {
                     email: payerEmail || "customer@email.com"
                 }
@@ -76,11 +80,16 @@ serve(async (req) => {
     // ---------------------------------------------------------
     const preference = new Preference(client);
 
+    // Dynamic Back URLs based on origin passed from Frontend
+    const successUrl = origin ? `${origin}` : (back_urls?.success || "http://localhost:5173");
+    const failureUrl = origin ? `${origin}` : (back_urls?.failure || "http://localhost:5173");
+    const pendingUrl = origin ? `${origin}` : (back_urls?.pending || "http://localhost:5173");
+
     const result = await preference.create({
       body: {
         items: [
           {
-            id: `ord-${Date.now()}`,
+            id: orderId || `ord-${Date.now()}`,
             title: description || "Pedido Chegoou Delivery",
             quantity: 1,
             unit_price: Number(amount),
@@ -90,7 +99,13 @@ serve(async (req) => {
         payer: {
           email: payerEmail || "customer@email.com"
         },
-        back_urls: back_urls,
+        // Link the payment to the Order ID so we can identify it on return
+        external_reference: orderId,
+        back_urls: {
+            success: successUrl,
+            failure: failureUrl,
+            pending: pendingUrl
+        },
         auto_return: "approved"
       }
     });

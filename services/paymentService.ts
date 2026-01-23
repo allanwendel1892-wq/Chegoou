@@ -1,3 +1,4 @@
+
 import { supabase, SUPABASE_ANON_KEY } from './supabaseClient';
 import { User } from '../types';
 
@@ -34,6 +35,7 @@ export const PaymentService = {
     method: 'pix' | 'card' | 'cash', 
     user: User, 
     description: string,
+    orderId?: string, // NEW: Required for Checkout Pro tracking
     cardToken?: string
   ): Promise<PaymentResponse> {
     
@@ -45,7 +47,7 @@ export const PaymentService = {
     try {
       console.log(`[PaymentService] Iniciando transação real via ${method} para ${user.email}`);
 
-      // URL base da aplicação
+      // URL base da aplicação (para retorno do Checkout Pro)
       const currentUrl = window.location.origin;
 
       // 2. Chamada Real ao Backend
@@ -57,13 +59,10 @@ export const PaymentService = {
           payerEmail: user.email,
           description,
           token: cardToken,
-          // Configuração para Checkout Pro:
+          orderId: orderId, // Send Order ID to backend
+          origin: currentUrl, // Send Origin for dynamic redirect
+          // Fallback legacy config
           returnUrl: currentUrl,
-          back_urls: {
-            success: currentUrl,
-            failure: currentUrl,
-            pending: currentUrl
-          }
         },
         headers: {
             // CRÍTICO: FORÇA o envio da Anon Key no cabeçalho Authorization.
