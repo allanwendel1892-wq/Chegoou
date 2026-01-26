@@ -1,5 +1,6 @@
 
 
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Company, Product, Order, ChatMessage, Address, CreditCard as CreditCardType, ProductOption, User } from '../types';
 import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, Timer, Settings, LogOut, Crosshair, AlertCircle, ClipboardCheck, ScanLine } from 'lucide-react';
@@ -738,7 +739,80 @@ const ClientView: React.FC<ClientViewProps> = ({
            </div>
        )}
 
-       {customizingProduct && (<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"><div className="bg-white w-full max-w-md rounded-2xl p-6 relative"><button onClick={() => setCustomizingProduct(null)} className="absolute top-4 right-4"><X/></button><h2 className="font-bold text-xl mb-4">{customizingProduct.name}</h2>{customizingProduct.groups.map(g => (<div key={g.id} className="mb-4"><h3 className="font-bold">{g.name}</h3>{g.options.map(o => (<div key={o.id} onClick={() => setSelections(prev => { const curr = prev[g.id] || []; const exists = curr.find(x => x.id === o.id); if (exists) return { ...prev, [g.id]: curr.filter(x => x.id !== o.id) }; if (curr.length >= g.max && g.max === 1) return { ...prev, [g.id]: [o] }; if (curr.length >= g.max) return prev; return { ...prev, [g.id]: [...curr, o] }; })} className={`p-2 border rounded mt-1 ${(selections[g.id]||[]).some(s=>s.id===o.id) ? 'bg-brandLight border-brand':''}`}>{o.name} +R${o.price}</div>))}</div>))}<button onClick={() => { const flatOptions: any[] = []; customizingProduct.groups.forEach(g => (selections[g.id] || []).forEach(o => flatOptions.push({groupName: g.name, optionName: o.name, price: o.price}))); addToCart(customizingProduct, currentPrice, flatOptions); setCustomizingProduct(null); }} className="w-full bg-brand text-white font-bold py-3 rounded-xl mt-4">Adicionar R$ {currentPrice.toFixed(2)}</button></div></div>)}
+       {customizingProduct && (
+           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+               {/* MODAL FIX: Flex col + max-height + overflow-y-auto on content */}
+               <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl relative flex flex-col max-h-[90vh] overflow-hidden">
+                   
+                   {/* FIXED HEADER */}
+                   <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-white z-10 shrink-0">
+                        <h2 className="font-bold text-xl truncate pr-8">{customizingProduct.name}</h2>
+                        <button onClick={() => setCustomizingProduct(null)} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X className="w-5 h-5"/></button>
+                   </div>
+                   
+                   {/* SCROLLABLE CONTENT */}
+                   <div className="p-4 overflow-y-auto flex-1">
+                       {customizingProduct.groups.map(g => (
+                           <div key={g.id} className="mb-4">
+                               <h3 className="font-bold text-gray-800 mb-2">{g.name}</h3>
+                               <p className="text-xs text-gray-400 mb-2">
+                                   {g.min === 1 && g.max === 1 ? 'Escolha 1 opção' : `Escolha até ${g.max} opções`}
+                               </p>
+                               {g.options.map(o => (
+                                   <div 
+                                       key={o.id} 
+                                       onClick={() => setSelections(prev => { 
+                                           const curr = prev[g.id] || []; 
+                                           const exists = curr.find(x => x.id === o.id); 
+                                           
+                                           // Toggle logic
+                                           if (exists) return { ...prev, [g.id]: curr.filter(x => x.id !== o.id) }; 
+                                           
+                                           // Single choice logic
+                                           if (curr.length >= g.max && g.max === 1) return { ...prev, [g.id]: [o] }; 
+                                           
+                                           // Max limit logic
+                                           if (curr.length >= g.max) return prev; 
+                                           
+                                           return { ...prev, [g.id]: [...curr, o] }; 
+                                       })} 
+                                       className={`p-3 border rounded-xl mt-2 flex justify-between items-center cursor-pointer transition-all active:scale-[0.98] 
+                                           ${(selections[g.id]||[]).some(s=>s.id===o.id) 
+                                               ? 'bg-red-50 border-red-500 text-red-700 shadow-sm' 
+                                               : 'bg-white border-gray-200 hover:bg-gray-50'
+                                           }`
+                                       }
+                                   >
+                                       <span>{o.name}</span>
+                                       <span className="font-bold text-sm">
+                                           {(selections[g.id]||[]).some(s=>s.id===o.id) && <CheckCircle className="inline w-4 h-4 mr-1"/>}
+                                           {o.price > 0 ? `+ R$ ${o.price.toFixed(2)}` : 'Grátis'}
+                                       </span>
+                                   </div>
+                               ))}
+                           </div>
+                       ))}
+                   </div>
+                   
+                   {/* FIXED FOOTER */}
+                   <div className="p-4 border-t border-gray-100 bg-gray-50 shrink-0">
+                       <button 
+                           onClick={() => { 
+                               const flatOptions: any[] = []; 
+                               customizingProduct.groups.forEach(g => (selections[g.id] || []).forEach(o => flatOptions.push({groupName: g.name, optionName: o.name, price: o.price}))); 
+                               addToCart(customizingProduct, currentPrice, flatOptions); 
+                               setCustomizingProduct(null); 
+                           }} 
+                           className="w-full bg-brand text-white font-bold py-3.5 rounded-xl shadow-lg shadow-red-200 hover:bg-brandHover transition-colors flex justify-between px-6 items-center"
+                       >
+                           <span>Adicionar</span>
+                           <span>R$ {currentPrice.toFixed(2)}</span>
+                       </button>
+                   </div>
+
+               </div>
+           </div>
+       )}
 
        {activeTab === 'home' && renderHome()}
        {activeTab === 'orders' && renderOrders()}

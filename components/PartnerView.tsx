@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
@@ -129,13 +128,27 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                           </div>
                           <span className="text-sm font-medium text-gray-800">{order.customerName}</span>
                       </div>
-                      <div className="space-y-1 bg-gray-50 p-2 rounded-lg mb-3">
+                      
+                      {/* ORDER ITEMS LIST WITH OPTIONS */}
+                      <div className="space-y-2 bg-gray-50 p-2.5 rounded-lg mb-3 border border-gray-100">
                           {order.items.slice(0, 3).map((item, idx) => (
-                              <div key={idx} className="text-xs text-gray-600 flex justify-between">
-                                  <span>{item.quantity}x {item.productName}</span>
+                              <div key={idx} className="flex flex-col border-b border-gray-100 last:border-0 pb-1 last:pb-0">
+                                  <div className="text-xs text-gray-800 font-medium flex justify-between">
+                                      <span>{item.quantity}x {item.productName}</span>
+                                  </div>
+                                  {/* RENDER SELECTED OPTIONS (FLAVORS) HERE */}
+                                  {item.selectedOptions && item.selectedOptions.length > 0 && (
+                                      <div className="pl-3 mt-0.5 space-y-0.5">
+                                          {item.selectedOptions.map((opt, optIdx) => (
+                                              <p key={optIdx} className="text-[10px] text-gray-500 leading-tight">
+                                                  • {opt.optionName}
+                                              </p>
+                                          ))}
+                                      </div>
+                                  )}
                               </div>
                           ))}
-                          {order.items.length > 3 && <div className="text-[10px] text-center text-gray-400">Ver mais...</div>}
+                          {order.items.length > 3 && <div className="text-[10px] text-center text-gray-400 font-medium pt-1">Ver mais {order.items.length - 3} itens...</div>}
                       </div>
                       
                       {/* PAYMENT BADGE */}
@@ -642,21 +655,33 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                              <h4 className="font-bold text-sm text-gray-500 uppercase tracking-wide">Itens do Pedido</h4>
                              <div className="bg-gray-50 rounded-xl p-4 space-y-4">
                                  {editingOrder.items.map((item, idx) => (
-                                     <div key={idx} className="flex justify-between items-center bg-white p-3 rounded-lg shadow-sm">
-                                         <div className="flex items-center gap-3">
-                                              <div className="flex items-center border rounded-lg">
-                                                  <button onClick={() => handleUpdateItemQuantity(idx, -1)} className="px-2 py-1 hover:bg-gray-100">-</button>
-                                                  <span className="px-2 font-bold text-sm">{item.quantity}</span>
-                                                  <button onClick={() => handleUpdateItemQuantity(idx, 1)} className="px-2 py-1 hover:bg-gray-100">+</button>
+                                     <div key={idx} className="flex flex-col bg-white p-3 rounded-lg shadow-sm border border-gray-100">
+                                         <div className="flex justify-between items-center mb-1">
+                                             <div className="flex items-center gap-3">
+                                                  <div className="flex items-center border rounded-lg">
+                                                      <button onClick={() => handleUpdateItemQuantity(idx, -1)} className="px-2 py-1 hover:bg-gray-100">-</button>
+                                                      <span className="px-2 font-bold text-sm">{item.quantity}</span>
+                                                      <button onClick={() => handleUpdateItemQuantity(idx, 1)} className="px-2 py-1 hover:bg-gray-100">+</button>
+                                                  </div>
+                                                  <span className="text-sm font-medium">{item.productName}</span>
+                                             </div>
+                                             <div className="flex items-center gap-4">
+                                                 <span className="font-bold text-sm">R$ {item.price.toFixed(2)}</span>
+                                                 <button onClick={() => handleDeleteItem(idx)} className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg">
+                                                     <Trash2 className="w-4 h-4"/>
+                                                 </button>
+                                             </div>
+                                         </div>
+                                         {/* SHOW SELECTED OPTIONS IN EDIT MODAL */}
+                                         {item.selectedOptions && item.selectedOptions.length > 0 && (
+                                              <div className="pl-24 space-y-0.5 border-t border-gray-50 pt-1 mt-1">
+                                                  {item.selectedOptions.map((opt, optIdx) => (
+                                                      <p key={optIdx} className="text-[10px] text-gray-500">
+                                                          + {opt.optionName}
+                                                      </p>
+                                                  ))}
                                               </div>
-                                              <span className="text-sm font-medium">{item.productName}</span>
-                                         </div>
-                                         <div className="flex items-center gap-4">
-                                             <span className="font-bold text-sm">R$ {item.price.toFixed(2)}</span>
-                                             <button onClick={() => handleDeleteItem(idx)} className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg">
-                                                 <Trash2 className="w-4 h-4"/>
-                                             </button>
-                                         </div>
+                                         )}
                                      </div>
                                  ))}
                                  {editingOrder.items.length === 0 && <p className="text-center text-sm text-gray-400">Nenhum item.</p>}
