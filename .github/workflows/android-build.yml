@@ -1,7 +1,7 @@
 name: Build Android App
 
 on:
-  workflow_dispatch:  # Permite clicar num botão para gerar
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -24,13 +24,11 @@ jobs:
         with:
           node-version: '18'
 
-      # 1. Instala o básico
       - name: Install Dependencies
         run: |
           npm install
           npm install @capacitor/core @capacitor/cli @capacitor/android
 
-      # 2. Cria a configuração apontando PRO SEU VERCEL (O Pulo do Gato)
       - name: Create Capacitor Config
         run: |
           echo '{
@@ -43,24 +41,28 @@ jobs:
             }
           }' > capacitor.config.json
 
-      # 3. Engana o Capacitor criando pasta www vazia
       - name: Create dummy www
         run: mkdir -p www && echo "Carregando..." > www/index.html
 
-      # 4. Gera a pasta Android
       - name: Add Android Platform
         run: |
           npx cap add android
           npx cap sync android
 
-      # 5. Compila o APK
+      # --- O PULO DO GATO ---
+      # Aqui trocamos a versão 8.2.1 pela 8.7 diretamente no arquivo de configuração
+      # antes mesmo do Gradle tentar rodar. Isso evita o crash.
+      - name: Force Gradle Upgrade to 8.7
+        run: |
+          cd android/gradle/wrapper
+          sed -i 's/8.2.1/8.7/g' gradle-wrapper.properties
+
       - name: Build APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew clean assembleDebug --no-daemon --max-workers=1
+          ./gradlew assembleDebug --no-daemon
 
-      # 6. Salva o arquivo pra você baixar
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
