@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest } from './types';
 import AuthView from './components/AuthView';
@@ -207,9 +206,9 @@ const App: React.FC = () => {
           let query = supabase.from('orders').select('*');
           
           if (currentUser.role === 'client') {
-              query = query.eq('customerId', currentUser.id).in('status', ['waiting_payment', 'pending', 'preparing', 'ready', 'delivering']);
+              query = query.eq('customerId', currentUser.id).in('status', ['waiting_payment', 'pending', 'preparing', 'ready', 'delivering', 'cancelled']);
           } else if (currentUser.role === 'partner') {
-              query = query.eq('companyId', currentUser.id).in('status', ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering']);
+              query = query.eq('companyId', currentUser.id).in('status', ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering', 'cancelled']);
           } else {
               return; 
           }
@@ -574,18 +573,61 @@ const App: React.FC = () => {
 
   // --- OTIMIZAÇÃO: ATUALIZAÇÃO OTIMISTA NO FRONTEND + SYNC NO BACKEND ---
   const updateOrderStatus = async (orderId: string, status: Order['status']) => {
-    // 1. Atualiza Frontend imediatamente (Otimista)
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
+    // Check if cancellation involves refund logic
+    if (status === 'cancelled') {
+        const orderToCancel = orders.find(o => o.id === orderId);
+        
+        // --- REFUND TRIGGER LOGIC ---
+        // If order was paid online and approved, trigger refund
+        if (orderToCancel && orderToCancel.paymentId && orderToCancel.paymentMethod !== 'cash') {
+            console.log("Cancelamento detectado. Iniciando estorno...", orderToCancel.paymentId);
+            try {
+                const refundResult = await PaymentService.refundPayment(orderToCancel.paymentId);
+                if (refundResult.success) {
+                    alert("Pedido cancelado e estorno processado com sucesso!");
+                    // Update Payment Status locally
+                    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status, paymentStatus: 'refunded' } : o));
+                     await supabase.from('orders').update({ status, paymentStatus: 'refunded' }).eq('id', orderId);
+                     return;
+                } else {
+                    alert("Aviso: O pedido foi cancelado, mas houve erro no estorno automático: " + refundResult.message);
+                }
+            } catch (e) {
+                console.error("Refund error", e);
+            }
+        }
+    }
 
-    // 2. Atualiza Backend
+    // Default update logic
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
     const { error } = await supabase.from('orders').update({ status }).eq('id', orderId);
     
     if (error) {
         console.error("Erro ao sincronizar status com Supabase:", error);
         alert("Erro de conexão. O status pode não ter sido salvo.");
-        // Reverte em caso de erro (opcional)
-        // fetchInitialData(); 
     }
+  };
+
+  // --- STRICT CANCEL HANDLER FOR CLIENTS & PARTNERS ---
+  const handleCancelOrder = async (orderId: string) => {
+      const order = orders.find(o => o.id === orderId);
+      if (!order) return;
+
+      if (!currentUser) return;
+
+      // CLIENT RULES
+      if (currentUser.role === 'client') {
+          if (order.status !== 'pending' && order.status !== 'waiting_payment') {
+              alert("Não é possível cancelar. O restaurante já começou a preparar seu pedido. Entre em contato com a loja.");
+              return;
+          }
+      }
+
+      // PARTNER RULES (Implicit: Can cancel anytime)
+      
+      if (window.confirm("Tem certeza que deseja cancelar este pedido? Se houve pagamento online, o estorno será processado.")) {
+          await updateOrderStatus(orderId, 'cancelled');
+      }
   };
   
   const handleUpdateFullOrder = async (updatedOrder: Order) => {
@@ -753,7 +795,7 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO anon;`}
             company={myCompany} 
             orders={orders.filter(o => o.companyId === myCompany.id)}
             products={products.filter(p => p.companyId === myCompany.id)}
-            updateOrderStatus={updateOrderStatus}
+            updateOrderStatus={updateOrderStatus} // Pass the smarter updated logic
             updateCompany={(data) => handleUpdateCompany(myCompany.id, data)}
             onAddProduct={handleAddProduct}
             onUpdateProduct={handleUpdateProduct} 
@@ -790,6 +832,8 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO anon;`}
             onRemoveAddress={handleRemoveAddress}
             onAddCard={handleAddCard}
             onRemoveCard={handleRemoveCard}
+            // Pass the Cancel Handler prop
+            onCancelOrder={handleCancelOrder} 
         />;
   }
 };

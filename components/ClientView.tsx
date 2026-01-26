@@ -1,6 +1,7 @@
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Company, Product, Order, ChatMessage, Address, CreditCard as CreditCardType, ProductOption, User } from '../types';
-import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, ClipboardCheck, ScanLine, LogOut, Settings, Crosshair } from 'lucide-react';
+import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, Timer, Settings, LogOut, Crosshair, AlertCircle, ClipboardCheck, ScanLine, XCircle } from 'lucide-react';
 
 declare global {
   interface Window {
@@ -22,6 +23,7 @@ interface ClientViewProps {
   onRemoveAddress: (index: number) => void;
   onAddCard: (card: CreditCardType) => void;
   onRemoveCard: (index: number) => void;
+  onCancelOrder: (orderId: string) => void; // New prop
 }
 
 // --- UTILS ---
@@ -36,6 +38,7 @@ const isMatch = (sourceText: string, searchTerm: string) => {
 
 const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   if (!Number.isFinite(lat1) || !Number.isFinite(lon1) || !Number.isFinite(lat2) || !Number.isFinite(lon2)) return Infinity;
+  // Check for default SP coordinates or 0,0
   const isDefault = (lat: number, lng: number) => (Math.abs(lat) < 0.0001 && Math.abs(lng) < 0.0001) || (Math.abs(lat - (-23.550520)) < 0.0001 && Math.abs(lng - (-46.633308)) < 0.0001);
   
   if (isDefault(lat1, lon1) || isDefault(lat2, lon2)) return Infinity;
@@ -68,7 +71,8 @@ const CATEGORIES = [
 
 const ClientView: React.FC<ClientViewProps> = ({ 
     user, companies, products, orders, onPlaceOrder, onLogout, onUpdateUser,
-    chats, onSendMessage, onAddAddress, onRemoveAddress, onAddCard, onRemoveCard
+    chats, onSendMessage, onAddAddress, onRemoveAddress, onAddCard, onRemoveCard,
+    onCancelOrder
 }) => {
   const [activeTab, setActiveTab] = useState<'home' | 'orders' | 'profile'>('home');
   const [subView, setSubView] = useState<'none' | 'wallet' | 'addresses' | 'settings' | 'chat'>('none');
@@ -247,6 +251,9 @@ const ClientView: React.FC<ClientViewProps> = ({
           
           if (paymentMethod === 'cash') {
             alert("Pedido realizado com sucesso!");
+          } else {
+             // alert("Pedido realizado! Aguardando confirmação do pagamento pelo sistema.");
+             // UX: Silent redirect to Orders tab to see the QR Code
           }
           setActiveTab('orders');
       }
@@ -311,7 +318,7 @@ const ClientView: React.FC<ClientViewProps> = ({
       if (selectedCompany) {
         const feeDisplay = filteredCompanies.find(c => c.id === selectedCompany.id)?.deliveryFeeCalc || 0;
         return (
-            <div className="pb-40 bg-gray-50 min-h-screen animate-fade-in">
+            <div className="pb-32 bg-gray-50 min-h-screen animate-fade-in">
                 <div className="relative h-48 md:h-64">
                     <img src={selectedCompany.coverImage || selectedCompany.logo} className="w-full h-full object-cover"/>
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
@@ -348,7 +355,7 @@ const ClientView: React.FC<ClientViewProps> = ({
         );
       }
       return (
-          <div className="pb-40 bg-gray-50 min-h-screen">
+          <div className="pb-32 bg-gray-50 min-h-screen">
              <div className="bg-white sticky top-0 z-30 shadow-sm">
                  <div className="px-4 py-4 max-w-3xl mx-auto">
                      <div className="flex justify-between items-center mb-4">
@@ -391,7 +398,7 @@ const ClientView: React.FC<ClientViewProps> = ({
   const renderOrders = () => {
     const myOrders = orders.filter(o => o.customerId === user.id).sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return (
-        <div className="pb-32 bg-gray-50 min-h-screen">
+        <div className="pb-24 bg-gray-50 min-h-screen">
             <div className="bg-white p-4 border-b border-gray-200 sticky top-0 z-10 shadow-sm flex justify-between items-center">
                 <h1 className="text-lg font-bold text-gray-800">Meus Pedidos</h1>
             </div>
@@ -408,6 +415,7 @@ const ClientView: React.FC<ClientViewProps> = ({
             ) : (
                 <div className="p-4 space-y-4">
                     {myOrders.map(order => {
+                        // Estimated time logic: Order time + 45 mins
                         const estimateTime = new Date(new Date(order.timestamp).getTime() + 45*60000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
 
                         return (
@@ -563,9 +571,22 @@ const ClientView: React.FC<ClientViewProps> = ({
                                 </div>
                                 
                                 <div className="flex justify-between items-center border-t border-gray-50 pt-4">
-                                    <button className="text-xs font-bold text-gray-400 hover:text-red-600 transition-colors">
-                                        Ajuda
-                                    </button>
+                                    <div className="flex gap-2">
+                                        <button className="text-xs font-bold text-gray-400 hover:text-red-600 transition-colors">
+                                            Ajuda
+                                        </button>
+                                        
+                                        {/* --- CLIENT CANCEL BUTTON --- */}
+                                        {(order.status === 'pending' || order.status === 'waiting_payment') && (
+                                            <button 
+                                                onClick={() => onCancelOrder(order.id)}
+                                                className="text-xs font-bold text-red-500 hover:text-red-700 transition-colors flex items-center gap-1"
+                                            >
+                                                <XCircle className="w-3 h-3" /> Cancelar Pedido
+                                            </button>
+                                        )}
+                                    </div>
+                                    
                                     <button onClick={() => openChat(order.id)} className="text-red-600 font-bold text-sm flex items-center gap-1.5 bg-red-50 px-4 py-2 rounded-xl border border-red-100 hover:bg-red-100 transition-colors">
                                         <MessageCircle className="w-4 h-4" /> Chat com Loja
                                     </button>
@@ -580,7 +601,7 @@ const ClientView: React.FC<ClientViewProps> = ({
   };
 
   const renderProfile = () => (
-    <div className="pb-32 bg-gray-50 min-h-screen">
+    <div className="pb-24 bg-gray-50 min-h-screen">
         <div className="bg-white p-6 border-b border-gray-100 flex items-center gap-4"><div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center text-xl font-bold text-gray-600">{user.name.charAt(0)}</div><div><h2 className="text-xl font-bold text-gray-900">{user.name}</h2><p className="text-sm text-gray-500">{user.email}</p></div></div>
         <div className="p-4 space-y-4">
              <button onClick={() => setSubView('wallet')} className="w-full bg-white p-4 rounded-xl border border-gray-100 flex items-center justify-between hover:bg-gray-50"><div className="flex items-center gap-3"><div className="bg-orange-100 p-2 rounded-lg text-orange-600"><Wallet className="w-5 h-5"/></div><span className="font-bold text-gray-700">Carteira</span></div><ChevronRight className="w-5 h-5 text-gray-300"/></button>
@@ -752,34 +773,34 @@ const ClientView: React.FC<ClientViewProps> = ({
                                </p>
                                {g.options.map(o => (
                                    <div 
-                                           key={o.id} 
-                                           onClick={() => setSelections(prev => { 
-                                               const curr = prev[g.id] || []; 
-                                               const exists = curr.find(x => x.id === o.id); 
-                                               
-                                               // Toggle logic
-                                               if (exists) return { ...prev, [g.id]: curr.filter(x => x.id !== o.id) }; 
-                                               
-                                               // Single choice logic
-                                               if (curr.length >= g.max && g.max === 1) return { ...prev, [g.id]: [o] }; 
-                                               
-                                               // Max limit logic
-                                               if (curr.length >= g.max) return prev; 
-                                               
-                                               return { ...prev, [g.id]: [...curr, o] }; 
-                                           })} 
-                                           className={`p-3 border rounded-xl mt-2 flex justify-between items-center cursor-pointer transition-all active:scale-[0.98] 
-                                                ${(selections[g.id]||[]).some(s=>s.id===o.id) 
-                                                     ? 'bg-red-50 border-red-500 text-red-700 shadow-sm' 
-                                                     : 'bg-white border-gray-200 hover:bg-gray-50'
-                                                }`
-                                           }
-                                    >
-                                           <span>{o.name}</span>
-                                           <span className="font-bold text-sm">
-                                                {(selections[g.id]||[]).some(s=>s.id===o.id) && <CheckCircle className="inline w-4 h-4 mr-1"/>}
-                                                {o.price > 0 ? `+ R$ ${o.price.toFixed(2)}` : 'Grátis'}
-                                           </span>
+                                       key={o.id} 
+                                       onClick={() => setSelections(prev => { 
+                                           const curr = prev[g.id] || []; 
+                                           const exists = curr.find(x => x.id === o.id); 
+                                           
+                                           // Toggle logic
+                                           if (exists) return { ...prev, [g.id]: curr.filter(x => x.id !== o.id) }; 
+                                           
+                                           // Single choice logic
+                                           if (curr.length >= g.max && g.max === 1) return { ...prev, [g.id]: [o] }; 
+                                           
+                                           // Max limit logic
+                                           if (curr.length >= g.max) return prev; 
+                                           
+                                           return { ...prev, [g.id]: [...curr, o] }; 
+                                       })} 
+                                       className={`p-3 border rounded-xl mt-2 flex justify-between items-center cursor-pointer transition-all active:scale-[0.98] 
+                                           ${(selections[g.id]||[]).some(s=>s.id===o.id) 
+                                               ? 'bg-red-50 border-red-500 text-red-700 shadow-sm' 
+                                               : 'bg-white border-gray-200 hover:bg-gray-50'
+                                           }`
+                                       }
+                                   >
+                                       <span>{o.name}</span>
+                                       <span className="font-bold text-sm">
+                                           {(selections[g.id]||[]).some(s=>s.id===o.id) && <CheckCircle className="inline w-4 h-4 mr-1"/>}
+                                           {o.price > 0 ? `+ R$ ${o.price.toFixed(2)}` : 'Grátis'}
+                                       </span>
                                    </div>
                                ))}
                            </div>
@@ -809,38 +830,8 @@ const ClientView: React.FC<ClientViewProps> = ({
        {activeTab === 'home' && renderHome()}
        {activeTab === 'orders' && renderOrders()}
        {activeTab === 'profile' && renderProfile()}
-
-       {/* CORREÇÃO DO BOTÃO SACOLA: Agora respeita a área segura do fundo */}
-       {cart.length > 0 && !isCartOpen && (
-           <div className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] left-0 right-0 px-4 z-20 flex justify-center animate-fade-in-up pointer-events-none">
-               <button onClick={() => setIsCartOpen(true)} className="bg-brand text-white w-full max-w-md shadow-xl shadow-red-200/50 rounded-xl p-3 flex justify-between items-center font-bold pointer-events-auto transform active:scale-95 transition-all">
-                   <div className="flex items-center gap-3">
-                       <div className="bg-white/20 w-8 h-8 rounded-full flex items-center justify-center text-sm">{cart.reduce((acc, i) => acc + i.quantity, 0)}</div>
-                       <span className="text-sm">Ver Sacola</span>
-                   </div>
-                   <div className="flex items-center gap-2">
-                       <span className="text-sm">R$ {productTotal.toFixed(2)}</span>
-                       <ShoppingBag className="w-5 h-5 fill-white/20" />
-                   </div>
-               </button>
-           </div>
-       )}
-       
-       {/* CORREÇÃO DA BARRA DE NAVEGAÇÃO: Adicionado padding-bottom inteligente */}
-       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 pt-2 pb-[calc(env(safe-area-inset-bottom)+8px)] px-6 flex justify-between items-center z-30">
-           <button onClick={() => { setActiveTab('home'); setSubView('none'); }} className={`flex flex-col items-center gap-1 ${activeTab === 'home' ? 'text-brand' : 'text-gray-400'}`}>
-               <Home className={`w-6 h-6 ${activeTab === 'home' ? 'fill-current' : ''}`} />
-               <span className="text-[10px] font-bold">Início</span>
-           </button>
-           <button onClick={() => { setActiveTab('orders'); setSubView('none'); }} className={`flex flex-col items-center gap-1 ${activeTab === 'orders' ? 'text-brand' : 'text-gray-400'}`}>
-               <FileText className={`w-6 h-6 ${activeTab === 'orders' ? 'fill-current' : ''}`} />
-               <span className="text-[10px] font-bold">Pedidos</span>
-           </button>
-           <button onClick={() => { setActiveTab('profile'); setSubView('none'); }} className={`flex flex-col items-center gap-1 ${activeTab === 'profile' ? 'text-brand' : 'text-gray-400'}`}>
-               <UserIcon className={`w-6 h-6 ${activeTab === 'profile' ? 'fill-current' : ''}`} />
-               <span className="text-[10px] font-bold">Perfil</span>
-           </button>
-       </div>
+       {cart.length > 0 && !isCartOpen && (<div className="fixed bottom-20 left-0 right-0 px-4 z-20 flex justify-center animate-fade-in-up pointer-events-none"><button onClick={() => setIsCartOpen(true)} className="bg-brand text-white w-full max-w-md shadow-xl shadow-red-200/50 rounded-xl p-3 flex justify-between items-center font-bold pointer-events-auto transform active:scale-95 transition-all"><div className="flex items-center gap-3"><div className="bg-white/20 w-8 h-8 rounded-full flex items-center justify-center text-sm">{cart.reduce((acc, i) => acc + i.quantity, 0)}</div><span className="text-sm">Ver Sacola</span></div><div className="flex items-center gap-2"><span className="text-sm">R$ {productTotal.toFixed(2)}</span><ShoppingBag className="w-5 h-5 fill-white/20" /></div></button></div>)}
+       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 py-2 px-6 flex justify-between items-center z-30"><button onClick={() => { setActiveTab('home'); setSubView('none'); }} className={`flex flex-col items-center gap-1 ${activeTab === 'home' ? 'text-brand' : 'text-gray-400'}`}><Home className={`w-6 h-6 ${activeTab === 'home' ? 'fill-current' : ''}`} /><span className="text-[10px] font-bold">Início</span></button><button onClick={() => { setActiveTab('orders'); setSubView('none'); }} className={`flex flex-col items-center gap-1 ${activeTab === 'orders' ? 'text-brand' : 'text-gray-400'}`}><FileText className={`w-6 h-6 ${activeTab === 'orders' ? 'fill-current' : ''}`} /><span className="text-[10px] font-bold">Pedidos</span></button><button onClick={() => { setActiveTab('profile'); setSubView('none'); }} className={`flex flex-col items-center gap-1 ${activeTab === 'profile' ? 'text-brand' : 'text-gray-400'}`}><UserIcon className={`w-6 h-6 ${activeTab === 'profile' ? 'fill-current' : ''}`} /><span className="text-[10px] font-bold">Perfil</span></button></div>
        
        {showMapModal && (<div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in h-full"><div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl flex flex-col h-[90%] relative"><div className="absolute top-0 left-0 right-0 p-4 z-10 flex justify-between items-start pointer-events-none"><div className="bg-white/95 backdrop-blur px-4 py-2 rounded-xl shadow-md border border-gray-100 pointer-events-auto"><h3 className="font-bold text-gray-800 flex items-center gap-2"><Navigation className="w-4 h-4 text-brand" /> Definir Localização</h3><p className="text-xs text-gray-500">Mova o pin para o endereço correto.</p></div><button onClick={() => setShowMapModal(false)} className="bg-white p-2 rounded-full shadow-md hover:bg-gray-100 pointer-events-auto"><X className="w-6 h-6 text-gray-500" /></button></div><div className="flex-1 bg-gray-100 relative group overflow-hidden">{mapError ? (<div className="w-full h-full flex flex-col items-center justify-center text-center p-8"><MapIcon className="w-16 h-16 text-gray-300"/><p>Erro no Mapa</p></div>) : (<><div ref={mapContainerRef} className="w-full h-full" /><div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-20 pointer-events-none transition-all duration-300 ease-out ${isMapDragging ? '-mt-16 scale-110' : '-mt-8'}`}><div className="w-12 h-12 bg-brand rounded-full flex items-center justify-center shadow-2xl border-[3px] border-white"><MapPin className="w-6 h-6 text-white fill-current" /></div><div className={`w-2 h-8 bg-black/80 rounded-full -mt-2 blur-[1px] transition-opacity duration-300 ${isMapDragging ? 'opacity-0' : 'opacity-20'}`}></div></div>{!isMapDragging && <div className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-3 py-1.5 rounded-full pointer-events-none flex items-center gap-2 animate-pulse"><MousePointer2 className="w-3 h-3" /> Arraste o mapa</div>}</>)}</div><div className="p-6 bg-white border-t border-gray-100 rounded-t-3xl -mt-6 relative z-30 shadow-[0_-5px_20px_rgba(0,0,0,0.05)]"><div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"><div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"></div><div className="flex items-start gap-3 mb-6"><div className="p-2 bg-brandLight rounded-lg shrink-0"><MapPin className="w-6 h-6 text-brand" /></div><div className="flex-1"><p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Endereço Selecionado</p><h4 className="font-bold text-gray-900 text-lg leading-tight line-clamp-2">{mapAddress || 'Carregando endereço...'}</h4></div></div><button onClick={() => setShowMapModal(false)} className="w-full bg-brand text-white font-bold py-3.5 rounded-xl hover:bg-brandHover shadow-lg flex items-center justify-center gap-2"><CheckCircle className="w-5 h-5" /> Confirmar</button></div></div></div></div>)}
     </div>

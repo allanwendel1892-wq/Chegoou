@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
-import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet } from 'lucide-react';
+import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle } from 'lucide-react';
 import DashboardView from './DashboardView';
 import ForecastView from './ForecastView';
 import WhatsAppBotView from './WhatsAppBotView';
@@ -473,10 +473,12 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       setEditingOrder({ ...editingOrder, items: newItems });
   };
 
-  const handleDeleteOrderClick = (orderId: string) => {
-      if (window.confirm("ATENÇÃO: Deseja realmente excluir este pedido permanentemente?")) {
-          onDeleteOrder(orderId);
-          setEditingOrder(null); // Close modal if open
+  // --- STRICT PARTNER CANCEL HANDLER ---
+  const handlePartnerCancelOrder = () => {
+      if (!editingOrder) return;
+      if (window.confirm("ATENÇÃO: Deseja realmente CANCELAR este pedido? Se houve pagamento online, o estorno será iniciado automaticamente.")) {
+          updateOrderStatus(editingOrder.id, 'cancelled');
+          setEditingOrder(null); 
       }
   };
 
@@ -707,15 +709,25 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                              </select>
                          </div>
                      </div>
-                     <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-between items-center">
-                         <div>
+                     <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-between items-center gap-2">
+                         <div className="flex-1">
                              <p className="text-xs text-gray-500 font-bold uppercase">Total Atualizado</p>
                              <p className="text-xl font-bold text-gray-900">
                                  R$ {((editingOrder.items.reduce((a,b) => a + (b.price * b.quantity), 0)) + editingOrder.deliveryFee + editingOrder.serviceFee).toFixed(2)}
                              </p>
                          </div>
+                         
+                         {/* CANCEL BUTTON FOR PARTNER */}
+                         <button 
+                            onClick={handlePartnerCancelOrder}
+                            className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-4 py-3 rounded-xl font-bold flex items-center gap-2 transition-colors text-sm"
+                            title="Cancela o pedido e estorna pagamento (se houver)"
+                         >
+                             <XCircle className="w-5 h-5" /> Cancelar (Estornar)
+                         </button>
+
                          <button onClick={handleSaveEditingOrder} className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-green-200 transition-colors">
-                             <Check className="w-5 h-5" /> Salvar Alterações
+                             <Check className="w-5 h-5" /> Salvar
                          </button>
                      </div>
                  </div>

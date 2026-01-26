@@ -4,7 +4,7 @@ import { User } from '../types';
 
 export interface PaymentResponse {
   success: boolean;
-  status: 'approved' | 'pending' | 'rejected' | 'in_process';
+  status: 'approved' | 'pending' | 'rejected' | 'in_process' | 'refunded' | 'cancelled';
   paymentId?: string;
   qrCode?: string; // Base64 image or text
   qrCodeBase64?: string; // Explicit Base64 Image
@@ -56,6 +56,7 @@ export const PaymentService = {
       // 2. Chamada Real ao Backend
       const { data, error } = await supabase.functions.invoke('create-payment', {
         body: {
+          action: 'create', // Explicit action
           amount,
           method,
           payerEmail: user.email,
@@ -114,5 +115,41 @@ export const PaymentService = {
       console.error("[PaymentService] Falha Crítica:", e);
       throw e; 
     }
+  },
+
+  /**
+   * Process a REFUND via Supabase Edge Functions.
+   */
+  async refundPayment(paymentId: string): Promise<PaymentResponse> {
+      try {
+          console.log(`[PaymentService] Iniciando estorno para Payment ID: ${paymentId}`);
+
+          const { data, error } = await supabase.functions.invoke('create-payment', {
+              body: {
+                  action: 'refund',
+                  paymentId: paymentId
+              },
+              headers: {
+                  Authorization: `Bearer ${SUPABASE_ANON_KEY}`
+              }
+          });
+
+          if (error) throw error;
+          if (!data || !data.success) throw new Error(data?.error || "Falha ao processar estorno.");
+
+          return {
+              success: true,
+              status: 'refunded',
+              message: 'Estorno realizado com sucesso.'
+          };
+
+      } catch (e: any) {
+          console.error("[PaymentService] Erro no Estorno:", e);
+          return {
+              success: false,
+              status: 'rejected',
+              message: e.message || "Erro ao estornar."
+          };
+      }
   }
 };
