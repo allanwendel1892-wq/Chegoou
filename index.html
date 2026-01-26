@@ -2,7 +2,7 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Chegoou Delivery</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -13,6 +13,13 @@
               brand: '#EA1D2C', // iFood Official Red
               brandHover: '#B9121F',
               brandLight: '#FEF2F2'
+            },
+            // MUDANÇA 2: Adicionando espaçamento de segurança para o Tailwind
+            spacing: {
+              'safe-top': 'env(safe-area-inset-top)',
+              'safe-bottom': 'env(safe-area-inset-bottom)',
+              'safe-left': 'env(safe-area-inset-left)',
+              'safe-right': 'env(safe-area-inset-right)',
             }
           }
         }
@@ -22,10 +29,25 @@
     <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyChZ--rhWfvNOT9QYLYS2GlCjs36R9hgR8&libraries=places"></script>
     <script src="https://sdk.mercadopago.com/js/v2"></script>
     <style>
+      :root {
+        /* Variáveis para uso no CSS puro se precisar */
+        --sat: env(safe-area-inset-top);
+        --sab: env(safe-area-inset-bottom);
+        --sal: env(safe-area-inset-left);
+        --sar: env(safe-area-inset-right);
+      }
+
       body {
         font-family: 'Inter', sans-serif;
         background-color: #f3f4f6;
+        /* MUDANÇA 3: Garante que o app ocupe 100% da altura real */
+        min-height: 100vh;
+        min-height: -webkit-fill-available;
+        /* Proteção básica para não colar nas bordas em iPhones novos */
+        padding-top: var(--sat);
+        padding-bottom: var(--sab);
       }
+
       /* Custom scrollbar for webkit */
       ::-webkit-scrollbar {
         width: 8px;
