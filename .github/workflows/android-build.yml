@@ -13,22 +13,27 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      # 1. Configura Java 21 (Obrigatório para Gradle 8.7)
       - name: Setup Java
         uses: actions/setup-java@v3
         with:
           distribution: 'zulu'
           java-version: '21'
 
+      # 2. Configura Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '20'
 
+      # 3. Instala dependências e a ferramenta de ícones
       - name: Install Dependencies
         run: |
           npm install
           npm install @capacitor/core @capacitor/cli @capacitor/android
+          npm install @capacitor/assets --save-dev
 
+      # 4. Cria a configuração do Capacitor
       - name: Create Capacitor Config
         run: |
           echo '{
@@ -49,9 +54,27 @@ jobs:
           npx cap add android
           npx cap sync android
 
-      # --- O PASSO SALVADOR ---
-      # Isso injeta uma regra no arquivo de construção que diz:
-      # "Se alguém pedir Kotlin velho, entregue o novo (1.8.22) para não dar briga."
+      # --- A MÁGICA DOS ÍCONES ---
+      # Se você subiu o icon.png na raiz, ele gera tudo aqui.
+      - name: Generate Icons & Splash
+        run: |
+          if [ -f "icon.png" ]; then
+            echo "✅ Arquivo icon.png encontrado! Gerando ícones..."
+            mkdir -p assets
+            cp icon.png assets/icon.png
+            cp icon.png assets/splash.png
+            npx @capacitor/assets generate --android
+          else
+            echo "⚠️ Arquivo icon.png NÃO encontrado na raiz. O app ficará com o ícone padrão."
+          fi
+
+      # 5. Força atualização do Gradle para 8.7 (Evita erro de arquivo corrompido)
+      - name: Force Gradle Upgrade to 8.7
+        run: |
+          cd android/gradle/wrapper
+          sed -i 's/distributionUrl=.*gradle-.*-all.zip/distributionUrl=https\:\/\/services.gradle.org\/distributions\/gradle-8.7-all.zip/g' gradle-wrapper.properties
+
+      # 6. Corrige conflito de versões do Kotlin (Evita erro de classes duplicadas)
       - name: Fix Kotlin Duplicates
         run: |
           cd android
@@ -59,19 +82,21 @@ jobs:
           echo "allprojects {" >> build.gradle
           echo "    configurations.all {" >> build.gradle
           echo "        resolutionStrategy {" >> build.gradle
-          echo "            force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'" >> build.gradle
-          echo "            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'" >> build.gradle
-          echo "            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'" >> build.gradle
+            echo "            force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'" >> build.gradle
+            echo "            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'" >> build.gradle
+            echo "            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'" >> build.gradle
           echo "        }" >> build.gradle
           echo "    }" >> build.gradle
           echo "}" >> build.gradle
 
+      # 7. Gera o APK
       - name: Build APK
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
 
+      # 8. Salva o arquivo para você baixar
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
