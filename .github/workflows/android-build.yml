@@ -1,0 +1,68 @@
+name: Build Android App
+
+on:
+  workflow_dispatch:  # Permite clicar num botão para gerar
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      # 1. Instala o básico
+      - name: Install Dependencies
+        run: |
+          npm install
+          npm install @capacitor/core @capacitor/cli @capacitor/android
+
+      # 2. Cria a configuração apontando PRO SEU VERCEL (O Pulo do Gato)
+      - name: Create Capacitor Config
+        run: |
+          echo '{
+            "appId": "com.chegoou.app",
+            "appName": "Chegoou Delivery",
+            "webDir": "www",
+            "server": {
+              "url": "https://chegoou.vercel.app",
+              "androidScheme": "https"
+            }
+          }' > capacitor.config.json
+
+      # 3. Engana o Capacitor criando pasta www vazia
+      - name: Create dummy www
+        run: mkdir -p www && echo "Carregando..." > www/index.html
+
+      # 4. Gera a pasta Android
+      - name: Add Android Platform
+        run: |
+          npx cap add android
+          npx cap sync android
+
+      # 5. Compila o APK
+      - name: Build APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      # 6. Salva o arquivo pra você baixar
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: chegoou-app-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
