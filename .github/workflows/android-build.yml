@@ -13,6 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      # --- A CORREÇÃO ESTÁ AQUI (Mudamos de 17 para 21) ---
       - name: Setup Java
         uses: actions/setup-java@v3
         with:
@@ -22,7 +23,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18'
+          node-version: '20' # Atualizei para 20 também para garantir
 
       - name: Install Dependencies
         run: |
@@ -49,9 +50,7 @@ jobs:
           npx cap add android
           npx cap sync android
 
-      # --- O PULO DO GATO ---
-      # Aqui trocamos a versão 8.2.1 pela 8.7 diretamente no arquivo de configuração
-      # antes mesmo do Gradle tentar rodar. Isso evita o crash.
+      # Força o Gradle 8.7 (que funciona bem com Java 21)
       - name: Force Gradle Upgrade to 8.7
         run: |
           cd android/gradle/wrapper
