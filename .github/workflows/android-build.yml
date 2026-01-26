@@ -13,7 +13,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      # --- A CORREÇÃO ESTÁ AQUI (Mudamos de 17 para 21) ---
       - name: Setup Java
         uses: actions/setup-java@v3
         with:
@@ -23,7 +22,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '20' # Atualizei para 20 também para garantir
+          node-version: '20'
 
       - name: Install Dependencies
         run: |
@@ -50,11 +49,22 @@ jobs:
           npx cap add android
           npx cap sync android
 
-      # Força o Gradle 8.7 (que funciona bem com Java 21)
-      - name: Force Gradle Upgrade to 8.7
+      # --- O PASSO SALVADOR ---
+      # Isso injeta uma regra no arquivo de construção que diz:
+      # "Se alguém pedir Kotlin velho, entregue o novo (1.8.22) para não dar briga."
+      - name: Fix Kotlin Duplicates
         run: |
-          cd android/gradle/wrapper
-          sed -i 's/8.2.1/8.7/g' gradle-wrapper.properties
+          cd android
+          echo "" >> build.gradle
+          echo "allprojects {" >> build.gradle
+          echo "    configurations.all {" >> build.gradle
+          echo "        resolutionStrategy {" >> build.gradle
+          echo "            force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'" >> build.gradle
+          echo "            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'" >> build.gradle
+          echo "            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'" >> build.gradle
+          echo "        }" >> build.gradle
+          echo "    }" >> build.gradle
+          echo "}" >> build.gradle
 
       - name: Build APK
         run: |
