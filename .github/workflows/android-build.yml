@@ -58,7 +58,7 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew clean assembleDebug --no-daemon --max-workers=1
 
       # 6. Salva o arquivo pra você baixar
       - name: Upload APK
