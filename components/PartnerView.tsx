@@ -1,3 +1,5 @@
+
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem, WithdrawalRequest } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
@@ -194,8 +196,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   
   const [editingProductId, setEditingProductId] = useState<string | null>(null); 
-  const [productToDelete, setProductToDelete] = useState<string | null>(null);
-  const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false); // NEW STATE FOR MODAL
+  const [productToDelete, setProductToDelete] = useState<string | null>(null); 
   
   const [newProduct, setNewProduct] = useState<Partial<Product>>({
       isAvailable: true,
@@ -231,13 +232,15 @@ const PartnerView: React.FC<PartnerViewProps> = ({
         const ordersToUnlock = orders.filter(o => 
             o.repasseStatus === 'blocked' && 
             o.repasseDate && 
-            o.paymentMethod !== 'cash' && 
-            o.status !== 'cancelled' && 
-            (now.getTime() - new Date(o.repasseDate).getTime()) > 24 * 60 * 60 * 1000 
+            o.paymentMethod !== 'cash' && // Filtra pedidos em dinheiro
+            (now.getTime() - new Date(o.repasseDate).getTime()) > 24 * 60 * 60 * 1000 // > 24 hours
         );
 
         if (ordersToUnlock.length > 0) {
             console.log(`Desbloqueando ${ordersToUnlock.length} pedidos para saque...`);
+            // Update local state first to reflect changes immediately
+            // Note: This relies on App.tsx refreshing or local logic being robust. 
+            // In a real app, we'd optimistically update or refetch.
             for (const order of ordersToUnlock) {
                  await supabase.from('orders').update({ repasseStatus: 'available' }).eq('id', order.id);
             }
@@ -264,12 +267,14 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   }, [view, company.id]);
 
   const financialSummary = useMemo(() => {
+      // 1. Blocked Balance: Delivered but < 24h (EXCLUDING CASH)
       const blocked = orders
-        .filter(o => o.repasseStatus === 'blocked' && o.paymentMethod !== 'cash' && o.status !== 'cancelled')
+        .filter(o => o.repasseStatus === 'blocked' && o.paymentMethod !== 'cash')
         .reduce((acc, o) => acc + (o.repasseValue || 0), 0);
 
+      // 2. Available Balance: Delivered > 24h (status 'available') MINUS Pending/Paid Withdrawals (EXCLUDING CASH)
       const totalAvailableFromOrders = orders
-        .filter(o => o.repasseStatus === 'available' && o.paymentMethod !== 'cash' && o.status !== 'cancelled')
+        .filter(o => o.repasseStatus === 'available' && o.paymentMethod !== 'cash')
         .reduce((acc, o) => acc + (o.repasseValue || 0), 0);
 
       const totalWithdrawals = withdrawHistory
@@ -285,7 +290,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       return { blocked, available, paid };
   }, [orders, withdrawHistory]);
 
-  const handleRequestWithdraw = () => {
+  const handleRequestWithdraw = async () => {
       if (!localCompany.pixKey) {
           alert("Configure sua chave Pix nas configurações antes de solicitar saque.");
           setView(ViewState.SETTINGS);
@@ -297,55 +302,26 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           return;
       }
 
-      // NO CONFIRM HERE - OPEN CUSTOM MODAL
-      setIsWithdrawModalOpen(true);
-  };
+      if (confirm(`Confirmar solicitação de saque de R$ ${financialSummary.available.toFixed(2)} para o Pix ${localCompany.pixKey}?`)) {
+           const newRequest: WithdrawalRequest = {
+               id: `wd-${Date.now()}`,
+               userId: company.id,
+               userName: company.name,
+               userType: 'partner',
+               amount: financialSummary.available,
+               status: 'pending',
+               date: new Date().toISOString(),
+               bankInfo: `${localCompany.pixKeyType?.toUpperCase()}: ${localCompany.pixKey}`
+           };
 
-  const executeWithdrawal = async () => {
-       setIsWithdrawModalOpen(false); // Close Modal
-       setIsLoadingFinance(true);
-       try {
-           console.log("Enviando solicitação para Edge Function...");
-           
-           // Invoke Supabase Function
-           const { data, error } = await supabase.functions.invoke('process-withdraw', {
-               body: {
-                   amount: financialSummary.available,
-                   pixKey: localCompany.pixKey,
-                   pixKeyType: localCompany.pixKeyType || 'email',
-                   userId: company.id,
-                   userName: company.name
-               }
-           });
-
+           const { error } = await supabase.from('withdrawal_requests').insert([newRequest]);
            if (error) {
-               console.error("Erro na Edge Function:", error);
-               let msg = error.message;
-               try {
-                   const body = typeof error === 'string' ? JSON.parse(error) : error;
-                   if (body && body.error) msg = body.error;
-               } catch(e) {}
-               throw new Error(msg);
+               alert("Erro ao solicitar saque.");
+           } else {
+               alert("Solicitação enviada! O valor será transferido em breve.");
+               setWithdrawHistory([newRequest, ...withdrawHistory]);
            }
-
-           console.log("Edge Function Success:", data);
-           alert("Solicitação enviada com sucesso! O pagamento será processado em breve.");
-           
-           // Refresh history
-           const { data: updatedHistory } = await supabase
-                .from('withdrawal_requests')
-                .select('*')
-                .eq('userId', company.id)
-                .order('date', {ascending: false});
-                
-           if (updatedHistory) setWithdrawHistory(updatedHistory);
-
-       } catch (e: any) {
-           console.error("Erro no catch:", e);
-           alert("Erro ao processar saque: " + (e.message || "Falha na comunicação com o servidor."));
-       } finally {
-           setIsLoadingFinance(false);
-       }
+      }
   };
 
   // --- END FINANCEIRO ---
@@ -651,32 +627,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   return (
     <div className="flex h-screen bg-gray-50 relative">
         
-        {/* WITHDRAWAL MODAL - REPLACES WINDOW.CONFIRM */}
-        {isWithdrawModalOpen && (
-            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
-                <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-scale-in">
-                    <h3 className="text-xl font-bold text-gray-900 mb-2">Confirmar Saque</h3>
-                    <p className="text-gray-600 mb-6">
-                        Deseja transferir <span className="font-bold text-gray-900">R$ {financialSummary.available.toFixed(2)}</span> para a chave Pix <span className="font-mono bg-gray-100 px-1 rounded">{localCompany.pixKey}</span>?
-                    </p>
-                    <div className="flex gap-3">
-                        <button 
-                            onClick={() => setIsWithdrawModalOpen(false)}
-                            className="flex-1 py-3 rounded-xl bg-gray-100 font-bold text-gray-600 hover:bg-gray-200 transition-colors"
-                        >
-                            Cancelar
-                        </button>
-                        <button 
-                            onClick={executeWithdrawal}
-                            className="flex-1 py-3 rounded-xl bg-green-600 font-bold text-white hover:bg-green-700 shadow-lg shadow-green-200 transition-colors"
-                        >
-                            Confirmar
-                        </button>
-                    </div>
-                </div>
-            </div>
-        )}
-
         {productToDelete && (
             <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
                 <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-scale-in">
@@ -705,7 +655,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             </div>
         )}
 
-        {/* ... Rest of existing JSX ... */}
         {editingOrder && (
              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
                  <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl animate-scale-in overflow-hidden max-h-[90vh] flex flex-col">
@@ -1128,10 +1077,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                 </div>
             )}
 
-            {/* ... other views ... */}
             {view === ViewState.MENU && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    {/* ... (Existing Menu View Code) ... */}
                     <div className="lg:col-span-1 bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-fit sticky top-8">
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
@@ -1157,8 +1104,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 )}
                                 <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={e => handleFileUpload(e, setProductImagePreview)} accept="image/*" />
                             </div>
-                            
-                            {/* ... Rest of Menu Form ... */}
+
                             <div className="grid grid-cols-2 gap-3">
                                 <div className="col-span-2">
                                     <label className="text-xs font-bold text-gray-500 uppercase ml-1">Nome</label>
@@ -1268,8 +1214,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                             </button>
                         </div>
                     </div>
-                    
-                    {/* ... Rest of existing Menu rendering ... */}
+
                     <div className="lg:col-span-2 space-y-6">
                         <div className="flex justify-between items-center">
                             <h2 className="text-2xl font-bold text-gray-800">Cardápio Atual</h2>
@@ -1314,7 +1259,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                     </div>
                 </div>
             )}
-            
+
             {view === ViewState.FORECAST && (
                 <ForecastView products={products} salesHistory={calculatedSalesHistory} />
             )}
@@ -1325,13 +1270,11 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
             {view === ViewState.SETTINGS && (
                 <div className="max-w-2xl mx-auto bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
-                    {/* ... (Existing Settings Code) ... */}
                     <h2 className="text-2xl font-bold text-gray-900 mb-6">Configurações da Loja</h2>
                     
                     <div className="space-y-6">
                         <div className="grid grid-cols-2 gap-4">
-                            {/* ... Image, Name, Desc fields ... */}
-                             <div className="col-span-2">
+                            <div className="col-span-2">
                                 <label className="text-sm font-bold text-gray-700 mb-2 block">Identidade Visual</label>
                                 <div className="flex gap-6 items-start">
                                     <div className="flex flex-col items-center gap-2">
@@ -1361,7 +1304,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <div className="col-span-2 mt-4">
                                 <label className="text-sm font-bold text-gray-700">Nome da Loja</label>
                                 <input 
@@ -1371,8 +1314,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 />
                             </div>
                             
-                             {/* ... Other inputs ... */}
-                             <div className="col-span-2">
+                            <div className="col-span-2">
                                 <label className="text-sm font-bold text-gray-700">Categoria</label>
                                 <select 
                                     value={localCompany.category} 
@@ -1543,32 +1485,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             )}
         </div>
       </div>
-
-      {/* WITHDRAWAL MODAL - REPLACES WINDOW.CONFIRM */}
-      {isWithdrawModalOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
-            <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-scale-in">
-                <h3 className="text-xl font-bold text-gray-900 mb-2">Confirmar Saque</h3>
-                <p className="text-gray-600 mb-6">
-                    Deseja transferir <span className="font-bold text-gray-900">R$ {financialSummary.available.toFixed(2)}</span> para a chave Pix <span className="font-mono bg-gray-100 px-1 rounded">{localCompany.pixKey}</span>?
-                </p>
-                <div className="flex gap-3">
-                    <button 
-                        onClick={() => setIsWithdrawModalOpen(false)}
-                        className="flex-1 py-3 rounded-xl bg-gray-100 font-bold text-gray-600 hover:bg-gray-200 transition-colors"
-                    >
-                        Cancelar
-                    </button>
-                    <button 
-                        onClick={executeWithdrawal}
-                        className="flex-1 py-3 rounded-xl bg-green-600 font-bold text-white hover:bg-green-700 shadow-lg shadow-green-200 transition-colors"
-                    >
-                        Confirmar
-                    </button>
-                </div>
-            </div>
-        </div>
-      )}
 
       {showMapModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in h-full">
