@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest } from './types';
 import AuthView from './components/AuthView';
@@ -370,6 +371,10 @@ const App: React.FC = () => {
     const company = companies.find(c => c.id === companyId);
     if (!company) return false;
 
+    // LÓGICA FINANCEIRA: Se for dinheiro, o repasse para a carteira da plataforma é 0
+    const isOnlinePayment = paymentMethod !== 'cash';
+    const repasseValue = isOnlinePayment ? Math.max(0, finalTotal - serviceFee) : 0;
+
     const newOrder: Order = {
         id: `ord-${Date.now()}`,
         companyId,
@@ -398,7 +403,8 @@ const App: React.FC = () => {
         pickupAddress: company.address || { street: '', number: '', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0 },
         deliveryType: company.deliveryType,
         paymentStatus: 'pending',
-        repasseValue: Math.max(0, finalTotal - serviceFee),
+        repasseValue: repasseValue,
+        repasseStatus: 'pending', 
     };
 
     const { error } = await supabase.from('orders').insert([newOrder]);
@@ -469,8 +475,23 @@ const App: React.FC = () => {
         }
     }
 
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
-    await supabase.from('orders').update({ status }).eq('id', orderId);
+    // --- LÓGICA DE REPASSE (24H LOCK) ---
+    // Quando o pedido é entregue, marcamos o repasse como 'bloqueado' e setamos a data.
+    // SOMENTE SE O PAGAMENTO NÃO FOR DINHEIRO (CASH)
+    let updateData: any = { status };
+    
+    // Obter dados atuais do pedido para checar o método de pagamento
+    const currentOrder = orders.find(o => o.id === orderId);
+
+    if (status === 'delivered') {
+        if (currentOrder && currentOrder.paymentMethod !== 'cash') {
+            updateData.repasseStatus = 'blocked';
+            updateData.repasseDate = new Date().toISOString();
+        }
+    }
+
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updateData } : o));
+    await supabase.from('orders').update(updateData).eq('id', orderId);
   };
 
   const handleCancelOrder = async (orderId: string) => {

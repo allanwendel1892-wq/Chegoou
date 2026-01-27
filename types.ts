@@ -142,10 +142,10 @@ export interface Order {
   paymentPixImage?: string; // BASE64 da imagem do QR Code
 
   // 2. Controle do Repasse
-  repasseStatus?: 'pending' | 'ready' | 'paid' | 'blocked'; // repasse_status
+  repasseStatus?: 'pending' | 'blocked' | 'available' | 'withdrawn'; // blocked = 24h lock
   repasseValue?: number; // Valor líquido para o restaurante
-  repasseDate?: string; // Quando o repasse foi feito
-  waitingFunds?: boolean; // aguardando_fundos (D+1, D+30, etc)
+  repasseDate?: string; // Data que o valor foi creditado (geralmente data da entrega)
+  waitingFunds?: boolean; // deprecated, use repasseStatus logic
 }
 
 export interface FinancialRecord {
@@ -166,7 +166,7 @@ export interface WithdrawalRequest {
   amount: number;
   status: 'pending' | 'paid' | 'rejected';
   date: string;
-  bankInfo: string;
+  bankInfo: string; // Chave PIX e Tipo
 }
 
 export enum ViewState {
@@ -175,7 +175,8 @@ export enum ViewState {
   MENU = 'menu', // Cardapio (was inventory)
   FORECAST = 'forecast',
   WHATSAPP = 'whatsapp',
-  SETTINGS = 'settings'
+  SETTINGS = 'settings',
+  FINANCE = 'finance' // NEW
 }
 
 export interface SalesHistoryItem {

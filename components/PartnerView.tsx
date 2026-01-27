@@ -1,12 +1,14 @@
 
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem } from '../types';
+import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem, WithdrawalRequest } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
-import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle } from 'lucide-react';
+import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle, ArrowRight, Lock, Unlock, Banknote, AlertCircle } from 'lucide-react';
 import DashboardView from './DashboardView';
 import ForecastView from './ForecastView';
 import WhatsAppBotView from './WhatsAppBotView';
 import Sidebar from './Sidebar';
+import { supabase } from '../services/supabaseClient';
 
 interface PartnerViewProps {
   company: Company;
@@ -218,8 +220,111 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const [mapAddress, setMapAddress] = useState('');
   const [isMapDragging, setIsMapDragging] = useState(false);
   const [mapError, setMapError] = useState(false);
+  const [withdrawHistory, setWithdrawHistory] = useState<WithdrawalRequest[]>([]);
+  const [isLoadingFinance, setIsLoadingFinance] = useState(false);
   
   useEffect(() => { setLocalCompany(company); }, [company]);
+
+  // --- FINANCEIRO: Lógica de Desbloqueio de Saldo (24h) ---
+  useEffect(() => {
+    const unlockFunds = async () => {
+        const now = new Date();
+        const ordersToUnlock = orders.filter(o => 
+            o.repasseStatus === 'blocked' && 
+            o.repasseDate && 
+            o.paymentMethod !== 'cash' && // Filtra pedidos em dinheiro
+            (now.getTime() - new Date(o.repasseDate).getTime()) > 24 * 60 * 60 * 1000 // > 24 hours
+        );
+
+        if (ordersToUnlock.length > 0) {
+            console.log(`Desbloqueando ${ordersToUnlock.length} pedidos para saque...`);
+            // Update local state first to reflect changes immediately
+            // Note: This relies on App.tsx refreshing or local logic being robust. 
+            // In a real app, we'd optimistically update or refetch.
+            for (const order of ordersToUnlock) {
+                 await supabase.from('orders').update({ repasseStatus: 'available' }).eq('id', order.id);
+            }
+        }
+    };
+    
+    // Check every 1 minute or on load
+    const interval = setInterval(unlockFunds, 60000);
+    unlockFunds(); // Check immediately on mount
+    return () => clearInterval(interval);
+  }, [orders]);
+
+  // --- FINANCEIRO: Carregar Histórico de Saques ---
+  useEffect(() => {
+    if (view === ViewState.FINANCE) {
+        setIsLoadingFinance(true);
+        const fetchWithdrawals = async () => {
+             const { data } = await supabase.from('withdrawal_requests').select('*').eq('userId', company.id).order('date', {ascending: false});
+             if (data) setWithdrawHistory(data);
+             setIsLoadingFinance(false);
+        };
+        fetchWithdrawals();
+    }
+  }, [view, company.id]);
+
+  const financialSummary = useMemo(() => {
+      // 1. Blocked Balance: Delivered but < 24h (EXCLUDING CASH)
+      const blocked = orders
+        .filter(o => o.repasseStatus === 'blocked' && o.paymentMethod !== 'cash')
+        .reduce((acc, o) => acc + (o.repasseValue || 0), 0);
+
+      // 2. Available Balance: Delivered > 24h (status 'available') MINUS Pending/Paid Withdrawals (EXCLUDING CASH)
+      const totalAvailableFromOrders = orders
+        .filter(o => o.repasseStatus === 'available' && o.paymentMethod !== 'cash')
+        .reduce((acc, o) => acc + (o.repasseValue || 0), 0);
+
+      const totalWithdrawals = withdrawHistory
+        .filter(w => w.status !== 'rejected')
+        .reduce((acc, w) => acc + w.amount, 0);
+
+      const available = Math.max(0, totalAvailableFromOrders - totalWithdrawals);
+
+      const paid = withdrawHistory
+        .filter(w => w.status === 'paid')
+        .reduce((acc, w) => acc + w.amount, 0);
+
+      return { blocked, available, paid };
+  }, [orders, withdrawHistory]);
+
+  const handleRequestWithdraw = async () => {
+      if (!localCompany.pixKey) {
+          alert("Configure sua chave Pix nas configurações antes de solicitar saque.");
+          setView(ViewState.SETTINGS);
+          return;
+      }
+
+      if (financialSummary.available <= 0) {
+          alert("Saldo insuficiente para saque.");
+          return;
+      }
+
+      if (confirm(`Confirmar solicitação de saque de R$ ${financialSummary.available.toFixed(2)} para o Pix ${localCompany.pixKey}?`)) {
+           const newRequest: WithdrawalRequest = {
+               id: `wd-${Date.now()}`,
+               userId: company.id,
+               userName: company.name,
+               userType: 'partner',
+               amount: financialSummary.available,
+               status: 'pending',
+               date: new Date().toISOString(),
+               bankInfo: `${localCompany.pixKeyType?.toUpperCase()}: ${localCompany.pixKey}`
+           };
+
+           const { error } = await supabase.from('withdrawal_requests').insert([newRequest]);
+           if (error) {
+               alert("Erro ao solicitar saque.");
+           } else {
+               alert("Solicitação enviada! O valor será transferido em breve.");
+               setWithdrawHistory([newRequest, ...withdrawHistory]);
+           }
+      }
+  };
+
+  // --- END FINANCEIRO ---
 
   const calculatedSalesHistory = useMemo(() => {
       const grouped: Record<string, { revenue: number, count: number }> = {};
@@ -729,7 +834,164 @@ const PartnerView: React.FC<PartnerViewProps> = ({
         <div className="p-4 md:p-8 max-w-[1600px] mx-auto w-full">
             
             {view === ViewState.DASHBOARD && (
-                <DashboardView salesData={calculatedSalesHistory} />
+                <div className="space-y-8">
+                    <DashboardView salesData={calculatedSalesHistory} />
+                    
+                    {/* MINI FINANCE WIDGET ON DASHBOARD */}
+                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2">
+                                <Wallet className="w-5 h-5 text-gray-500"/> Financeiro Rápido
+                            </h3>
+                            <button onClick={() => setView(ViewState.FINANCE)} className="text-sm font-bold text-blue-600 hover:underline">Ver Detalhes</button>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                                <p className="text-xs text-gray-500 uppercase font-bold">Saldo Disponível</p>
+                                <h4 className="text-2xl font-bold text-green-600 mt-1">R$ {financialSummary.available.toFixed(2)}</h4>
+                            </div>
+                            <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                                <p className="text-xs text-gray-500 uppercase font-bold">Bloqueado (24h)</p>
+                                <h4 className="text-2xl font-bold text-gray-400 mt-1 flex items-center gap-2">
+                                    R$ {financialSummary.blocked.toFixed(2)} <Lock className="w-4 h-4"/>
+                                </h4>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
+            {/* --- NOVO MÓDULO FINANCEIRO --- */}
+            {view === ViewState.FINANCE && (
+                <div className="space-y-6">
+                    <div className="flex justify-between items-center">
+                        <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                            <Banknote className="w-8 h-8 text-green-600" /> Gestão Financeira
+                        </h2>
+                        {!localCompany.pixKey && (
+                            <div className="bg-yellow-50 text-yellow-800 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">
+                                <AlertTriangle className="w-4 h-4" /> Configure sua chave Pix para receber
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-center gap-3">
+                        <AlertCircle className="w-5 h-5 text-blue-600 shrink-0" />
+                        <p className="text-sm text-blue-800 font-medium">
+                            Os valores abaixo referem-se <strong>apenas a vendas online</strong> (Pix e Cartão pelo App). 
+                            Pagamentos em dinheiro são recebidos diretamente por você no ato da entrega.
+                        </p>
+                    </div>
+
+                    {/* Resumo de Saldos */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden">
+                            <div className="relative z-10">
+                                <p className="text-sm font-bold text-gray-500 uppercase tracking-wide">Saldo Disponível</p>
+                                <h3 className="text-4xl font-bold text-green-600 mt-2">R$ {financialSummary.available.toFixed(2)}</h3>
+                                <p className="text-xs text-gray-400 mt-2">Livre para saque imediato.</p>
+                            </div>
+                            <div className="absolute right-0 top-0 h-full w-24 bg-gradient-to-l from-green-50 to-transparent"></div>
+                        </div>
+
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                            <div className="flex justify-between items-start">
+                                <div>
+                                    <p className="text-sm font-bold text-gray-500 uppercase tracking-wide">Bloqueado (24h)</p>
+                                    <h3 className="text-3xl font-bold text-gray-400 mt-2">R$ {financialSummary.blocked.toFixed(2)}</h3>
+                                </div>
+                                <div className="bg-gray-100 p-2 rounded-lg"><Lock className="w-6 h-6 text-gray-400"/></div>
+                            </div>
+                            <p className="text-xs text-gray-400 mt-2">Valores liberados 24h após entrega.</p>
+                        </div>
+
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                             <div className="flex justify-between items-start">
+                                <div>
+                                    <p className="text-sm font-bold text-gray-500 uppercase tracking-wide">Total Sacado</p>
+                                    <h3 className="text-3xl font-bold text-blue-900 mt-2">R$ {financialSummary.paid.toFixed(2)}</h3>
+                                </div>
+                                <div className="bg-blue-50 p-2 rounded-lg"><CheckCircle className="w-6 h-6 text-blue-600"/></div>
+                            </div>
+                             <p className="text-xs text-gray-400 mt-2">Histórico total de repasses.</p>
+                        </div>
+                    </div>
+
+                    {/* Área de Saque */}
+                    <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 flex flex-col md:flex-row items-center justify-between gap-6">
+                        <div>
+                            <h3 className="text-xl font-bold text-gray-800">Solicitar Repasse</h3>
+                            <p className="text-gray-500 mt-1 max-w-lg">
+                                O valor será enviado para sua chave Pix cadastrada: 
+                                <span className="font-mono font-bold text-gray-900 bg-gray-100 px-2 py-0.5 rounded ml-1">
+                                    {localCompany.pixKey || 'Não cadastrada'}
+                                </span>
+                            </p>
+                        </div>
+                        <button 
+                            onClick={handleRequestWithdraw}
+                            disabled={financialSummary.available <= 0}
+                            className={`px-8 py-4 rounded-xl font-bold text-lg flex items-center gap-2 shadow-lg transition-all
+                                ${financialSummary.available > 0 
+                                    ? 'bg-green-600 text-white hover:bg-green-700 shadow-green-200 hover:-translate-y-1' 
+                                    : 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none'}
+                            `}
+                        >
+                            <DollarSign className="w-6 h-6" /> Solicitar Saque
+                        </button>
+                    </div>
+
+                    {/* Histórico */}
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                        <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+                            <h3 className="font-bold text-lg text-gray-800">Histórico de Saques</h3>
+                            {isLoadingFinance && <Loader2 className="w-4 h-4 animate-spin text-gray-400"/>}
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left">
+                                <thead className="bg-gray-50/50">
+                                    <tr>
+                                        <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Data Solicitada</th>
+                                        <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Valor</th>
+                                        <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Status</th>
+                                        <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Detalhes Pix</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {withdrawHistory.length === 0 && (
+                                        <tr>
+                                            <td colSpan={4} className="p-8 text-center text-gray-400">
+                                                Nenhum saque registrado ainda.
+                                            </td>
+                                        </tr>
+                                    )}
+                                    {withdrawHistory.map(req => (
+                                        <tr key={req.id} className="hover:bg-gray-50 transition-colors">
+                                            <td className="p-4 text-sm font-medium text-gray-600">
+                                                {new Date(req.date).toLocaleString()}
+                                            </td>
+                                            <td className="p-4 font-bold text-gray-900">
+                                                R$ {req.amount.toFixed(2)}
+                                            </td>
+                                            <td className="p-4">
+                                                <span className={`px-2 py-1 rounded-full text-xs font-bold uppercase
+                                                    ${req.status === 'paid' ? 'bg-green-100 text-green-700' : ''}
+                                                    ${req.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : ''}
+                                                    ${req.status === 'rejected' ? 'bg-red-100 text-red-700' : ''}
+                                                `}>
+                                                    {req.status === 'paid' ? 'Pago' : req.status === 'pending' ? 'Pendente' : 'Rejeitado'}
+                                                </span>
+                                            </td>
+                                            <td className="p-4 text-xs font-mono text-gray-500">
+                                                {req.bankInfo}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             )}
 
             {view === ViewState.ORDERS && (

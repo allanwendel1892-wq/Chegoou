@@ -1,5 +1,7 @@
+
+
 import React from 'react';
-import { LayoutDashboard, UtensilsCrossed, TrendingUp, MessageSquare, ShoppingBag, LogOut, Settings } from 'lucide-react';
+import { LayoutDashboard, UtensilsCrossed, TrendingUp, MessageSquare, ShoppingBag, LogOut, Settings, Wallet } from 'lucide-react';
 import { ViewState } from '../types';
 
 interface SidebarProps {
@@ -16,6 +18,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, isMobileOpen, s
     { id: ViewState.DASHBOARD, label: 'Dashboard', icon: LayoutDashboard },
     { id: ViewState.ORDERS, label: 'Pedidos (Kanban)', icon: ShoppingBag },
     { id: ViewState.MENU, label: 'Cardápio', icon: UtensilsCrossed },
+    { id: ViewState.FINANCE, label: 'Financeiro', icon: Wallet },
     { id: ViewState.FORECAST, label: 'IA Preditiva', icon: TrendingUp },
     { id: ViewState.WHATSAPP, label: 'Bot WhatsApp', icon: MessageSquare },
     { id: ViewState.SETTINGS, label: 'Configurações', icon: Settings },
