@@ -173,26 +173,29 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
 
       setIsWithdrawing(true);
       try {
-           const { data, error } = await supabase.functions.invoke('smart-api', {
-               body: {
-                   amount: financialStats.availableBalance,
-                   pixKey: pixKey,
-                   pixKeyType: 'email', // Default fallback
-                   userId: courier.id,
-                   userName: courier.name
-               }
-           });
+           // Insert directly into Supabase
+           // GENERATE A VALID UUID V4
+           const withdrawalId = self.crypto.randomUUID();
+           const detailString = `PIX: ${pixKey} | Conta Pessoal`;
+
+           const { error } = await supabase.from('withdrawal_requests').insert([{
+               id: withdrawalId,
+               userId: courier.id,
+               userName: courier.name,
+               userType: 'courier',
+               amount: financialStats.availableBalance,
+               status: 'pending',
+               date: new Date().toISOString(),
+               bankInfo: detailString
+           }]);
 
            if (error) throw error;
 
-           // Save record locally if function succeeds (or rely on function insert, here we manually refresh)
-           if (data) {
-                // Refresh local history
-                const { data: updatedHistory } = await supabase.from('withdrawal_requests').select('*').eq('userId', courier.id);
-                if (updatedHistory) setWithdrawHistory(updatedHistory);
-                
-                alert("Solicitação enviada com sucesso! O pagamento cairá na sua conta em breve.");
-           }
+           // Refresh local history
+           const { data: updatedHistory } = await supabase.from('withdrawal_requests').select('*').eq('userId', courier.id);
+           if (updatedHistory) setWithdrawHistory(updatedHistory);
+            
+           alert("Solicitação enviada com sucesso! O pagamento será realizado manualmente pelo administrador.");
 
       } catch (e: any) {
           console.error("Withdrawal error:", e);

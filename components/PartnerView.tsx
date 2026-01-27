@@ -304,45 +304,33 @@ const PartnerView: React.FC<PartnerViewProps> = ({
        setIsWithdrawModalOpen(false); // Close Modal
        setIsLoadingFinance(true);
        try {
-           console.log("Enviando solicitação para Edge Function: smart-api ...");
+           console.log("Registrando solicitação de saque manual...");
            
            // Calculate values for display/record (PERCENTAGE LOGIC)
-           const bankFeeRate = localCompany.serviceFeePercentage || 0; // Taxa de Transação Bancária em %
+           const bankFeeRate = localCompany.serviceFeePercentage || 0;
            const bankFeeValue = financialSummary.available * (bankFeeRate / 100);
            const netAmount = Math.max(0, financialSummary.available - bankFeeValue);
 
-           // Invoke Supabase Function - USING 'smart-api' SLUG
-           const { data, error } = await supabase.functions.invoke('smart-api', {
-               body: {
-                   amount: financialSummary.available, // Bruto na função
-                   pixKey: localCompany.pixKey,
-                   pixKeyType: localCompany.pixKeyType || 'email',
-                   userId: company.id,
-                   userName: company.name
-               }
-           });
-
-           if (error) {
-               console.error("Erro na Edge Function:", error);
-               let msg = error.message;
-               try {
-                   const body = typeof error === 'string' ? JSON.parse(error) : error;
-                   if (body && body.error) msg = body.error;
-               } catch(e) {}
-               throw new Error(msg);
-           }
-
-           console.log("Edge Function Success:", data);
+           // USE UUID GENRATOR FOR VALID SUPABASE UUID TYPE
+           const withdrawalId = self.crypto.randomUUID();
            
-           // Se a função criou o registro, atualizamos o detalhamento no banco
-           if (data.data && data.data[0]) {
-               const withdrawalId = data.data[0].id;
-               const detailString = `${localCompany.pixKeyType || 'PIX'}: ${localCompany.pixKey} | Taxa (${bankFeeRate}%): R$ ${bankFeeValue.toFixed(2)} | Líquido: R$ ${netAmount.toFixed(2)}`;
-               
-               await supabase.from('withdrawal_requests').update({ bankInfo: detailString }).eq('id', withdrawalId);
-           }
+           const detailString = `${localCompany.pixKeyType || 'PIX'}: ${localCompany.pixKey} | Taxa (${bankFeeRate}%): R$ ${bankFeeValue.toFixed(2)} | Líquido: R$ ${netAmount.toFixed(2)}`;
 
-           alert("Solicitação enviada com sucesso! O pagamento será processado na próxima janela bancária.");
+           // Insert directly into Supabase instead of Edge Function
+           const { error } = await supabase.from('withdrawal_requests').insert([{
+               id: withdrawalId,
+               userId: company.id,
+               userName: company.name,
+               userType: 'partner',
+               amount: financialSummary.available, // Bruto
+               status: 'pending',
+               date: new Date().toISOString(),
+               bankInfo: detailString
+           }]);
+
+           if (error) throw error;
+
+           alert("Solicitação enviada com sucesso! O pagamento será processado manualmente.");
            
            // Refresh history
            const { data: updatedHistory } = await supabase
@@ -355,7 +343,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
        } catch (e: any) {
            console.error("Erro no catch:", e);
-           alert("Erro ao processar saque: " + (e.message || "Falha na comunicação com o servidor."));
+           alert("Erro ao processar saque: " + (e.message || "Erro desconhecido."));
        } finally {
            setIsLoadingFinance(false);
        }
@@ -711,6 +699,9 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             </div>
         )}
 
+        {/* ... Rest of existing JSX ... */}
+        {/* ... (Omitted primarily for brevity, but the file content remains the same until the next change) ... */}
+        
         {productToDelete && (
             <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
                 <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-scale-in">
@@ -739,7 +730,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             </div>
         )}
 
-        {/* ... Rest of existing JSX ... */}
         {editingOrder && (
              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
                  <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl animate-scale-in overflow-hidden max-h-[90vh] flex flex-col">
