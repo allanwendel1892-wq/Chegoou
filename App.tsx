@@ -510,6 +510,18 @@ const App: React.FC = () => {
     await supabase.from('orders').update(updateData).eq('id', orderId);
   };
 
+  const handleCourierAcceptOrder = async (orderId: string) => {
+      if (!currentUser) return;
+      
+      const updateData = {
+          status: 'delivering',
+          courierId: currentUser.id
+      };
+
+      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updateData } : o));
+      await supabase.from('orders').update(updateData).eq('id', orderId);
+  };
+
   const handleCancelOrder = async (orderId: string) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
@@ -652,7 +664,7 @@ const App: React.FC = () => {
         return <CourierView 
             courier={currentUser} 
             availableOrders={orders} 
-            acceptOrder={(id) => updateOrderStatus(id, 'delivering')}
+            acceptOrder={handleCourierAcceptOrder}
             confirmDelivery={(id, code) => updateOrderStatus(id, 'delivered')}
             onLogout={handleLogout}
         />;

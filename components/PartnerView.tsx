@@ -306,14 +306,15 @@ const PartnerView: React.FC<PartnerViewProps> = ({
        try {
            console.log("Enviando solicitação para Edge Function: smart-api ...");
            
-           // Calculate values for display/record
-           const bankFee = localCompany.serviceFeePercentage || 0; // "Taxa Transação Bancária"
-           const netAmount = Math.max(0, financialSummary.available - bankFee);
+           // Calculate values for display/record (PERCENTAGE LOGIC)
+           const bankFeeRate = localCompany.serviceFeePercentage || 0; // Taxa de Transação Bancária em %
+           const bankFeeValue = financialSummary.available * (bankFeeRate / 100);
+           const netAmount = Math.max(0, financialSummary.available - bankFeeValue);
 
            // Invoke Supabase Function - USING 'smart-api' SLUG
            const { data, error } = await supabase.functions.invoke('smart-api', {
                body: {
-                   amount: financialSummary.available, // Bruto na função, mas vamos salvar o detalhamento
+                   amount: financialSummary.available, // Bruto na função
                    pixKey: localCompany.pixKey,
                    pixKeyType: localCompany.pixKeyType || 'email',
                    userId: company.id,
@@ -333,11 +334,10 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
            console.log("Edge Function Success:", data);
            
-           // Se a função criou o registro, precisamos atualizar o campo 'bankInfo' para incluir o detalhamento das taxas
-           // Assumindo que a função retorna os dados criados em data.data[0]
+           // Se a função criou o registro, atualizamos o detalhamento no banco
            if (data.data && data.data[0]) {
                const withdrawalId = data.data[0].id;
-               const detailString = `${localCompany.pixKeyType || 'PIX'}: ${localCompany.pixKey} | Taxa: R$ ${bankFee.toFixed(2)} | Líquido: R$ ${netAmount.toFixed(2)}`;
+               const detailString = `${localCompany.pixKeyType || 'PIX'}: ${localCompany.pixKey} | Taxa (${bankFeeRate}%): R$ ${bankFeeValue.toFixed(2)} | Líquido: R$ ${netAmount.toFixed(2)}`;
                
                await supabase.from('withdrawal_requests').update({ bankInfo: detailString }).eq('id', withdrawalId);
            }
@@ -676,12 +676,12 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                             <span className="font-bold">R$ {financialSummary.available.toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between text-red-500">
-                            <span>Taxa Transação Bancária:</span>
-                            <span className="font-bold">- R$ {(localCompany.serviceFeePercentage || 0).toFixed(2)}</span>
+                            <span>Taxa Transação Bancária ({(localCompany.serviceFeePercentage || 0).toFixed(2)}%):</span>
+                            <span className="font-bold">- R$ {(financialSummary.available * ((localCompany.serviceFeePercentage || 0)/100)).toFixed(2)}</span>
                         </div>
                         <div className="border-t pt-2 mt-2 flex justify-between text-lg text-gray-900 font-bold">
                             <span>Valor Líquido (Pix):</span>
-                            <span>R$ {Math.max(0, financialSummary.available - (localCompany.serviceFeePercentage || 0)).toFixed(2)}</span>
+                            <span>R$ {Math.max(0, financialSummary.available - (financialSummary.available * ((localCompany.serviceFeePercentage || 0)/100))).toFixed(2)}</span>
                         </div>
                     </div>
 

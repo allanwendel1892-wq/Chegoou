@@ -30,9 +30,9 @@ export const generateSalesForecast = async (history: SalesHistoryItem[], product
     const schema = {
       type: Type.OBJECT,
       properties: {
-        predictedRevenue: { type: Type.NUMBER, description: "Estimated revenue for tomorrow in BRL" },
-        confidenceScore: { type: Type.INTEGER, description: "Confidence level 0-100" },
-        insight: { type: Type.STRING, description: "Short strategic advice in Portuguese" },
+        predictedRevenue: { type: Type.NUMBER, description: "Estimated revenue for tomorrow in BRL based on moving average and trends." },
+        confidenceScore: { type: Type.INTEGER, description: "Confidence level 0-100 based on data consistency." },
+        insight: { type: Type.STRING, description: "Short strategic advice in Portuguese based on the statistics." },
         predictedProducts: {
           type: Type.ARRAY,
           items: {
@@ -49,24 +49,28 @@ export const generateSalesForecast = async (history: SalesHistoryItem[], product
       required: ["predictedRevenue", "confidenceScore", "predictedProducts", "insight"]
     };
 
-    // 3. Prompt Engineering
+    // 3. Prompt Engineering - UPDATED FOR STATISTICAL FOCUS
     const prompt = `
-      Você é um especialista em Inteligência de Vendas para Delivery.
+      Você é um Analista de Dados de Vendas para Delivery (Estatístico).
       
       Hoje é: ${today}.
       
       CONTEXTO:
       - Cardápio Disponível: ${productNames}
-      - Histórico de Vendas Recente: ${historyContext}
+      - Histórico de Vendas Recente (Últimos dias): ${historyContext}
       
       TAREFA:
-      Preveja as vendas para AMANHÃ.
+      Calcule a previsão de vendas para AMANHÃ.
+      
+      MÉTODO ESTATÍSTICO:
+      1. Analise a Média Móvel dos últimos 3 dias.
+      2. Considere a tendência do dia da semana (ex: Sextas vendem mais que Segundas).
+      3. Se o histórico for zero, use uma estimativa de mercado conservadora (Cold Start).
       
       REGRAS:
-      1. Use APENAS produtos listados no "Cardápio Disponível". Não invente produtos.
-      2. Se o histórico for vazio ou baixo, baseie-se em tendências gerais de delivery para o dia da semana de amanhã (ex: Sexta pede Pizza/Hambúrguer, Segunda pede Saudável).
-      3. Seja realista com os números.
-      4. Responda estritamente no formato JSON solicitado.
+      1. Seja realista e conservador. Evite alucinações de valores altos sem dados.
+      2. Use APENAS produtos listados no "Cardápio Disponível".
+      3. Responda estritamente no formato JSON solicitado.
     `;
 
     // 4. Call API
@@ -76,7 +80,7 @@ export const generateSalesForecast = async (history: SalesHistoryItem[], product
       config: {
         responseMimeType: "application/json",
         responseSchema: schema,
-        temperature: 0.4 // Lower temperature for more grounded predictions
+        temperature: 0.2 // Very low temperature for analytical/statistical consistency
       }
     });
 

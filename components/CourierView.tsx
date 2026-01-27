@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Order, User, Address } from '../types';
-import { Navigation, Bike, CheckCircle, MapPin, DollarSign, LogOut, ArrowRight, Store, Loader2, Crosshair } from 'lucide-react';
+import { Order, User, Address, WithdrawalRequest } from '../types';
+import { Navigation, Bike, CheckCircle, MapPin, DollarSign, LogOut, ArrowRight, Store, Loader2, Crosshair, AlertTriangle } from 'lucide-react';
+import { supabase } from '../services/supabaseClient';
 
 interface CourierViewProps {
   courier: User;
@@ -27,8 +28,12 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
   const [isOnline, setIsOnline] = useState(true);
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [deliveryCodeInput, setDeliveryCodeInput] = useState('');
-  const [withdrawalSent, setWithdrawalSent] = useState(false); // State for withdrawal button feedback
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
   
+  // Real Balance Logic States
+  const [withdrawHistory, setWithdrawHistory] = useState<WithdrawalRequest[]>([]);
+  const [isBalanceLoading, setIsBalanceLoading] = useState(false);
+
   // GPS State
   const [currentLocation, setCurrentLocation] = useState<{lat: number, lng: number} | null>(
       courier.address ? { lat: courier.address.lat, lng: courier.address.lng } : null
@@ -38,21 +43,50 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
   // OPERATIONAL RADIUS FOR COURIER (e.g., 15km)
   const COURIER_OPERATIONAL_RADIUS_KM = 15;
 
+  // --- FETCH FINANCIAL DATA ---
+  useEffect(() => {
+      const fetchHistory = async () => {
+          setIsBalanceLoading(true);
+          const { data } = await supabase.from('withdrawal_requests').select('*').eq('userId', courier.id);
+          if (data) setWithdrawHistory(data);
+          setIsBalanceLoading(false);
+      };
+      fetchHistory();
+  }, [courier.id]);
+
+  const financialStats = useMemo(() => {
+      // 1. Total earned from deliveries (completed by this courier)
+      const totalEarned = availableOrders
+          .filter(o => o.courierId === courier.id && o.status === 'delivered')
+          .reduce((acc, o) => acc + o.deliveryFee, 0);
+
+      // 2. Total withdrawn (pending or paid)
+      const totalWithdrawn = withdrawHistory
+          .filter(w => w.status !== 'rejected')
+          .reduce((acc, w) => acc + w.amount, 0);
+
+      // 3. Balance available
+      const availableBalance = Math.max(0, totalEarned - totalWithdrawn);
+      const deliveriesCount = availableOrders.filter(o => o.courierId === courier.id && o.status === 'delivered').length;
+
+      return { availableBalance, deliveriesCount };
+  }, [availableOrders, withdrawHistory, courier.id]);
+
+
   // --- PERSISTENCE LOGIC ---
   // Ensure that if an order is currently 'delivering', it remains as the active order
-  // even if the courier refreshes or navigates away and back.
   useEffect(() => {
-      // Find an order that is already 'delivering' and belongs to the platform logic
-      // In a real backend scenario, we would also check if order.courierId === courier.id
+      // Find an order that is already 'delivering' AND assigned to this courier
       const inProgressOrder = availableOrders.find(o => 
           o.status === 'delivering' && 
-          o.deliveryType === 'chegoou'
+          o.deliveryType === 'chegoou' &&
+          o.courierId === courier.id
       );
 
       if (inProgressOrder) {
           setActiveOrder(inProgressOrder);
       }
-  }, [availableOrders]);
+  }, [availableOrders, courier.id]);
 
   // --- GEOLOCATION TRACKING ---
   useEffect(() => {
@@ -95,7 +129,6 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
             if (o.deliveryType !== 'chegoou') return false;
 
             // 2. Check Status: Only show available orders. 
-            // 'delivering' orders are handled by activeOrder state, so exclude them from the list.
             if (o.status !== 'ready' && o.status !== 'waiting_courier') return false;
 
             return true;
@@ -129,10 +162,44 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
     }
   };
 
-  const handleWithdrawRequest = () => {
-      setWithdrawalSent(true);
-      // In a real app, this would call an API
-      alert("Solicitação de saque enviada com sucesso! O admin analisará em até 24h.");
+  const handleWithdrawRequest = async () => {
+      if (financialStats.availableBalance <= 0) {
+          alert("Saldo insuficiente para saque.");
+          return;
+      }
+      
+      const pixKey = prompt("Confirme sua chave PIX para receber:");
+      if (!pixKey) return;
+
+      setIsWithdrawing(true);
+      try {
+           const { data, error } = await supabase.functions.invoke('smart-api', {
+               body: {
+                   amount: financialStats.availableBalance,
+                   pixKey: pixKey,
+                   pixKeyType: 'email', // Default fallback
+                   userId: courier.id,
+                   userName: courier.name
+               }
+           });
+
+           if (error) throw error;
+
+           // Save record locally if function succeeds (or rely on function insert, here we manually refresh)
+           if (data) {
+                // Refresh local history
+                const { data: updatedHistory } = await supabase.from('withdrawal_requests').select('*').eq('userId', courier.id);
+                if (updatedHistory) setWithdrawHistory(updatedHistory);
+                
+                alert("Solicitação enviada com sucesso! O pagamento cairá na sua conta em breve.");
+           }
+
+      } catch (e: any) {
+          console.error("Withdrawal error:", e);
+          alert("Erro ao solicitar saque: " + (e.message || "Erro desconhecido"));
+      } finally {
+          setIsWithdrawing(false);
+      }
   };
 
   // Helper to open Google Maps with Route
@@ -201,23 +268,23 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
         <div className="p-4 grid grid-cols-2 gap-4">
             <div className="bg-white p-4 rounded-xl shadow-sm col-span-2 md:col-span-1 flex justify-between items-center">
                 <div>
-                    <p className="text-xs text-gray-500">Saldo a Receber</p>
-                    <h3 className="text-xl font-bold text-gray-800">R$ 145,00</h3>
+                    <p className="text-xs text-gray-500 uppercase font-bold">Saldo a Receber</p>
+                    <h3 className="text-xl font-bold text-green-600">R$ {financialStats.availableBalance.toFixed(2)}</h3>
                 </div>
                 <button 
                     onClick={handleWithdrawRequest}
-                    disabled={withdrawalSent}
+                    disabled={isWithdrawing || financialStats.availableBalance <= 0}
                     className={`text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors flex items-center gap-1
-                        ${withdrawalSent ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'}
+                        ${isWithdrawing || financialStats.availableBalance <= 0 ? 'bg-gray-300 cursor-not-allowed text-gray-500' : 'bg-green-600 hover:bg-green-700'}
                     `}
                 >
-                    <DollarSign className="w-4 h-4" /> 
-                    {withdrawalSent ? 'Solicitado' : 'Solicitar Saque'}
+                    {isWithdrawing ? <Loader2 className="w-4 h-4 animate-spin"/> : <DollarSign className="w-4 h-4" />}
+                    Solicitar Saque
                 </button>
             </div>
             <div className="bg-white p-4 rounded-xl shadow-sm col-span-2 md:col-span-1">
-                <p className="text-xs text-gray-500">Corridas Hoje</p>
-                <h3 className="text-xl font-bold text-gray-800">8</h3>
+                <p className="text-xs text-gray-500 uppercase font-bold">Corridas Entregues</p>
+                <h3 className="text-xl font-bold text-gray-800">{financialStats.deliveriesCount}</h3>
             </div>
         </div>
 

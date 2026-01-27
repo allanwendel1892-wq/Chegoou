@@ -595,7 +595,7 @@ const AdminView: React.FC<AdminViewProps> = ({
                     <div className="space-y-3 text-sm text-gray-600 bg-white/50 p-4 rounded-xl mb-4">
                         <div className="flex justify-between border-b border-gray-200/50 pb-2">
                             <span>Taxa Transação Bancária</span>
-                            <span className="font-bold text-gray-900">R$ {company.serviceFeePercentage?.toFixed(2)}</span>
+                            <span className="font-bold text-gray-900">{company.serviceFeePercentage?.toFixed(2)}%</span>
                         </div>
                         <div className="flex justify-between border-b border-gray-200/50 pb-2">
                             <span>Logística</span>
@@ -1068,15 +1068,15 @@ const AdminView: React.FC<AdminViewProps> = ({
 
                       <div className="grid grid-cols-2 gap-4">
                           <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase">Taxa de Transação Bancária (R$)</label>
+                            <label className="text-xs font-bold text-gray-500 uppercase">Taxa de Transação Bancária (%)</label>
                             <input 
                                 type="number"
                                 value={editingCompany.serviceFeePercentage} 
                                 onChange={e => setEditingCompany({...editingCompany, serviceFeePercentage: Number(e.target.value)})}
                                 className="w-full border rounded-lg px-3 py-2 mt-1"
-                                placeholder="Ex: 1.00"
+                                placeholder="Ex: 2.5"
                             />
-                            <p className="text-[10px] text-gray-400 mt-1">Valor fixo cobrado no saque.</p>
+                            <p className="text-[10px] text-gray-400 mt-1">Porcentagem descontada do valor do saque.</p>
                           </div>
                           <div>
                             <label className="text-xs font-bold text-gray-500 uppercase">Status</label>
