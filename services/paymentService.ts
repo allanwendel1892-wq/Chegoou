@@ -13,6 +13,9 @@ export interface PaymentResponse {
   message?: string;
 }
 
+// Hardcoded for robustness against client config issues
+const FUNCTION_URL = 'https://shpdyqsrqudtwagqwart.supabase.co/functions/v1/create-payment';
+
 export const PaymentService = {
   /**
    * Process a REAL payment request via Supabase Edge Functions.
@@ -34,10 +37,14 @@ export const PaymentService = {
       console.log(`[PaymentService] Iniciando transação real via ${method}`);
       const currentUrl = window.location.origin.replace(/\/$/, "");
 
-      // Send request to Edge Function
-      // Note: Removed manual Authorization header to let Supabase client handle it
-      const { data, error } = await supabase.functions.invoke('create-payment', {
-        body: {
+      // Use native fetch instead of supabase.functions.invoke to avoid client library wrapper issues
+      const response = await fetch(FUNCTION_URL, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
           action: 'create',
           amount,
           method,
@@ -46,13 +53,23 @@ export const PaymentService = {
           token: cardToken,
           orderId: orderId,
           origin: currentUrl,
-        }
+        })
       });
 
-      if (error) {
-        console.error("[PaymentService] Erro na Edge Function:", error);
-        throw new Error(error.message || "Erro de comunicação com o servidor de pagamento (Edge Function).");
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorJson;
+        try {
+            errorJson = JSON.parse(errorText);
+        } catch (e) {
+            // Ignore parse error
+        }
+        
+        console.error("[PaymentService] Erro HTTP:", response.status, errorText);
+        throw new Error(errorJson?.error || `Erro de comunicação: ${response.status}`);
       }
+
+      const data = await response.json();
 
       if (!data || data.error) {
          throw new Error(data?.error || "Pagamento recusado pelo processador.");
@@ -82,15 +99,26 @@ export const PaymentService = {
       try {
           console.log(`[PaymentService] Iniciando estorno para Payment ID: ${paymentId}`);
 
-          const { data, error } = await supabase.functions.invoke('create-payment', {
-              body: {
-                  action: 'refund', // IMPORTANTE: Define que é um estorno
-                  paymentId: paymentId
-              }
+          const response = await fetch(FUNCTION_URL, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              action: 'refund',
+              paymentId: paymentId
+            })
           });
 
-          if (error) throw error;
-          if (!data || !data.success) throw new Error(data?.error || "Falha ao processar estorno.");
+          if (!response.ok) {
+             const errorText = await response.text();
+             throw new Error(`Erro HTTP ${response.status}: ${errorText}`);
+          }
+
+          const data = await response.json();
+
+          if (!data.success) throw new Error(data?.error || "Falha ao processar estorno.");
 
           return {
               success: true,

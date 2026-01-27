@@ -29,6 +29,7 @@ serve(async (req) => {
         if (text) body = JSON.parse(text);
     } catch (e) {
         console.error("Erro parsing body:", e);
+        // Continue com body vazio se falhar, validação abaixo vai pegar os campos faltantes
     }
     
     const { 
@@ -42,7 +43,7 @@ serve(async (req) => {
       origin 
     } = body;
 
-    console.log(`Action: ${action}, Method: ${method}`);
+    console.log(`Action: ${action}, Method: ${method}, Amount: ${amount}`);
 
     // =================================================================
     // AÇÃO: ESTORNO (REFUND)
