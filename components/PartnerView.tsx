@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem, WithdrawalRequest } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
@@ -196,7 +194,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   
   const [editingProductId, setEditingProductId] = useState<string | null>(null); 
-  const [productToDelete, setProductToDelete] = useState<string | null>(null); 
+  const [productToDelete, setProductToDelete] = useState<string | null>(null);
+  const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false); // NEW STATE FOR MODAL
   
   const [newProduct, setNewProduct] = useState<Partial<Product>>({
       isAvailable: true,
@@ -233,8 +232,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             o.repasseStatus === 'blocked' && 
             o.repasseDate && 
             o.paymentMethod !== 'cash' && 
-            o.status !== 'cancelled' && // Security check: never unlock cancelled orders
-            (now.getTime() - new Date(o.repasseDate).getTime()) > 24 * 60 * 60 * 1000 // > 24 hours
+            o.status !== 'cancelled' && 
+            (now.getTime() - new Date(o.repasseDate).getTime()) > 24 * 60 * 60 * 1000 
         );
 
         if (ordersToUnlock.length > 0) {
@@ -265,14 +264,10 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   }, [view, company.id]);
 
   const financialSummary = useMemo(() => {
-      // 1. Blocked Balance: Delivered but < 24h (EXCLUDING CASH AND CANCELLED)
-      // FIX: Added `&& o.status !== 'cancelled'` to double check data integrity.
       const blocked = orders
         .filter(o => o.repasseStatus === 'blocked' && o.paymentMethod !== 'cash' && o.status !== 'cancelled')
         .reduce((acc, o) => acc + (o.repasseValue || 0), 0);
 
-      // 2. Available Balance: Delivered > 24h (status 'available') MINUS Pending/Paid Withdrawals (EXCLUDING CASH AND CANCELLED)
-      // FIX: Added `&& o.status !== 'cancelled'` to double check data integrity.
       const totalAvailableFromOrders = orders
         .filter(o => o.repasseStatus === 'available' && o.paymentMethod !== 'cash' && o.status !== 'cancelled')
         .reduce((acc, o) => acc + (o.repasseValue || 0), 0);
@@ -290,7 +285,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       return { blocked, available, paid };
   }, [orders, withdrawHistory]);
 
-  const handleRequestWithdraw = async () => {
+  const handleRequestWithdraw = () => {
       if (!localCompany.pixKey) {
           alert("Configure sua chave Pix nas configurações antes de solicitar saque.");
           setView(ViewState.SETTINGS);
@@ -302,26 +297,55 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           return;
       }
 
-      if (confirm(`Confirmar solicitação de saque de R$ ${financialSummary.available.toFixed(2)} para o Pix ${localCompany.pixKey}?`)) {
-           const newRequest: WithdrawalRequest = {
-               id: `wd-${Date.now()}`,
-               userId: company.id,
-               userName: company.name,
-               userType: 'partner',
-               amount: financialSummary.available,
-               status: 'pending',
-               date: new Date().toISOString(),
-               bankInfo: `${localCompany.pixKeyType?.toUpperCase()}: ${localCompany.pixKey}`
-           };
+      // NO CONFIRM HERE - OPEN CUSTOM MODAL
+      setIsWithdrawModalOpen(true);
+  };
 
-           const { error } = await supabase.from('withdrawal_requests').insert([newRequest]);
+  const executeWithdrawal = async () => {
+       setIsWithdrawModalOpen(false); // Close Modal
+       setIsLoadingFinance(true);
+       try {
+           console.log("Enviando solicitação para Edge Function...");
+           
+           // Invoke Supabase Function
+           const { data, error } = await supabase.functions.invoke('process-withdraw', {
+               body: {
+                   amount: financialSummary.available,
+                   pixKey: localCompany.pixKey,
+                   pixKeyType: localCompany.pixKeyType || 'email',
+                   userId: company.id,
+                   userName: company.name
+               }
+           });
+
            if (error) {
-               alert("Erro ao solicitar saque.");
-           } else {
-               alert("Solicitação enviada! O valor será transferido em breve.");
-               setWithdrawHistory([newRequest, ...withdrawHistory]);
+               console.error("Erro na Edge Function:", error);
+               let msg = error.message;
+               try {
+                   const body = typeof error === 'string' ? JSON.parse(error) : error;
+                   if (body && body.error) msg = body.error;
+               } catch(e) {}
+               throw new Error(msg);
            }
-      }
+
+           console.log("Edge Function Success:", data);
+           alert("Solicitação enviada com sucesso! O pagamento será processado em breve.");
+           
+           // Refresh history
+           const { data: updatedHistory } = await supabase
+                .from('withdrawal_requests')
+                .select('*')
+                .eq('userId', company.id)
+                .order('date', {ascending: false});
+                
+           if (updatedHistory) setWithdrawHistory(updatedHistory);
+
+       } catch (e: any) {
+           console.error("Erro no catch:", e);
+           alert("Erro ao processar saque: " + (e.message || "Falha na comunicação com o servidor."));
+       } finally {
+           setIsLoadingFinance(false);
+       }
   };
 
   // --- END FINANCEIRO ---
@@ -627,6 +651,32 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   return (
     <div className="flex h-screen bg-gray-50 relative">
         
+        {/* WITHDRAWAL MODAL - REPLACES WINDOW.CONFIRM */}
+        {isWithdrawModalOpen && (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+                <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-scale-in">
+                    <h3 className="text-xl font-bold text-gray-900 mb-2">Confirmar Saque</h3>
+                    <p className="text-gray-600 mb-6">
+                        Deseja transferir <span className="font-bold text-gray-900">R$ {financialSummary.available.toFixed(2)}</span> para a chave Pix <span className="font-mono bg-gray-100 px-1 rounded">{localCompany.pixKey}</span>?
+                    </p>
+                    <div className="flex gap-3">
+                        <button 
+                            onClick={() => setIsWithdrawModalOpen(false)}
+                            className="flex-1 py-3 rounded-xl bg-gray-100 font-bold text-gray-600 hover:bg-gray-200 transition-colors"
+                        >
+                            Cancelar
+                        </button>
+                        <button 
+                            onClick={executeWithdrawal}
+                            className="flex-1 py-3 rounded-xl bg-green-600 font-bold text-white hover:bg-green-700 shadow-lg shadow-green-200 transition-colors"
+                        >
+                            Confirmar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+
         {productToDelete && (
             <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
                 <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-scale-in">
@@ -655,6 +705,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             </div>
         )}
 
+        {/* ... Rest of existing JSX ... */}
         {editingOrder && (
              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
                  <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl animate-scale-in overflow-hidden max-h-[90vh] flex flex-col">
@@ -1492,6 +1543,32 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             )}
         </div>
       </div>
+
+      {/* WITHDRAWAL MODAL - REPLACES WINDOW.CONFIRM */}
+      {isWithdrawModalOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-scale-in">
+                <h3 className="text-xl font-bold text-gray-900 mb-2">Confirmar Saque</h3>
+                <p className="text-gray-600 mb-6">
+                    Deseja transferir <span className="font-bold text-gray-900">R$ {financialSummary.available.toFixed(2)}</span> para a chave Pix <span className="font-mono bg-gray-100 px-1 rounded">{localCompany.pixKey}</span>?
+                </p>
+                <div className="flex gap-3">
+                    <button 
+                        onClick={() => setIsWithdrawModalOpen(false)}
+                        className="flex-1 py-3 rounded-xl bg-gray-100 font-bold text-gray-600 hover:bg-gray-200 transition-colors"
+                    >
+                        Cancelar
+                    </button>
+                    <button 
+                        onClick={executeWithdrawal}
+                        className="flex-1 py-3 rounded-xl bg-green-600 font-bold text-white hover:bg-green-700 shadow-lg shadow-green-200 transition-colors"
+                    >
+                        Confirmar
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
 
       {showMapModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in h-full">
