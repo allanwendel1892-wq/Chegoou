@@ -23,7 +23,7 @@ interface ClientViewProps {
   onRemoveAddress: (index: number) => void;
   onAddCard: (card: CreditCardType) => void;
   onRemoveCard: (index: number) => void;
-  onCancelOrder: (orderId: string) => void; // New prop
+  onCancelOrder: (orderId: string) => void;
 }
 
 // --- UTILS ---
@@ -38,11 +38,8 @@ const isMatch = (sourceText: string, searchTerm: string) => {
 
 const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   if (!Number.isFinite(lat1) || !Number.isFinite(lon1) || !Number.isFinite(lat2) || !Number.isFinite(lon2)) return Infinity;
-  // Check for default SP coordinates or 0,0
   const isDefault = (lat: number, lng: number) => (Math.abs(lat) < 0.0001 && Math.abs(lng) < 0.0001) || (Math.abs(lat - (-23.550520)) < 0.0001 && Math.abs(lng - (-46.633308)) < 0.0001);
-  
   if (isDefault(lat1, lon1) || isDefault(lat2, lon2)) return Infinity;
-
   const R = 6371; 
   const dLat = (lat2 - lat1) * (Math.PI / 180);
   const dLon = (lon2 - lon1) * (Math.PI / 180);
@@ -100,7 +97,6 @@ const ClientView: React.FC<ClientViewProps> = ({
   const [chatInput, setChatInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // New State for Pix Feedback
   const [copiedPix, setCopiedPix] = useState<string | null>(null);
 
   const [showMapModal, setShowMapModal] = useState(false);
@@ -111,7 +107,6 @@ const ClientView: React.FC<ClientViewProps> = ({
   const [isMapDragging, setIsMapDragging] = useState(false);
   const [mapError, setMapError] = useState(false);
 
-  // Map Initialization
   useEffect(() => {
     let map: any;
     const initMap = () => {
@@ -236,25 +231,14 @@ const ClientView: React.FC<ClientViewProps> = ({
           changeForValue = parseFloat(changeAmount.replace(',','.'));
           if (changeForValue < finalTotal) { alert("Troco deve ser maior que o total."); return; }
       }
-      
       setIsProcessingPayment(true);
-      
       const success = await onPlaceOrder(cart, cart[0].product.companyId, finalTotal, deliveryMethod, serviceFeeValue, activeDeliveryFee, productTotal, paymentMethod, changeForValue); 
-      
       setIsProcessingPayment(false);
-      
       if (success) {
           setIsCartOpen(false); 
           setCart([]); 
           setSelectedCompany(null); 
           setChangeAmount('');
-          
-          if (paymentMethod === 'cash') {
-            alert("Pedido realizado com sucesso!");
-          } else {
-             // alert("Pedido realizado! Aguardando confirmação do pagamento pelo sistema.");
-             // UX: Silent redirect to Orders tab to see the QR Code
-          }
           setActiveTab('orders');
       }
   };
@@ -415,7 +399,6 @@ const ClientView: React.FC<ClientViewProps> = ({
             ) : (
                 <div className="p-4 space-y-4">
                     {myOrders.map(order => {
-                        // Estimated time logic: Order time + 45 mins
                         const estimateTime = new Date(new Date(order.timestamp).getTime() + 45*60000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
 
                         return (
@@ -452,7 +435,6 @@ const ClientView: React.FC<ClientViewProps> = ({
                                     </span>
                                 </div>
 
-                                {/* ESTIMATE & DELIVERY CODE */}
                                 {order.status !== 'delivered' && order.status !== 'cancelled' && (
                                     <div className="flex justify-between items-center mb-4 p-3 bg-gray-50 rounded-xl border border-gray-100">
                                         <div className="flex flex-col">
@@ -470,7 +452,6 @@ const ClientView: React.FC<ClientViewProps> = ({
                                     </div>
                                 )}
 
-                                {/* --- PAYMENT AREA (PIX) --- */}
                                 {order.status === 'waiting_payment' && (
                                     <div className="mb-5 animate-slide-up">
                                         {order.paymentMethod === 'pix' ? (
@@ -489,7 +470,6 @@ const ClientView: React.FC<ClientViewProps> = ({
                                                         </div>
                                                     </div>
 
-                                                    {/* QR Code Image Display */}
                                                     {order.paymentPixImage && (
                                                         <div className="flex justify-center mb-6">
                                                             <div className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
@@ -527,7 +507,6 @@ const ClientView: React.FC<ClientViewProps> = ({
                                                         )}
                                                     </button>
 
-                                                    {/* Polling/Verification Indicator */}
                                                     <div className="mt-4 flex items-center justify-center gap-2 text-green-700 bg-green-100/50 p-2 rounded-lg border border-green-100">
                                                         <span className="relative flex h-2.5 w-2.5">
                                                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
@@ -576,7 +555,6 @@ const ClientView: React.FC<ClientViewProps> = ({
                                             Ajuda
                                         </button>
                                         
-                                        {/* --- CLIENT CANCEL BUTTON --- */}
                                         {(order.status === 'pending' || order.status === 'waiting_payment') && (
                                             <button 
                                                 onClick={() => onCancelOrder(order.id)}
@@ -709,7 +687,6 @@ const ClientView: React.FC<ClientViewProps> = ({
                     <div className="flex justify-between items-center mb-6"><h2 className="font-bold text-xl text-gray-800">Sacola</h2><button onClick={() => setIsCartOpen(false)}><X/></button></div>
                     <div className="flex bg-gray-100 p-1 rounded-xl mb-4"><button onClick={() => setDeliveryMethod('delivery')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${deliveryMethod === 'delivery' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Entrega</button><button onClick={() => setDeliveryMethod('pickup')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${deliveryMethod === 'pickup' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Retirada</button></div>
                     
-                    {/* RESTAURANT ADDRESS FOR PICKUP (Inside Cart) */}
                     {deliveryMethod === 'pickup' && activeCompanyData?.address && (
                         <div className="bg-orange-50 p-3 rounded-xl border border-orange-100 mb-4 text-sm animate-fade-in">
                             <p className="font-bold text-orange-800 flex items-center gap-1 mb-1">
@@ -754,16 +731,13 @@ const ClientView: React.FC<ClientViewProps> = ({
 
        {customizingProduct && (
            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-               {/* MODAL FIX: Flex col + max-height + overflow-y-auto on content */}
                <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl relative flex flex-col max-h-[90vh] overflow-hidden">
                    
-                   {/* FIXED HEADER */}
                    <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-white z-10 shrink-0">
                         <h2 className="font-bold text-xl truncate pr-8">{customizingProduct.name}</h2>
                         <button onClick={() => setCustomizingProduct(null)} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X className="w-5 h-5"/></button>
                    </div>
                    
-                   {/* SCROLLABLE CONTENT */}
                    <div className="p-4 overflow-y-auto flex-1">
                        {customizingProduct.groups.map(g => (
                            <div key={g.id} className="mb-4">
@@ -777,16 +751,9 @@ const ClientView: React.FC<ClientViewProps> = ({
                                        onClick={() => setSelections(prev => { 
                                            const curr = prev[g.id] || []; 
                                            const exists = curr.find(x => x.id === o.id); 
-                                           
-                                           // Toggle logic
                                            if (exists) return { ...prev, [g.id]: curr.filter(x => x.id !== o.id) }; 
-                                           
-                                           // Single choice logic
                                            if (curr.length >= g.max && g.max === 1) return { ...prev, [g.id]: [o] }; 
-                                           
-                                           // Max limit logic
                                            if (curr.length >= g.max) return prev; 
-                                           
                                            return { ...prev, [g.id]: [...curr, o] }; 
                                        })} 
                                        className={`p-3 border rounded-xl mt-2 flex justify-between items-center cursor-pointer transition-all active:scale-[0.98] 
@@ -807,7 +774,6 @@ const ClientView: React.FC<ClientViewProps> = ({
                        ))}
                    </div>
                    
-                   {/* FIXED FOOTER */}
                    <div className="p-4 border-t border-gray-100 bg-gray-50 shrink-0">
                        <button 
                            onClick={() => { 
@@ -830,8 +796,11 @@ const ClientView: React.FC<ClientViewProps> = ({
        {activeTab === 'home' && renderHome()}
        {activeTab === 'orders' && renderOrders()}
        {activeTab === 'profile' && renderProfile()}
-       {cart.length > 0 && !isCartOpen && (<div className="fixed bottom-20 left-0 right-0 px-4 z-20 flex justify-center animate-fade-in-up pointer-events-none"><button onClick={() => setIsCartOpen(true)} className="bg-brand text-white w-full max-w-md shadow-xl shadow-red-200/50 rounded-xl p-3 flex justify-between items-center font-bold pointer-events-auto transform active:scale-95 transition-all"><div className="flex items-center gap-3"><div className="bg-white/20 w-8 h-8 rounded-full flex items-center justify-center text-sm">{cart.reduce((acc, i) => acc + i.quantity, 0)}</div><span className="text-sm">Ver Sacola</span></div><div className="flex items-center gap-2"><span className="text-sm">R$ {productTotal.toFixed(2)}</span><ShoppingBag className="w-5 h-5 fill-white/20" /></div></button></div>)}
-       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 py-2 px-6 flex justify-between items-center z-30"><button onClick={() => { setActiveTab('home'); setSubView('none'); }} className={`flex flex-col items-center gap-1 ${activeTab === 'home' ? 'text-brand' : 'text-gray-400'}`}><Home className={`w-6 h-6 ${activeTab === 'home' ? 'fill-current' : ''}`} /><span className="text-[10px] font-bold">Início</span></button><button onClick={() => { setActiveTab('orders'); setSubView('none'); }} className={`flex flex-col items-center gap-1 ${activeTab === 'orders' ? 'text-brand' : 'text-gray-400'}`}><FileText className={`w-6 h-6 ${activeTab === 'orders' ? 'fill-current' : ''}`} /><span className="text-[10px] font-bold">Pedidos</span></button><button onClick={() => { setActiveTab('profile'); setSubView('none'); }} className={`flex flex-col items-center gap-1 ${activeTab === 'profile' ? 'text-brand' : 'text-gray-400'}`}><UserIcon className={`w-6 h-6 ${activeTab === 'profile' ? 'fill-current' : ''}`} /><span className="text-[10px] font-bold">Perfil</span></button></div>
+       {/* MUDANÇA: bottom ajustado com calc() para subir se tiver barra de gestos */}
+       {cart.length > 0 && !isCartOpen && (<div className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] left-0 right-0 px-4 z-20 flex justify-center animate-fade-in-up pointer-events-none"><button onClick={() => setIsCartOpen(true)} className="bg-brand text-white w-full max-w-md shadow-xl shadow-red-200/50 rounded-xl p-3 flex justify-between items-center font-bold pointer-events-auto transform active:scale-95 transition-all"><div className="flex items-center gap-3"><div className="bg-white/20 w-8 h-8 rounded-full flex items-center justify-center text-sm">{cart.reduce((acc, i) => acc + i.quantity, 0)}</div><span className="text-sm">Ver Sacola</span></div><div className="flex items-center gap-2"><span className="text-sm">R$ {productTotal.toFixed(2)}</span><ShoppingBag className="w-5 h-5 fill-white/20" /></div></button></div>)}
+       
+       {/* MUDANÇA: Trocamos py-2 por pt-2 e pb com cálculo da safe-area */}
+       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 pt-2 pb-[calc(8px+env(safe-area-inset-bottom))] px-6 flex justify-between items-center z-30"><button onClick={() => { setActiveTab('home'); setSubView('none'); }} className={`flex flex-col items-center gap-1 ${activeTab === 'home' ? 'text-brand' : 'text-gray-400'}`}><Home className={`w-6 h-6 ${activeTab === 'home' ? 'fill-current' : ''}`} /><span className="text-[10px] font-bold">Início</span></button><button onClick={() => { setActiveTab('orders'); setSubView('none'); }} className={`flex flex-col items-center gap-1 ${activeTab === 'orders' ? 'text-brand' : 'text-gray-400'}`}><FileText className={`w-6 h-6 ${activeTab === 'orders' ? 'fill-current' : ''}`} /><span className="text-[10px] font-bold">Pedidos</span></button><button onClick={() => { setActiveTab('profile'); setSubView('none'); }} className={`flex flex-col items-center gap-1 ${activeTab === 'profile' ? 'text-brand' : 'text-gray-400'}`}><UserIcon className={`w-6 h-6 ${activeTab === 'profile' ? 'fill-current' : ''}`} /><span className="text-[10px] font-bold">Perfil</span></button></div>
        
        {showMapModal && (<div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in h-full"><div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl flex flex-col h-[90%] relative"><div className="absolute top-0 left-0 right-0 p-4 z-10 flex justify-between items-start pointer-events-none"><div className="bg-white/95 backdrop-blur px-4 py-2 rounded-xl shadow-md border border-gray-100 pointer-events-auto"><h3 className="font-bold text-gray-800 flex items-center gap-2"><Navigation className="w-4 h-4 text-brand" /> Definir Localização</h3><p className="text-xs text-gray-500">Mova o pin para o endereço correto.</p></div><button onClick={() => setShowMapModal(false)} className="bg-white p-2 rounded-full shadow-md hover:bg-gray-100 pointer-events-auto"><X className="w-6 h-6 text-gray-500" /></button></div><div className="flex-1 bg-gray-100 relative group overflow-hidden">{mapError ? (<div className="w-full h-full flex flex-col items-center justify-center text-center p-8"><MapIcon className="w-16 h-16 text-gray-300"/><p>Erro no Mapa</p></div>) : (<><div ref={mapContainerRef} className="w-full h-full" /><div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-20 pointer-events-none transition-all duration-300 ease-out ${isMapDragging ? '-mt-16 scale-110' : '-mt-8'}`}><div className="w-12 h-12 bg-brand rounded-full flex items-center justify-center shadow-2xl border-[3px] border-white"><MapPin className="w-6 h-6 text-white fill-current" /></div><div className={`w-2 h-8 bg-black/80 rounded-full -mt-2 blur-[1px] transition-opacity duration-300 ${isMapDragging ? 'opacity-0' : 'opacity-20'}`}></div></div>{!isMapDragging && <div className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-3 py-1.5 rounded-full pointer-events-none flex items-center gap-2 animate-pulse"><MousePointer2 className="w-3 h-3" /> Arraste o mapa</div>}</>)}</div><div className="p-6 bg-white border-t border-gray-100 rounded-t-3xl -mt-6 relative z-30 shadow-[0_-5px_20px_rgba(0,0,0,0.05)]"><div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"><div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"></div><div className="flex items-start gap-3 mb-6"><div className="p-2 bg-brandLight rounded-lg shrink-0"><MapPin className="w-6 h-6 text-brand" /></div><div className="flex-1"><p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Endereço Selecionado</p><h4 className="font-bold text-gray-900 text-lg leading-tight line-clamp-2">{mapAddress || 'Carregando endereço...'}</h4></div></div><button onClick={() => setShowMapModal(false)} className="w-full bg-brand text-white font-bold py-3.5 rounded-xl hover:bg-brandHover shadow-lg flex items-center justify-center gap-2"><CheckCircle className="w-5 h-5" /> Confirmar</button></div></div></div></div>)}
     </div>

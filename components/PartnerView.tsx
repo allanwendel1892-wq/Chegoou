@@ -18,22 +18,18 @@ interface PartnerViewProps {
   onUpdateProduct: (product: Product) => void; 
   onDeleteProduct: (productId: string) => void; 
   onLogout: () => void;
-  // Chat Props
   chats: Record<string, ChatMessage[]>;
   onSendMessage: (orderId: string, text: string, senderId: string, role: 'client' | 'partner') => void;
-  // Order Edit Props
   onUpdateFullOrder: (order: Order) => void;
   onDeleteOrder: (orderId: string) => void;
 }
 
-// EXACT MATCH WITH CLIENT VIEW CATEGORIES
 const COMPANY_CATEGORIES = [
     "Lanches", "Pizza", "Japonesa", "Brasileira", "Açaí", 
     "Doces & Bolos", "Saudável", "Italiana", "Bebidas", "Padaria", 
     "Sorvetes", "Carnes", "Mercado", "Asiática"
 ];
 
-// --- KANBAN COLUMN COMPONENT ---
 interface KanbanColumnProps {
   title: string;
   status: Order['status'];
@@ -42,7 +38,6 @@ interface KanbanColumnProps {
   isLast?: boolean;
   onClickOrder: (order: Order) => void;
   onDrop: (orderId: string, status: Order['status']) => void;
-  // Chat Integration
   chats: Record<string, ChatMessage[]>;
   onOpenChat: (orderId: string) => void;
 }
@@ -108,8 +103,6 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                               {new Date(order.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                           </span>
                       </div>
-                      
-                      {/* DELIVERY METHOD INDICATOR */}
                       <div className="mb-3">
                           {order.deliveryMethod === 'pickup' ? (
                               <span className="inline-flex items-center gap-1.5 bg-purple-50 text-purple-700 border border-purple-100 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide">
@@ -121,22 +114,18 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                               </span>
                           )}
                       </div>
-
                       <div className="flex items-center gap-2 mb-3">
                           <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center font-bold text-gray-600 text-xs">
                               {order.customerName.charAt(0)}
                           </div>
                           <span className="text-sm font-medium text-gray-800">{order.customerName}</span>
                       </div>
-                      
-                      {/* ORDER ITEMS LIST WITH OPTIONS */}
                       <div className="space-y-2 bg-gray-50 p-2.5 rounded-lg mb-3 border border-gray-100">
                           {order.items.slice(0, 3).map((item, idx) => (
                               <div key={idx} className="flex flex-col border-b border-gray-100 last:border-0 pb-1 last:pb-0">
                                   <div className="text-xs text-gray-800 font-medium flex justify-between">
                                       <span>{item.quantity}x {item.productName}</span>
                                   </div>
-                                  {/* RENDER SELECTED OPTIONS (FLAVORS) HERE */}
                                   {item.selectedOptions && item.selectedOptions.length > 0 && (
                                       <div className="pl-3 mt-0.5 space-y-0.5">
                                           {item.selectedOptions.map((opt, optIdx) => (
@@ -150,8 +139,6 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                           ))}
                           {order.items.length > 3 && <div className="text-[10px] text-center text-gray-400 font-medium pt-1">Ver mais {order.items.length - 3} itens...</div>}
                       </div>
-                      
-                      {/* PAYMENT BADGE */}
                       {order.paymentMethod === 'cash' && (
                           <div className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-1 rounded mb-2 flex items-center gap-1 border border-green-200">
                               <DollarSign className="w-3 h-3"/>
@@ -164,12 +151,9 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                                Aguardando Pagamento
                            </div>
                       )}
-
                       <div className="flex justify-between items-center pt-2 border-t border-gray-50 mt-2">
                           <span className="font-bold text-sm">R$ {order.total.toFixed(2)}</span>
-                          
                           <div className="flex items-center gap-2">
-                              {/* CHAT BUTTON IN CARD */}
                               <button 
                                 onClick={(e) => { e.stopPropagation(); onOpenChat(order.id); }}
                                 className={`p-2 rounded-full transition-all flex items-center gap-1
@@ -183,7 +167,6 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                                   <MessageCircle className="w-4 h-4" />
                                   {hasUnread && <span className="text-[10px] font-bold">Novo</span>}
                               </button>
-                              
                               <div className={`w-2 h-2 rounded-full ${color.replace('border-', 'bg-').replace('200', '500')}`}></div>
                           </div>
                       </div>
@@ -210,7 +193,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   
-  // --- PRODUCT FORM STATE ---
   const [editingProductId, setEditingProductId] = useState<string | null>(null); 
   const [productToDelete, setProductToDelete] = useState<string | null>(null); 
   
@@ -221,21 +203,13 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       groups: []
   });
   
-  // UI State for Group Management
   const [activeGroupIndex, setActiveGroupIndex] = useState<number | null>(null);
-
   const [generatingAi, setGeneratingAi] = useState(false);
   const [productImagePreview, setProductImagePreview] = useState<string>('');
-
-  // --- CHAT STATE ---
   const [activeChatOrder, setActiveChatOrder] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // --- ORDER EDIT STATE ---
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
-
-  // --- SETTINGS LOCAL STATE & MAP LOGIC ---
   const [localCompany, setLocalCompany] = useState<Company>(company);
   const [showMapModal, setShowMapModal] = useState(false);
   const [loadingCep, setLoadingCep] = useState(false);
@@ -245,40 +219,27 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const [isMapDragging, setIsMapDragging] = useState(false);
   const [mapError, setMapError] = useState(false);
   
-  useEffect(() => {
-      setLocalCompany(company);
-  }, [company]);
+  useEffect(() => { setLocalCompany(company); }, [company]);
 
-  // --- DATA PROCESSING FOR DASHBOARD/AI ---
   const calculatedSalesHistory = useMemo(() => {
-      // 1. Group orders by date (YYYY-MM-DD)
       const grouped: Record<string, { revenue: number, count: number }> = {};
-      
       orders.forEach(o => {
           if (o.status === 'delivered' || o.status === 'delivering' || o.status === 'ready' || o.status === 'preparing' || o.status === 'pending') {
-              // Note: In real app, date should be order creation date.
-              // Assuming o.timestamp is a Date object or string
               const dateObj = new Date(o.timestamp);
-              const dateKey = dateObj.toLocaleDateString('en-CA'); // YYYY-MM-DD format
-              
+              const dateKey = dateObj.toLocaleDateString('en-CA');
               if (!grouped[dateKey]) grouped[dateKey] = { revenue: 0, count: 0 };
               grouped[dateKey].revenue += o.total;
               grouped[dateKey].count += 1;
           }
       });
-
-      // 2. Convert to array and sort
       const history: SalesHistoryItem[] = Object.keys(grouped).map(date => ({
-          date, // Display format can be handled in UI
+          date,
           revenue: grouped[date].revenue,
           ordersCount: grouped[date].count
       })).sort((a, b) => a.date.localeCompare(b.date));
-
-      // 3. Fill missing days (optional, simplified here to just return existing data)
-      return history.slice(-30); // Last 30 days
+      return history.slice(-30);
   }, [orders]);
 
-  // Map Initialization for Settings (Same logic as Admin/Client)
   useEffect(() => {
     let map: any;
     const initMap = () => {
@@ -364,7 +325,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
               const res = await fetch(`https://viacep.com.br/ws/${value}/json/`);
               const data = await res.json();
               if (!data.erro) {
-                  // 1. Update text
                   setLocalCompany(prev => ({ 
                       ...prev, 
                       address: { 
@@ -374,8 +334,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                           neighborhood: data.bairro 
                       } 
                   }));
-
-                  // 2. CRITICAL: Trigger Geocode to get lat/lng
                   if (window.google && window.google.maps) {
                       const geocoder = new window.google.maps.Geocoder();
                       const fullAddress = `${data.logradouro}, ${data.bairro}, ${data.localidade}, Brasil`;
@@ -402,7 +360,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chats, activeChatOrder]);
 
-  // --- HANDLERS ---
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, onSuccess: (base64: string) => void) => {
       const file = e.target.files?.[0];
       if (file) {
@@ -423,18 +380,13 @@ const PartnerView: React.FC<PartnerViewProps> = ({
         alert("Preencha o nome e categoria do produto para ajudar a IA.");
         return;
     }
-
     setGeneratingAi(true);
-    
-    // Call the updated service
     const enhancedImage = await enhanceProductImage(productImagePreview, newProduct.name, newProduct.category);
-    
     if (enhancedImage) {
         setProductImagePreview(enhancedImage);
     } else {
         alert("Não foi possível melhorar a imagem. Tente novamente.");
     }
-    
     setGeneratingAi(false);
   };
 
@@ -444,13 +396,10 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       setChatInput('');
   };
 
-  // --- ORDER EDITING HANDLERS ---
   const handleSaveEditingOrder = () => {
       if (editingOrder) {
-          // Recalculate total
           const itemsTotal = editingOrder.items.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-          const newTotal = itemsTotal + editingOrder.deliveryFee + editingOrder.serviceFee; // Include serviceFee
-          
+          const newTotal = itemsTotal + editingOrder.deliveryFee + editingOrder.serviceFee; 
           const finalOrder = { ...editingOrder, total: newTotal, subtotal: itemsTotal };
           onUpdateFullOrder(finalOrder);
           setEditingOrder(null);
@@ -473,7 +422,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       setEditingOrder({ ...editingOrder, items: newItems });
   };
 
-  // --- STRICT PARTNER CANCEL HANDLER ---
   const handlePartnerCancelOrder = () => {
       if (!editingOrder) return;
       if (window.confirm("ATENÇÃO: Deseja realmente CANCELAR este pedido? Se houve pagamento online, o estorno será iniciado automaticamente.")) {
@@ -482,7 +430,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       }
   };
 
-  // --- DRAG AND DROP HANDLER ---
   const handleDragDropOrder = (orderId: string, status: Order['status']) => {
       updateOrderStatus(orderId, status);
   };
@@ -513,7 +460,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       setNewProduct(prev => ({ ...prev, groups }));
   };
 
-  // --- PRODUCT CRUD HANDLERS ---
   const handleEditProduct = (product: Product) => {
       setNewProduct(product);
       setProductImagePreview(product.image);
@@ -565,7 +511,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           alert("Produto criado!");
       }
       
-      handleCancelEdit(); // Reset form
+      handleCancelEdit();
   };
 
   const handleSaveSettings = () => {
@@ -576,7 +522,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   return (
     <div className="flex h-screen bg-gray-50 relative">
         
-        {/* --- DELETE CONFIRMATION MODAL --- */}
         {productToDelete && (
             <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
                 <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-scale-in">
@@ -605,7 +550,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             </div>
         )}
 
-        {/* EDIT ORDER MODAL */}
         {editingOrder && (
              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
                  <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl animate-scale-in overflow-hidden max-h-[90vh] flex flex-col">
@@ -614,7 +558,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                          <button onClick={() => setEditingOrder(null)} className="p-2 hover:bg-gray-100 rounded-full"><X className="w-5 h-5"/></button>
                      </div>
                      <div className="p-6 overflow-y-auto space-y-6 flex-1">
-                         {/* Payment Info */}
                          <div className="bg-yellow-50 border border-yellow-100 p-4 rounded-xl">
                              <div className="flex justify-between items-center mb-2">
                                  <h4 className="font-bold text-sm text-yellow-800 uppercase">Pagamento</h4>
@@ -629,7 +572,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                              )}
                          </div>
 
-                         {/* Customer Info */}
                          <div className="space-y-4">
                              <h4 className="font-bold text-sm text-gray-500 uppercase tracking-wide">Dados do Cliente</h4>
                              <div className="grid grid-cols-2 gap-4">
@@ -652,7 +594,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                              </div>
                          </div>
 
-                         {/* Items Edit */}
                          <div className="space-y-4">
                              <h4 className="font-bold text-sm text-gray-500 uppercase tracking-wide">Itens do Pedido</h4>
                              <div className="bg-gray-50 rounded-xl p-4 space-y-4">
@@ -674,7 +615,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                                  </button>
                                              </div>
                                          </div>
-                                         {/* SHOW SELECTED OPTIONS IN EDIT MODAL */}
                                          {item.selectedOptions && item.selectedOptions.length > 0 && (
                                               <div className="pl-24 space-y-0.5 border-t border-gray-50 pt-1 mt-1">
                                                   {item.selectedOptions.map((opt, optIdx) => (
@@ -690,7 +630,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                              </div>
                          </div>
 
-                         {/* Status Edit */}
                          <div className="space-y-2">
                              <label className="text-xs font-bold text-gray-400 uppercase">Status do Pedido</label>
                              <select 
@@ -717,7 +656,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                              </p>
                          </div>
                          
-                         {/* CANCEL BUTTON FOR PARTNER */}
                          <button 
                             onClick={handlePartnerCancelOrder}
                             className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-4 py-3 rounded-xl font-bold flex items-center gap-2 transition-colors text-sm"
@@ -734,7 +672,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
              </div>
         )}
 
-        {/* --- CHAT OVERLAY --- */}
         {activeChatOrder && (
              <div className="fixed bottom-0 right-0 w-full sm:w-96 h-[500px] bg-white shadow-2xl z-40 rounded-t-3xl sm:rounded-tl-3xl border border-gray-200 flex flex-col animate-slide-up">
                  <div className="bg-red-600 text-white p-4 rounded-t-3xl flex justify-between items-center">
@@ -781,7 +718,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       />
 
       <div className="flex-1 overflow-auto flex flex-col">
-        {/* Mobile Header */}
         <div className="md:hidden bg-white p-4 flex justify-between items-center border-b border-gray-100 sticky top-0 z-20">
              <div className="flex items-center gap-2">
                  <Store className="w-6 h-6 text-red-600" />
@@ -811,7 +747,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         </div>
                     </div>
                     
-                    {/* KANBAN BOARD */}
                     <div className="flex-1 overflow-x-auto pb-4">
                         <div className="flex gap-4 h-full min-w-max px-1">
                             <KanbanColumn 
@@ -880,12 +815,9 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                 </div>
             )}
 
-            {/* Other Views... (Same as before, simplified for brevity in this XML change block but assumed present) */}
             {view === ViewState.MENU && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    {/* Add Product Form */}
                     <div className="lg:col-span-1 bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-fit sticky top-8">
-                        {/* ... (Existing Product Form Code) ... */}
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
                                 {editingProductId ? <Edit className="w-5 h-5 text-blue-600"/> : <Plus className="w-5 h-5 bg-red-100 text-red-600 rounded p-0.5" />} 
@@ -899,7 +831,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         </div>
                         
                         <div className="space-y-4">
-                            {/* Image Upload */}
                             <div className="w-full h-40 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center relative overflow-hidden group hover:border-red-300 transition-colors cursor-pointer">
                                 {productImagePreview ? (
                                     <img src={productImagePreview} className="w-full h-full object-cover" />
@@ -941,7 +872,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                         placeholder="0.00" 
                                     />
                                 </div>
-                                {/* UPDATED PRODUCT CATEGORY SELECT */}
                                 <div>
                                     <label className="text-xs font-bold text-gray-500 uppercase ml-1">Categoria</label>
                                     <select 
@@ -957,7 +887,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 </div>
                             </div>
                             
-                            {/* Pizza/Groups Config */}
                              <div className="bg-gray-50 rounded-xl p-3 border border-gray-200">
                                 <div className="flex justify-between items-center mb-2">
                                     <h4 className="font-bold text-sm text-gray-700">Complementos / Grupos</h4>
@@ -991,7 +920,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 ))}
                              </div>
 
-                            {/* AI IMAGE ENHANCER */}
                             <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-4 rounded-xl border border-indigo-100">
                                 <div className="flex justify-between items-center mb-2">
                                     <h4 className="font-bold text-indigo-900 text-xs uppercase flex items-center gap-1">
@@ -1025,7 +953,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         </div>
                     </div>
 
-                    {/* Product List */}
                     <div className="lg:col-span-2 space-y-6">
                         <div className="flex justify-between items-center">
                             <h2 className="text-2xl font-bold text-gray-800">Cardápio Atual</h2>
@@ -1081,16 +1008,13 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
             {view === ViewState.SETTINGS && (
                 <div className="max-w-2xl mx-auto bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
-                    {/* ... (Existing Settings UI) ... */}
                     <h2 className="text-2xl font-bold text-gray-900 mb-6">Configurações da Loja</h2>
                     
                     <div className="space-y-6">
-                        {/* VISUAL IDENTITY SECTION */}
                         <div className="grid grid-cols-2 gap-4">
                             <div className="col-span-2">
                                 <label className="text-sm font-bold text-gray-700 mb-2 block">Identidade Visual</label>
                                 <div className="flex gap-6 items-start">
-                                    {/* Logo Upload */}
                                     <div className="flex flex-col items-center gap-2">
                                         <div className="w-24 h-24 bg-gray-100 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center relative overflow-hidden group hover:border-red-300 cursor-pointer">
                                             {localCompany.logo ? (
@@ -1103,7 +1027,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                         <span className="text-xs font-bold text-gray-500">Logo</span>
                                     </div>
 
-                                    {/* Cover Upload (Fixed) */}
                                     <div className="flex-1">
                                         <div className="w-full h-24 bg-gray-100 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center relative overflow-hidden group hover:border-red-300 cursor-pointer">
                                             {localCompany.coverImage ? (
@@ -1129,7 +1052,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 />
                             </div>
                             
-                            {/* UPDATED CATEGORY SELECT FOR PARTNER SETTINGS */}
                             <div className="col-span-2">
                                 <label className="text-sm font-bold text-gray-700">Categoria</label>
                                 <select 
@@ -1153,7 +1075,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                             </div>
                         </div>
 
-                        {/* FINANCE SECTION (NEW) */}
                         <div className="border-t border-gray-100 pt-6">
                              <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
                                 <Wallet className="w-5 h-5 text-gray-500" /> Dados Financeiros (Recebimento)
@@ -1189,14 +1110,12 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                             </p>
                         </div>
 
-                        {/* ADDRESS CONFIGURATION */}
                         <div className="border-t border-gray-100 pt-6">
                             <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
                                 <MapPin className="w-5 h-5 text-gray-500" /> Endereço e Localização
                             </h3>
                             
                             <div className="space-y-3 bg-gray-50 p-4 rounded-xl border border-gray-200">
-                                {/* Search Tools */}
                                 <div className="flex gap-2">
                                     <div className="relative w-1/3">
                                         <input 
@@ -1223,7 +1142,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                     </button>
                                 </div>
 
-                                {/* Address Fields */}
                                 <div className="grid grid-cols-2 gap-3">
                                     <div className="col-span-2">
                                         <input 
@@ -1306,7 +1224,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
         </div>
       </div>
 
-      {/* MAP MODAL (Partner Settings) */}
       {showMapModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in h-full">
             <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl flex flex-col h-[90%] relative">

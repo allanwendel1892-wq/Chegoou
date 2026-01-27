@@ -1,143 +1,162 @@
 
-
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { MercadoPagoConfig, Preference, Payment } from "npm:mercadopago";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 declare const Deno: any;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+}
 
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    // 1. Get the MP Access Token from Secrets
-    const mpAccessToken = Deno.env.get('MP_ACCESS_TOKEN');
-    if (!mpAccessToken) {
-        console.error("Missing MP_ACCESS_TOKEN secret");
-        throw new Error("MP_ACCESS_TOKEN is missing. Please set it in Supabase Edge Function Secrets.");
+    const MP_TOKEN = Deno.env.get('MP_ACCESS_TOKEN');
+    if (!MP_TOKEN) {
+      throw new Error("MP_ACCESS_TOKEN não configurado no Supabase.");
     }
 
-    // 2. Parse Request Body
-    // UPDATED: Now accepting orderId and origin
-    const { amount, description, payerEmail, method, back_urls, orderId, origin } = await req.json();
+    let body = {};
+    try {
+        body = await req.json();
+    } catch(e) {
+        // If body is empty or invalid JSON, ignore (body stays empty)
+    }
+    
+    // Extrair action (padrão é 'create' se não vier nada)
+    const { action = 'create', paymentId, amount, payerEmail, description, method, orderId, origin } = body as any;
 
-    // 3. Initialize Mercado Pago
-    const client = new MercadoPagoConfig({ accessToken: mpAccessToken });
+    // =================================================================
+    // AÇÃO: ESTORNO (REFUND)
+    // =================================================================
+    if (action === 'refund') {
+      if (!paymentId) {
+        return new Response(JSON.stringify({ error: "Payment ID é obrigatório para estorno." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
 
-    // ---------------------------------------------------------
-    // A. PIX NATIVE PAYMENT (QRCode Inline)
-    // ---------------------------------------------------------
-    if (method === 'pix') {
-        const payment = new Payment(client);
-        
-        console.log("Creating Pix Payment...");
+      console.log(`Iniciando estorno para pagamento: ${paymentId}`);
 
-        const result = await payment.create({
-            body: {
-                transaction_amount: Number(amount),
-                description: description || "Pedido Chegoou Delivery",
-                payment_method_id: 'pix',
-                // Link Pix to Order ID as well
-                external_reference: orderId,
-                payer: {
-                    email: payerEmail || "customer@email.com"
-                }
-            }
+      // Endpoint de Reembolso Total do Mercado Pago
+      const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}/refunds`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${MP_TOKEN}`,
+          "Content-Type": "application/json",
+          "X-Idempotency-Key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({}) // Empty body for full refund
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        console.error("Erro MP Refund:", result);
+        return new Response(JSON.stringify({ success: false, error: result.message || "Erro ao processar estorno no Mercado Pago" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      return new Response(JSON.stringify({
+        success: true,
+        status: result.status, // 'approved' geralmente
+        refundId: result.id
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // =================================================================
+    // AÇÃO: CRIAR PAGAMENTO (CREATE)
+    // =================================================================
+    else {
+      if (!amount || !payerEmail) {
+        return new Response(JSON.stringify({ error: "Dados ausentes (amount ou email)" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      // --- LÓGICA PIX: CHECKOUT TRANSPARENTE ---
+      if (method === 'pix') {
+        const response = await fetch("https://api.mercadopago.com/v1/payments", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${MP_TOKEN}`,
+            "Content-Type": "application/json",
+            "X-Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify({
+            transaction_amount: Number(amount),
+            description: description || 'Pedido Chegoou',
+            payment_method_id: 'pix',
+            payer: { email: payerEmail.trim() },
+            external_reference: orderId, // Vinculo Importante
+            notification_url: "https://seusite.com/api/webhook" // Opcional
+          }),
         });
 
-        if (!result.point_of_interaction) {
-            throw new Error("Pix generated but no QR Code returned from Mercado Pago.");
+        const result = await response.json();
+        
+        if (!response.ok) {
+             throw new Error(result.message || "Erro ao criar Pix");
         }
 
-        const poi = result.point_of_interaction;
-        
-        return new Response(
-            JSON.stringify({
-                success: true,
-                status: result.status, // 'pending'
-                id: result.id,
-                qrCode: poi.transaction_data?.qr_code, // Copy & Paste Code
-                qrCodeBase64: poi.transaction_data?.qr_code_base64, // Image Data
-                copyPaste: poi.transaction_data?.qr_code,
-                ticketUrl: result.point_of_interaction?.transaction_data?.ticket_url // Link to Receipt
-            }),
-            { 
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 200 
+        return new Response(JSON.stringify({
+          success: true,
+          status: result.status,
+          id: result.id,
+          qrCode: result.point_of_interaction?.transaction_data?.qr_code,
+          qrCodeBase64: result.point_of_interaction?.transaction_data?.qr_code_base64,
+          ticketUrl: result.transaction_details?.external_resource_url
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      // --- LÓGICA CARTÃO: CHECKOUT PRO (REDIRECT) ---
+      else {
+        const response = await fetch("https://api.mercadopago.com/checkout/preferences", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${MP_TOKEN}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            items: [{
+              id: orderId,
+              title: description || 'Pedido Chegoou',
+              quantity: 1,
+              unit_price: Number(amount),
+              currency_id: 'BRL'
+            }],
+            payer: { email: payerEmail.trim() },
+            external_reference: orderId,
+            back_urls: {
+              success: origin || '',
+              failure: origin || '',
+              pending: origin || ''
+            },
+            auto_return: "approved",
+            payment_methods: {
+              excluded_payment_methods: [{ id: 'ticket' }],
+              excluded_payment_types: [{ id: 'bank_transfer' }],
+              installments: 12
             }
-        );
+          }),
+        });
+
+        const result = await response.json();
+        
+        if (!response.ok) {
+             throw new Error(result.message || "Erro ao criar Preferência");
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          status: 'pending',
+          ticketUrl: result.init_point, // URL de redirecionamento
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
     }
 
-    // ---------------------------------------------------------
-    // B. CHECKOUT PRO PREFERENCE (Cards / General)
-    // ---------------------------------------------------------
-    const preference = new Preference(client);
-
-    // Dynamic Back URLs based on origin passed from Frontend
-    const successUrl = origin ? `${origin}` : (back_urls?.success || "http://localhost:5173");
-    const failureUrl = origin ? `${origin}` : (back_urls?.failure || "http://localhost:5173");
-    const pendingUrl = origin ? `${origin}` : (back_urls?.pending || "http://localhost:5173");
-
-    const result = await preference.create({
-      body: {
-        items: [
-          {
-            id: orderId || `ord-${Date.now()}`,
-            title: description || "Pedido Chegoou Delivery",
-            quantity: 1,
-            unit_price: Number(amount),
-            currency_id: "BRL"
-          }
-        ],
-        payer: {
-          email: payerEmail || "customer@email.com"
-        },
-        // Link the payment to the Order ID so we can identify it on return
-        external_reference: orderId,
-        back_urls: {
-            success: successUrl,
-            failure: failureUrl,
-            pending: pendingUrl
-        },
-        auto_return: "approved"
-      }
-    });
-
-    console.log("Preference created:", result.id);
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        status: 'pending', 
-        id: result.id,
-        init_point: result.init_point, 
-        sandbox_init_point: result.sandbox_init_point, 
-        ticketUrl: result.init_point 
-      }),
-      { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200 
-      }
-    );
-
   } catch (error: any) {
-    console.error("Error creating payment:", error.message);
-    return new Response(
-      JSON.stringify({
-        success: false,
-        error: error.message || "Internal Server Error",
-      }),
-      { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 400 
-      }
-    );
+    console.error("Critical Error:", error);
+    return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
-});
+})
+    

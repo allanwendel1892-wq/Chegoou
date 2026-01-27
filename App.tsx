@@ -7,10 +7,9 @@ import PartnerView from './components/PartnerView';
 import CourierView from './components/CourierView';
 import ClientView from './components/ClientView';
 import { supabase } from './services/supabaseClient';
-import { PaymentService } from './services/paymentService'; // Importação do Serviço de Pagamento
+import { PaymentService } from './services/paymentService';
 import { Loader2, AlertCircle, Database, Lock } from 'lucide-react';
 
-// Helper for Distance Calculation
 const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
   const R = 6371; 
@@ -23,7 +22,6 @@ const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon
   return R * c;
 };
 
-// --- HELPER: SANITIZAÇÃO DE PAYLOAD ---
 const prepareProductPayload = (product: Product) => {
     return {
         id: product.id,
@@ -45,7 +43,6 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [connectionError, setConnectionError] = useState<{title: string, message: string, type: 'network' | 'permission' | 'unknown'} | null>(null);
   
-  // Shared State
   const [users, setUsers] = useState<User[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -60,44 +57,32 @@ const App: React.FC = () => {
       maintenanceMode: false
   });
 
-  // Ref to keep track of orders for polling without triggering effects
   const ordersRef = useRef<Order[]>([]);
   useEffect(() => { ordersRef.current = orders; }, [orders]);
 
-  // --- CHECKOUT PRO CALLBACK HANDLER ---
-  // Verifica se o usuário voltou do Mercado Pago com pagamento aprovado
   useEffect(() => {
       const handlePaymentReturn = async () => {
           const query = new URLSearchParams(window.location.search);
           const collectionStatus = query.get('collection_status');
-          const externalReference = query.get('external_reference'); // This is our Order ID
+          const externalReference = query.get('external_reference');
 
-          // Se tiver status aprovado e ID do pedido
           if (collectionStatus === 'approved' && externalReference) {
-              console.log("💰 Pagamento Checkout Pro confirmado para pedido:", externalReference);
-
               try {
-                  // 1. Atualiza Status no Banco
                   const { error } = await supabase
                       .from('orders')
                       .update({ 
-                          status: 'pending', // Confirmado
+                          status: 'pending',
                           paymentStatus: 'approved' 
                       })
                       .eq('id', externalReference);
                   
                   if (error) throw error;
-
-                  // 2. Feedback Visual
                   alert("Pagamento confirmado com sucesso! Seu pedido foi enviado para a loja.");
-
-                  // 3. Atualiza Estado Local (Otimista)
                   setOrders(prev => prev.map(o => o.id === externalReference ? { ...o, status: 'pending', paymentStatus: 'approved' } : o));
 
               } catch (e) {
                   console.error("Erro ao confirmar pagamento no retorno:", e);
               } finally {
-                  // 4. Limpa URL para não reprocessar ao recarregar
                   window.history.replaceState({}, document.title, window.location.pathname);
               }
           }
@@ -106,13 +91,11 @@ const App: React.FC = () => {
       if (currentUser) {
           handlePaymentReturn();
       }
-  }, [currentUser]); // Run when user is loaded
+  }, [currentUser]);
 
-  // --- INITIAL DATA FETCHING (Static Data) ---
   useEffect(() => {
     fetchInitialData();
 
-    // Global Subscriptions (Withdrawals & Messages)
     const messagesSub = supabase
       .channel('public:messages')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
@@ -141,7 +124,6 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // --- SMART ORDER SUBSCRIPTION (Realtime) ---
   useEffect(() => {
       if (!currentUser) return;
 
@@ -153,8 +135,6 @@ const App: React.FC = () => {
           filter = `companyId=eq.${currentUser.id}`;
       }
 
-      console.log(`[Realtime] Iniciando canal de pedidos. Filtro: ${filter || 'TODOS (Admin/Courier)'}`);
-
       const channel = supabase.channel(`orders_user_${currentUser.id}`)
           .on('postgres_changes', { 
               event: '*', 
@@ -162,12 +142,9 @@ const App: React.FC = () => {
               table: 'orders',
               filter: filter 
           }, (payload) => {
-              // Realtime handling
               if (payload.eventType === 'INSERT') {
                   const newOrder = payload.new as Order;
-                  // Format timestamp correctly from ISO string
                   newOrder.timestamp = new Date(newOrder.timestamp);
-                  
                   setOrders(prev => {
                       if (prev.some(o => o.id === newOrder.id)) return prev;
                       return [newOrder, ...prev]; 
@@ -175,24 +152,18 @@ const App: React.FC = () => {
               } else if (payload.eventType === 'UPDATE') {
                   const updatedOrder = payload.new as Order;
                   updatedOrder.timestamp = new Date(updatedOrder.timestamp);
-                  
                   setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
               } else if (payload.eventType === 'DELETE') {
                   setOrders(prev => prev.filter(o => o.id !== payload.old.id));
               }
           })
-          .subscribe((status) => {
-              if (status === 'SUBSCRIBED') {
-                  console.log('[Realtime] Conectado com sucesso.');
-              }
-          });
+          .subscribe();
 
       return () => {
           supabase.removeChannel(channel);
       };
   }, [currentUser]);
 
-  // --- HEARTBEAT POLLING (CORREÇÃO DE SINCRONIZAÇÃO N8N) ---
   useEffect(() => {
       if (!currentUser) return;
 
@@ -264,9 +235,7 @@ const App: React.FC = () => {
           try {
             const { data: withdrawalData, error: wdError } = await supabase.from('withdrawal_requests').select('*');
             if (!wdError && withdrawalData) setWithdrawals(withdrawalData);
-          } catch (e) {
-              console.warn("Table withdrawal_requests might be missing or empty");
-          }
+          } catch (e) {}
 
           try {
             const { data: messagesData, error: msgError } = await supabase.from('messages').select('*').order('timestamp', { ascending: true });
@@ -281,34 +250,29 @@ const App: React.FC = () => {
                 });
                 setChats(groupedChats);
             }
-          } catch (e) {
-              console.warn("Table messages might be missing or empty");
-          }
+          } catch (e) {}
 
       } catch (error: any) {
           console.error("Error fetching initial data:", error);
-          
           let errorType: 'network' | 'permission' | 'unknown' = 'unknown';
           let title = "Erro de Conexão";
           let message = error.message || "Erro desconhecido ao conectar com Supabase";
 
-          if (error.code === '42501' || (error.message && error.message.toLowerCase().includes('permission denied'))) {
+          if (error.code === '42501') {
               errorType = 'permission';
               title = "Acesso Bloqueado (RLS)";
-              message = "O banco de dados recusou a conexão. Isso acontece quando as Políticas de Segurança (RLS) estão ativadas mas não configuradas para acesso público.";
+              message = "O banco de dados recusou a conexão.";
           } else if (error.message && (error.message.includes('fetch') || error.message.includes('network'))) {
               errorType = 'network';
               title = "Erro de Rede";
-              message = "Não foi possível alcançar os servidores do Supabase. Verifique sua conexão com a internet.";
+              message = "Não foi possível alcançar os servidores do Supabase.";
           }
-
           setConnectionError({ title, message, type: errorType });
       } finally {
           setIsLoading(false);
       }
   };
 
-  // ACTIONS
   const handleLogout = () => {
     setCurrentUser(null);
   };
@@ -316,28 +280,14 @@ const App: React.FC = () => {
   const handleLogin = async (userAttempt: User) => {
     if (userAttempt.id === 'login_action') {
         try {
-            const { data, error } = await supabase
-                .from('users')
-                .select('*')
-                .eq('email', userAttempt.email)
-                .eq('password', userAttempt.password)
-                .single();
-
+            const { data, error } = await supabase.from('users').select('*').eq('email', userAttempt.email).eq('password', userAttempt.password).single();
             if (error) {
-                if (error.code === 'PGRST116') {
-                    alert("E-mail ou senha incorretos.");
-                } else {
-                    console.error("Login Error:", error);
-                    alert("Erro ao conectar: " + error.message);
-                }
+                alert("E-mail ou senha incorretos.");
                 return;
             }
-
             if (data) {
                 setCurrentUser(data);
-                if (!users.find(u => u.id === data.id)) {
-                    setUsers([...users, data]);
-                }
+                if (!users.find(u => u.id === data.id)) setUsers([...users, data]);
             }
         } catch (e: any) {
             alert("Erro fatal no login: " + e.message);
@@ -346,13 +296,8 @@ const App: React.FC = () => {
     else if (userAttempt.id.startsWith('u-')) {
         const { data, error } = await supabase.from('users').insert([userAttempt]).select();
         if (error) {
-            console.error("Registration Error:", error);
-            if (error.code === '23505') {
-                 alert("Erro: Este usuário já existe. Tente fazer login.");
-            } else {
-                 alert("Erro ao criar conta: " + error.message);
-            }
-            return;
+             alert("Erro ao criar conta: " + error.message);
+             return;
         }
         if (data) {
             setUsers([...users, data[0]]);
@@ -361,29 +306,17 @@ const App: React.FC = () => {
     }
   };
 
-  // --- CRUD HANDLERS FOR ADMIN & USERS ---
-
   const handleUpdateUser = async (updatedUser: User) => {
       const { error } = await supabase.from('users').update(updatedUser).eq('id', updatedUser.id);
-      
       if (!error) {
         setUsers(users.map(u => u.id === updatedUser.id ? updatedUser : u));
-        if (currentUser && currentUser.id === updatedUser.id) {
-            setCurrentUser(updatedUser);
-        }
-      } else {
-          console.error("Error updating user:", error);
-          alert("Erro ao atualizar usuário no banco de dados.");
+        if (currentUser && currentUser.id === updatedUser.id) setCurrentUser(updatedUser);
       }
   };
 
   const handleDeleteUser = async (userId: string) => {
       const { error } = await supabase.from('users').delete().eq('id', userId);
-      if (!error) {
-          setUsers(users.filter(u => u.id !== userId));
-      } else {
-          alert("Erro ao excluir usuário: " + error.message);
-      }
+      if (!error) setUsers(users.filter(u => u.id !== userId));
   };
 
   const handleUpsertCompany = async (company: Company) => {
@@ -394,19 +327,12 @@ const App: React.FC = () => {
                if (exists) return prev.map(c => c.id === company.id ? data[0] : c);
                return [...prev, data[0]];
            });
-      } else {
-          console.error("Error saving company:", error);
-          alert("Erro ao salvar empresa: " + (error?.message || ""));
       }
   };
 
   const handleDeleteCompany = async (companyId: string) => {
       const { error } = await supabase.from('companies').delete().eq('id', companyId);
-      if (!error) {
-          setCompanies(companies.filter(c => c.id !== companyId));
-      } else {
-          alert("Erro ao excluir empresa: " + error.message);
-      }
+      if (!error) setCompanies(companies.filter(c => c.id !== companyId));
   };
 
   const handleUpdateGlobalSettings = (newSettings: typeof globalSettings) => {
@@ -426,60 +352,23 @@ const App: React.FC = () => {
           text,
           timestamp: new Date().toISOString()
       };
-      const { error } = await supabase.from('messages').insert([newMessage]);
-      if (error) console.error("Error sending message:", error);
+      await supabase.from('messages').insert([newMessage]);
   };
 
   const handleUpdateWithdrawal = async (id: string, status: 'paid' | 'rejected') => {
-      const { error } = await supabase.from('withdrawal_requests').update({ status }).eq('id', id);
-      if (error) {
-          alert("Erro ao atualizar saque: " + error.message);
-      }
+      await supabase.from('withdrawal_requests').update({ status }).eq('id', id);
   };
 
   const handlePlaceOrder = async (
-      cartItems: any[], 
-      companyId: string, 
-      finalTotal: number, 
-      deliveryMethod: 'delivery' | 'pickup', 
-      serviceFee: number, 
-      deliveryFee: number, 
-      subtotal: number, 
-      paymentMethod: 'cash' | 'card' | 'pix',
-      changeFor?: number
+      cartItems: any[], companyId: string, finalTotal: number, deliveryMethod: 'delivery' | 'pickup', serviceFee: number, deliveryFee: number, subtotal: number, paymentMethod: 'cash' | 'card' | 'pix', changeFor?: number
   ): Promise<boolean> => {
     if (!currentUser || !currentUser.address) {
-        alert("Erro: Você precisa selecionar um endereço de entrega.");
+        alert("Selecione um endereço.");
         return false;
     }
     
     const company = companies.find(c => c.id === companyId);
-    if (!company) {
-        alert("Erro: Restaurante não encontrado.");
-        return false;
-    }
-
-    if (company.isSuspended) {
-        alert("Este estabelecimento está temporariamente indisponível.");
-        return false;
-    }
-
-    if (deliveryMethod === 'delivery' && company.address) {
-        const distance = getDistanceFromLatLonInKm(
-            currentUser.address.lat, currentUser.address.lng,
-            company.address.lat, company.address.lng
-        );
-
-        if (distance > company.deliveryRadiusKm) {
-            alert(`Erro: Você está fora da área de entrega deste restaurante (${distance.toFixed(1)}km > ${company.deliveryRadiusKm}km).`);
-            return false;
-        }
-    }
-
-    const code = currentUser.phone.slice(-4) || '0000';
-    const initialStatus = paymentMethod === 'cash' ? 'pending' : 'waiting_payment';
-
-    const repasseValue = Math.max(0, finalTotal - serviceFee);
+    if (!company) return false;
 
     const newOrder: Order = {
         id: `ord-${Date.now()}`,
@@ -502,68 +391,54 @@ const App: React.FC = () => {
         deliveryMethod: deliveryMethod,
         paymentMethod: paymentMethod,
         changeFor: changeFor,
-        status: initialStatus,
+        status: paymentMethod === 'cash' ? 'pending' : 'waiting_payment',
         timestamp: new Date(),
-        deliveryCode: code,
+        deliveryCode: currentUser.phone.slice(-4),
         deliveryAddress: currentUser.address,
         pickupAddress: company.address || { street: '', number: '', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0 },
         deliveryType: company.deliveryType,
-        paymentStatus: paymentMethod === 'cash' ? 'pending' : 'pending',
-        repasseStatus: 'pending',
-        repasseValue: repasseValue,
-        waitingFunds: true
+        paymentStatus: 'pending',
+        repasseValue: Math.max(0, finalTotal - serviceFee),
     };
 
-    // 1. Inserir Pedido no Banco (Status Inicial)
-    const { data, error } = await supabase.from('orders').insert([newOrder]).select();
+    const { error } = await supabase.from('orders').insert([newOrder]);
     
     if (error) {
         alert("Erro ao realizar pedido: " + error.message);
         return false;
     }
 
-    // 2. Processar Pagamento Online via PaymentService (Edge Function)
     if (paymentMethod !== 'cash') {
         try {
-            console.log("🚀 Iniciando pagamento online via Edge Function...");
-            
             const paymentResponse = await PaymentService.processPayment(
                 finalTotal,
                 paymentMethod,
                 currentUser,
                 `Pedido #${newOrder.id} - ${company.name}`,
-                newOrder.id // Pass Order ID for Checkout Pro reference
+                newOrder.id
             );
 
-            // A. Redirecionamento (Checkout Pro)
             if (paymentResponse.ticketUrl && !paymentResponse.copyPaste && !paymentResponse.qrCodeBase64) {
-                console.log("Redirecionando para Mercado Pago:", paymentResponse.ticketUrl);
-                // Use assign instead of href for better mobile handling
                 window.location.assign(paymentResponse.ticketUrl);
                 return true; 
             }
 
-            // B. Pix Copia e Cola / QRCode Image
             if (paymentMethod === 'pix' && (paymentResponse.copyPaste || paymentResponse.qrCodeBase64)) {
-                 // Atualiza o pedido com o código Pix E a imagem
                  await supabase.from('orders').update({
                     paymentPixCode: paymentResponse.copyPaste,
-                    paymentPixImage: paymentResponse.qrCodeBase64, // Persist Image Base64
+                    paymentPixImage: paymentResponse.qrCodeBase64,
                     paymentId: paymentResponse.paymentId
                  }).eq('id', newOrder.id);
             }
 
-            // C. Erro ou Rejeição
             if (!paymentResponse.success) {
                 alert("Pagamento não aprovado: " + paymentResponse.message);
-                // Opcional: Cancelar o pedido criado se falhar
                 await supabase.from('orders').update({ status: 'cancelled' }).eq('id', newOrder.id);
                 return false;
             }
 
         } catch (e: any) {
-            console.error("Falha no processo de pagamento:", e);
-            alert("Erro ao iniciar pagamento: " + (e.message || "Erro desconhecido. Verifique se o Token do MP está configurado."));
+            alert("Erro ao iniciar pagamento: " + (e.message || "Erro desconhecido."));
             return false;
         }
     }
@@ -571,24 +446,20 @@ const App: React.FC = () => {
     return true;
   };
 
-  // --- OTIMIZAÇÃO: ATUALIZAÇÃO OTIMISTA NO FRONTEND + SYNC NO BACKEND ---
   const updateOrderStatus = async (orderId: string, status: Order['status']) => {
-    // Check if cancellation involves refund logic
+    // --- LÓGICA DE CANCELAMENTO COM ESTORNO ---
     if (status === 'cancelled') {
         const orderToCancel = orders.find(o => o.id === orderId);
         
-        // --- REFUND TRIGGER LOGIC ---
-        // If order was paid online and approved, trigger refund
         if (orderToCancel && orderToCancel.paymentId && orderToCancel.paymentMethod !== 'cash') {
             console.log("Cancelamento detectado. Iniciando estorno...", orderToCancel.paymentId);
             try {
                 const refundResult = await PaymentService.refundPayment(orderToCancel.paymentId);
                 if (refundResult.success) {
                     alert("Pedido cancelado e estorno processado com sucesso!");
-                    // Update Payment Status locally
                     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status, paymentStatus: 'refunded' } : o));
-                     await supabase.from('orders').update({ status, paymentStatus: 'refunded' }).eq('id', orderId);
-                     return;
+                    await supabase.from('orders').update({ status, paymentStatus: 'refunded' }).eq('id', orderId);
+                    return;
                 } else {
                     alert("Aviso: O pedido foi cancelado, mas houve erro no estorno automático: " + refundResult.message);
                 }
@@ -598,32 +469,22 @@ const App: React.FC = () => {
         }
     }
 
-    // Default update logic
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
-    const { error } = await supabase.from('orders').update({ status }).eq('id', orderId);
-    
-    if (error) {
-        console.error("Erro ao sincronizar status com Supabase:", error);
-        alert("Erro de conexão. O status pode não ter sido salvo.");
-    }
+    await supabase.from('orders').update({ status }).eq('id', orderId);
   };
 
-  // --- STRICT CANCEL HANDLER FOR CLIENTS & PARTNERS ---
   const handleCancelOrder = async (orderId: string) => {
       const order = orders.find(o => o.id === orderId);
       if (!order) return;
-
       if (!currentUser) return;
 
-      // CLIENT RULES
+      // REGRAS RIGOROSAS
       if (currentUser.role === 'client') {
           if (order.status !== 'pending' && order.status !== 'waiting_payment') {
               alert("Não é possível cancelar. O restaurante já começou a preparar seu pedido. Entre em contato com a loja.");
               return;
           }
       }
-
-      // PARTNER RULES (Implicit: Can cancel anytime)
       
       if (window.confirm("Tem certeza que deseja cancelar este pedido? Se houve pagamento online, o estorno será processado.")) {
           await updateOrderStatus(orderId, 'cancelled');
@@ -631,56 +492,31 @@ const App: React.FC = () => {
   };
   
   const handleUpdateFullOrder = async (updatedOrder: Order) => {
-    // 1. Atualiza Frontend
     setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-
-    // 2. Atualiza Backend
-    const { error } = await supabase.from('orders').update(updatedOrder).eq('id', updatedOrder.id);
-    if (error) console.error("Erro ao atualizar pedido completo:", error);
+    await supabase.from('orders').update(updatedOrder).eq('id', updatedOrder.id);
   };
 
   const handleDeleteOrder = async (orderId: string) => {
-    // 1. Atualiza Frontend
     setOrders(prev => prev.filter(o => o.id !== orderId));
-
-    // 2. Atualiza Backend
-    const { error } = await supabase.from('orders').delete().eq('id', orderId);
-    if (error) console.error("Erro ao deletar pedido:", error);
+    await supabase.from('orders').delete().eq('id', orderId);
   };
 
-  // --- CRUD WRAPPERS ---
+  // CRUD Wrappers
   const handleAddProduct = async (newProduct: Product) => {
       const payload = prepareProductPayload(newProduct);
       const { data, error } = await supabase.from('products').insert([payload]).select();
-      
-      if (error) {
-          console.error("Erro ao salvar produto:", error);
-          if (error.code === '42703') {
-              alert("Erro de Coluna (42703): Verifique se há Triggers no banco exigindo colunas antigas.");
-          } else {
-              alert(`Erro ao salvar: ${error.message} (Código: ${error.code})`);
-          }
-      } else if (data) {
-          setProducts([...products, data[0]]);
-      }
+      if (!error && data) setProducts([...products, data[0]]);
   };
 
   const handleUpdateProduct = async (updatedProduct: Product) => {
       const payload = prepareProductPayload(updatedProduct);
       const { error } = await supabase.from('products').update(payload).eq('id', updatedProduct.id);
-      
-      if (error) {
-          console.error("Erro ao atualizar produto:", error);
-          alert(`Erro ao atualizar: ${error.message}`);
-      } else {
-          setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
-      }
+      if (!error) setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
   };
 
   const handleDeleteProduct = async (productId: string) => {
       const { error } = await supabase.from('products').delete().eq('id', productId);
       if (!error) setProducts(prev => prev.filter(p => p.id !== productId));
-      else alert("Erro ao excluir: " + error.message);
   };
   
   const handleUpdateCompany = async (companyId: string, data: Partial<Company>) => {
@@ -690,30 +526,26 @@ const App: React.FC = () => {
 
   const handleAddAddress = (address: Address) => {
       if (!currentUser) return;
-      const updatedUser = { ...currentUser, address: address, savedAddresses: [...(currentUser.savedAddresses || []), address] };
-      handleUpdateUser(updatedUser);
+      handleUpdateUser({ ...currentUser, address: address, savedAddresses: [...(currentUser.savedAddresses || []), address] });
   };
 
   const handleRemoveAddress = (index: number) => {
       if (!currentUser || !currentUser.savedAddresses) return;
       const updatedAddresses = [...currentUser.savedAddresses];
       updatedAddresses.splice(index, 1);
-      const updatedUser = { ...currentUser, savedAddresses: updatedAddresses };
-      handleUpdateUser(updatedUser);
+      handleUpdateUser({ ...currentUser, savedAddresses: updatedAddresses });
   };
 
   const handleAddCard = (card: CreditCard) => {
       if (!currentUser) return;
-      const updatedUser = { ...currentUser, savedCards: [...(currentUser.savedCards || []), card] };
-      handleUpdateUser(updatedUser);
+      handleUpdateUser({ ...currentUser, savedCards: [...(currentUser.savedCards || []), card] });
   };
 
   const handleRemoveCard = (index: number) => {
       if (!currentUser || !currentUser.savedCards) return;
       const updatedCards = [...currentUser.savedCards];
       updatedCards.splice(index, 1);
-      const updatedUser = { ...currentUser, savedCards: updatedCards };
-      handleUpdateUser(updatedUser);
+      handleUpdateUser({ ...currentUser, savedCards: updatedCards });
   };
 
   if (isLoading) {
@@ -728,26 +560,9 @@ const App: React.FC = () => {
   if (connectionError) {
       return (
           <div className="h-screen w-full flex flex-col items-center justify-center bg-gray-50 p-6 text-center">
-              <div className={`p-4 rounded-full mb-4 ${connectionError.type === 'permission' ? 'bg-orange-100 text-orange-600' : 'bg-red-100 text-red-600'}`}>
-                  {connectionError.type === 'permission' ? <Lock className="w-10 h-10" /> : <AlertCircle className="w-10 h-10" />}
-              </div>
-              
+              <AlertCircle className="w-10 h-10 text-red-600 mb-4 mx-auto" />
               <h2 className="text-xl font-bold text-gray-900">{connectionError.title}</h2>
               <p className="text-gray-500 mt-2 max-w-md">{connectionError.message}</p>
-              
-              {connectionError.type === 'permission' && (
-                  <div className="mt-6 bg-gray-100 p-4 rounded-xl text-left max-w-lg w-full text-sm border border-gray-200">
-                      <p className="font-bold text-gray-700 mb-2 flex items-center gap-2">
-                         <Database className="w-4 h-4"/> Como Resolver (Admin):
-                      </p>
-                      <p className="mb-2 text-gray-600">Rode o script SQL de liberação no painel do Supabase:</p>
-                      <pre className="bg-black text-green-400 p-3 rounded-lg overflow-x-auto text-xs font-mono">
-{`ALTER TABLE users DISABLE ROW LEVEL SECURITY;
-GRANT ALL ON ALL TABLES IN SCHEMA public TO anon;`}
-                      </pre>
-                  </div>
-              )}
-              
               <button onClick={() => window.location.reload()} className="mt-8 bg-gray-900 text-white px-6 py-3 rounded-xl font-bold hover:bg-black transition-colors">
                   Tentar Conexão Novamente
               </button>
@@ -778,24 +593,13 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO anon;`}
     
     case 'partner':
         const myCompany = companies.find(c => c.id === currentUser.id);
-        if (!myCompany) {
-             return (
-                 <div className="h-screen flex items-center justify-center bg-gray-50 text-center p-8">
-                     <div>
-                         <h1 className="text-3xl font-bold text-gray-800 mb-2">Configurando Loja...</h1>
-                         <p className="text-gray-500 mb-4">Sua empresa ainda não foi vinculada. Aguarde ou contate o suporte.</p>
-                         <button onClick={handleLogout} className="mt-4 bg-red-600 text-white px-4 py-2 rounded-xl font-bold">Sair</button>
-                     </div>
-                 </div>
-             );
-        }
-        if (myCompany.isSuspended) return <div className="h-screen flex items-center justify-center bg-gray-50 text-center p-8"><div><h1 className="text-3xl font-bold text-red-600 mb-2">Conta Suspensa</h1><button onClick={handleLogout} className="mt-4 bg-gray-200 px-4 py-2 rounded">Sair</button></div></div>;
+        if (!myCompany) return <div className="h-screen flex items-center justify-center">Loja não encontrada. <button onClick={handleLogout}>Sair</button></div>;
         
         return <PartnerView 
             company={myCompany} 
             orders={orders.filter(o => o.companyId === myCompany.id)}
             products={products.filter(p => p.companyId === myCompany.id)}
-            updateOrderStatus={updateOrderStatus} // Pass the smarter updated logic
+            updateOrderStatus={updateOrderStatus}
             updateCompany={(data) => handleUpdateCompany(myCompany.id, data)}
             onAddProduct={handleAddProduct}
             onUpdateProduct={handleUpdateProduct} 
@@ -832,7 +636,6 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO anon;`}
             onRemoveAddress={handleRemoveAddress}
             onAddCard={handleAddCard}
             onRemoveCard={handleRemoveCard}
-            // Pass the Cancel Handler prop
             onCancelOrder={handleCancelOrder} 
         />;
   }
