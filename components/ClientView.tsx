@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Company, Product, Order, ChatMessage, Address, CreditCard as CreditCardType, ProductOption, User } from '../types';
 import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, Timer, Settings, LogOut, Crosshair, AlertCircle, ClipboardCheck, ScanLine, XCircle } from 'lucide-react';
@@ -222,7 +221,7 @@ const ClientView: React.FC<ClientViewProps> = ({
   const activeCompanyData = selectedCompany ? filteredCompanies.find(c => c.id === selectedCompany.id) : null;
   const productTotal = cart.reduce((acc, item) => acc + (item.finalPrice * item.quantity), 0); 
   const activeDeliveryFee = deliveryMethod === 'pickup' ? 0 : (activeCompanyData ? activeCompanyData.deliveryFeeCalc : 0);
-  const serviceFeeValue = productTotal * ((activeCompanyData ? activeCompanyData.serviceFeePercentage : 0) / 100);
+  const serviceFeeValue = 0.49; // TAXA FIXA
   const finalTotal = productTotal + activeDeliveryFee + serviceFeeValue;
 
   const handleFinalizeOrder = async () => {
@@ -712,15 +711,13 @@ const ClientView: React.FC<ClientViewProps> = ({
                                 {activeDeliveryFee === 0 ? 'Grátis' : `R$ ${activeDeliveryFee.toFixed(2)}`}
                             </span>
                         </div>
-                        {serviceFeeValue > 0 && (
-                            <div className="flex justify-between">
-                                <span className="flex items-center gap-1 text-xs">
-                                    Taxa de Serviço
-                                    <span className="text-[10px] text-gray-400">({activeCompanyData?.serviceFeePercentage}%)</span>
-                                </span>
-                                <span>R$ {serviceFeeValue.toFixed(2)}</span>
-                            </div>
-                        )}
+                        
+                        <div className="flex justify-between">
+                            <span className="flex items-center gap-1 text-xs">
+                                Taxa de Serviço
+                            </span>
+                            <span>R$ {serviceFeeValue.toFixed(2)}</span>
+                        </div>
                     </div>
                     <div className="mt-4 border-t pt-4"><p className="text-xs font-bold text-gray-500 mb-2 uppercase">Pagamento</p><div className="flex gap-2 mb-4"><button onClick={() => setPaymentMethod('cash')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'cash' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-100'}`}><DollarSign/><span className="text-xs font-bold">Dinheiro</span></button><button onClick={() => setPaymentMethod('card')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'card' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-100'}`}><CreditCard/><span className="text-xs font-bold">Cartão</span></button><button onClick={() => setPaymentMethod('pix')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'pix' ? 'border-teal-500 bg-teal-50 text-teal-700' : 'border-gray-100'}`}><QrCode/><span className="text-xs font-bold">Pix</span></button></div>{paymentMethod === 'cash' && (<div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200 mb-4"><label className="text-xs font-bold text-yellow-800 block mb-1">Troco para quanto?</label><input type="number" placeholder="Ex: 50.00" value={changeAmount} onChange={e => setChangeAmount(e.target.value)} className="w-full py-2 outline-none text-gray-800 font-bold bg-transparent border-b border-yellow-300"/></div>)}</div>
                     <div className="mt-2 flex justify-between font-bold text-xl text-gray-900 border-t pt-2"><span>Total</span><span>R$ {finalTotal.toFixed(2)}</span></div>
@@ -796,10 +793,8 @@ const ClientView: React.FC<ClientViewProps> = ({
        {activeTab === 'home' && renderHome()}
        {activeTab === 'orders' && renderOrders()}
        {activeTab === 'profile' && renderProfile()}
-       {/* MUDANÇA: bottom ajustado com calc() para subir se tiver barra de gestos */}
        {cart.length > 0 && !isCartOpen && (<div className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] left-0 right-0 px-4 z-20 flex justify-center animate-fade-in-up pointer-events-none"><button onClick={() => setIsCartOpen(true)} className="bg-brand text-white w-full max-w-md shadow-xl shadow-red-200/50 rounded-xl p-3 flex justify-between items-center font-bold pointer-events-auto transform active:scale-95 transition-all"><div className="flex items-center gap-3"><div className="bg-white/20 w-8 h-8 rounded-full flex items-center justify-center text-sm">{cart.reduce((acc, i) => acc + i.quantity, 0)}</div><span className="text-sm">Ver Sacola</span></div><div className="flex items-center gap-2"><span className="text-sm">R$ {productTotal.toFixed(2)}</span><ShoppingBag className="w-5 h-5 fill-white/20" /></div></button></div>)}
        
-       {/* MUDANÇA: Trocamos py-2 por pt-2 e pb com cálculo da safe-area */}
        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 pt-2 pb-[calc(8px+env(safe-area-inset-bottom))] px-6 flex justify-between items-center z-30"><button onClick={() => { setActiveTab('home'); setSubView('none'); }} className={`flex flex-col items-center gap-1 ${activeTab === 'home' ? 'text-brand' : 'text-gray-400'}`}><Home className={`w-6 h-6 ${activeTab === 'home' ? 'fill-current' : ''}`} /><span className="text-[10px] font-bold">Início</span></button><button onClick={() => { setActiveTab('orders'); setSubView('none'); }} className={`flex flex-col items-center gap-1 ${activeTab === 'orders' ? 'text-brand' : 'text-gray-400'}`}><FileText className={`w-6 h-6 ${activeTab === 'orders' ? 'fill-current' : ''}`} /><span className="text-[10px] font-bold">Pedidos</span></button><button onClick={() => { setActiveTab('profile'); setSubView('none'); }} className={`flex flex-col items-center gap-1 ${activeTab === 'profile' ? 'text-brand' : 'text-gray-400'}`}><UserIcon className={`w-6 h-6 ${activeTab === 'profile' ? 'fill-current' : ''}`} /><span className="text-[10px] font-bold">Perfil</span></button></div>
        
        {showMapModal && (<div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in h-full"><div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl flex flex-col h-[90%] relative"><div className="absolute top-0 left-0 right-0 p-4 z-10 flex justify-between items-start pointer-events-none"><div className="bg-white/95 backdrop-blur px-4 py-2 rounded-xl shadow-md border border-gray-100 pointer-events-auto"><h3 className="font-bold text-gray-800 flex items-center gap-2"><Navigation className="w-4 h-4 text-brand" /> Definir Localização</h3><p className="text-xs text-gray-500">Mova o pin para o endereço correto.</p></div><button onClick={() => setShowMapModal(false)} className="bg-white p-2 rounded-full shadow-md hover:bg-gray-100 pointer-events-auto"><X className="w-6 h-6 text-gray-500" /></button></div><div className="flex-1 bg-gray-100 relative group overflow-hidden">{mapError ? (<div className="w-full h-full flex flex-col items-center justify-center text-center p-8"><MapIcon className="w-16 h-16 text-gray-300"/><p>Erro no Mapa</p></div>) : (<><div ref={mapContainerRef} className="w-full h-full" /><div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-20 pointer-events-none transition-all duration-300 ease-out ${isMapDragging ? '-mt-16 scale-110' : '-mt-8'}`}><div className="w-12 h-12 bg-brand rounded-full flex items-center justify-center shadow-2xl border-[3px] border-white"><MapPin className="w-6 h-6 text-white fill-current" /></div><div className={`w-2 h-8 bg-black/80 rounded-full -mt-2 blur-[1px] transition-opacity duration-300 ${isMapDragging ? 'opacity-0' : 'opacity-20'}`}></div></div>{!isMapDragging && <div className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-3 py-1.5 rounded-full pointer-events-none flex items-center gap-2 animate-pulse"><MousePointer2 className="w-3 h-3" /> Arraste o mapa</div>}</>)}</div><div className="p-6 bg-white border-t border-gray-100 rounded-t-3xl -mt-6 relative z-30 shadow-[0_-5px_20px_rgba(0,0,0,0.05)]"><div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"><div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"></div><div className="flex items-start gap-3 mb-6"><div className="p-2 bg-brandLight rounded-lg shrink-0"><MapPin className="w-6 h-6 text-brand" /></div><div className="flex-1"><p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Endereço Selecionado</p><h4 className="font-bold text-gray-900 text-lg leading-tight line-clamp-2">{mapAddress || 'Carregando endereço...'}</h4></div></div><button onClick={() => setShowMapModal(false)} className="w-full bg-brand text-white font-bold py-3.5 rounded-xl hover:bg-brandHover shadow-lg flex items-center justify-center gap-2"><CheckCircle className="w-5 h-5" /> Confirmar</button></div></div></div></div>)}

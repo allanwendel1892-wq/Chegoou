@@ -1,8 +1,6 @@
-
-
 import React, { useState, useRef, useEffect } from 'react';
 import { User, Company, Order, WithdrawalRequest, UserRole, Address } from '../types';
-import { Users, Building2, DollarSign, Settings, Trash2, CheckCircle, Ban, TrendingUp, Search, Lock, Unlock, Edit, X, Save, Bike, LogOut, MapPin, Truck, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair } from 'lucide-react';
+import { Users, Building2, DollarSign, Settings, Trash2, CheckCircle, Ban, TrendingUp, Search, Lock, Unlock, Edit, X, Save, Bike, LogOut, MapPin, Truck, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, Store, Wallet } from 'lucide-react';
 
 interface AdminViewProps {
   users: User[];
@@ -392,7 +390,7 @@ const AdminView: React.FC<AdminViewProps> = ({
           type: 'approve_withdrawal',
           id,
           title: 'Confirmar Pagamento',
-          message: 'Você confirma que o pagamento foi realizado para o entregador?'
+          message: 'Você confirma que o pagamento foi realizado?'
       });
   };
 
@@ -416,7 +414,7 @@ const AdminView: React.FC<AdminViewProps> = ({
   const totalRevenue = orders.reduce((acc, o) => o.status !== 'cancelled' ? acc + o.total : acc, 0);
   const totalOrders = orders.length;
   const activeCompaniesCount = companies.filter(c => !c.isSuspended).length;
-  const platformRevenue = totalRevenue * (globalSettings.platformFee / 100);
+  const platformRevenue = totalRevenue * (0.15); // Estimativa de 15% apenas para dashboard visual
 
   return (
     <div className="p-6 md:p-10 max-w-7xl mx-auto bg-gray-50 min-h-screen">
@@ -596,8 +594,8 @@ const AdminView: React.FC<AdminViewProps> = ({
                     
                     <div className="space-y-3 text-sm text-gray-600 bg-white/50 p-4 rounded-xl mb-4">
                         <div className="flex justify-between border-b border-gray-200/50 pb-2">
-                            <span>Taxa Serviço</span>
-                            <span className="font-bold text-gray-900">{company.serviceFeePercentage}%</span>
+                            <span>Taxa Transação Bancária</span>
+                            <span className="font-bold text-gray-900">R$ {company.serviceFeePercentage?.toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between border-b border-gray-200/50 pb-2">
                             <span>Logística</span>
@@ -664,24 +662,24 @@ const AdminView: React.FC<AdminViewProps> = ({
                       <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-6 rounded-2xl border border-green-100">
                           <p className="text-sm text-green-600 font-bold uppercase tracking-wider mb-2">Receita Plataforma</p>
                           <h4 className="text-3xl font-bold text-green-900">R$ {platformRevenue.toFixed(2)}</h4>
-                          <p className="text-xs text-green-600 mt-2 opacity-80">Baseado na taxa de {globalSettings.platformFee}%</p>
+                          <p className="text-xs text-green-600 mt-2 opacity-80">Estimativa baseada em taxas</p>
                       </div>
                   </div>
               </div>
 
-              {/* Courier Withdrawals */}
+              {/* All Withdrawals (Partners & Couriers) */}
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                  <div className="p-6 border-b border-gray-100 flex items-center gap-3">
-                     <Bike className="w-5 h-5 text-orange-600" />
-                     <h3 className="font-bold text-lg text-gray-800">Solicitações de Saque (Entregadores)</h3>
+                     <Wallet className="w-5 h-5 text-gray-600" />
+                     <h3 className="font-bold text-lg text-gray-800">Solicitações de Saque</h3>
                  </div>
                  <div className="overflow-x-auto">
                     <table className="w-full text-left">
                         <thead className="bg-gray-50/50">
                             <tr>
                                 <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Solicitante</th>
-                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Valor</th>
-                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Dados Bancários</th>
+                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Valor Disponível (Bruto)</th>
+                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Instruções de Pagamento (Líquido)</th>
                                 <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Status</th>
                                 <th className="p-4 text-xs font-semibold text-gray-500 uppercase text-right">Ações</th>
                             </tr>
@@ -696,9 +694,25 @@ const AdminView: React.FC<AdminViewProps> = ({
                             )}
                             {withdrawals.map(req => (
                                 <tr key={req.id}>
-                                    <td className="p-4 font-medium text-gray-900">{req.userName}</td>
-                                    <td className="p-4 font-bold text-gray-800">R$ {req.amount.toFixed(2)}</td>
-                                    <td className="p-4 text-sm text-gray-600 font-mono bg-gray-50 rounded">{req.bankInfo}</td>
+                                    <td className="p-4">
+                                        <div className="flex items-center gap-2">
+                                            <div className={`p-2 rounded-full ${req.userType === 'partner' ? 'bg-red-100 text-red-600' : 'bg-orange-100 text-orange-600'}`}>
+                                                {req.userType === 'partner' ? <Store className="w-4 h-4"/> : <Bike className="w-4 h-4"/>}
+                                            </div>
+                                            <div>
+                                                <span className="font-bold text-gray-900 block">{req.userName}</span>
+                                                <span className="text-xs text-gray-500 capitalize">{req.userType === 'partner' ? 'Restaurante' : 'Entregador'}</span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td className="p-4 font-bold text-gray-500">R$ {req.amount.toFixed(2)}</td>
+                                    <td className="p-4">
+                                        <div className={`text-sm font-mono p-2 rounded border ${req.bankInfo.includes('Líquido') ? 'bg-green-50 border-green-200 text-green-800' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
+                                            {req.bankInfo.split('|').map((part, i) => (
+                                                <div key={i} className={part.includes('Líquido') ? 'font-bold mt-1 text-base' : ''}>{part.trim()}</div>
+                                            ))}
+                                        </div>
+                                    </td>
                                     <td className="p-4">
                                         {req.status === 'paid' ? (
                                             <span className="bg-green-100 text-green-700 px-2 py-1 rounded-full text-xs font-bold uppercase">Pago</span>
@@ -710,7 +724,7 @@ const AdminView: React.FC<AdminViewProps> = ({
                                         {req.status === 'pending' && (
                                             <button 
                                                 onClick={() => approveWithdrawal(req.id)}
-                                                className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-green-700 transition-colors"
+                                                className="bg-green-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-green-700 transition-colors shadow-sm"
                                             >
                                                 Confirmar Pagto
                                             </button>
@@ -769,14 +783,14 @@ const AdminView: React.FC<AdminViewProps> = ({
                   </div>
                   <div className="p-6 space-y-4">
                       <div>
-                          <label className="text-sm font-bold text-gray-700">Taxa Padrão da Plataforma (%)</label>
+                          <label className="text-sm font-bold text-gray-700">Taxa de Serviço Fixa (R$)</label>
                           <input 
                             type="number" 
                             value={localSettingsForm.platformFee}
                             onChange={(e) => setLocalSettingsForm({...localSettingsForm, platformFee: Number(e.target.value)})}
                             className="w-full mt-1 border border-gray-200 rounded-lg px-4 py-2"
                           />
-                          <p className="text-xs text-red-500 mt-1">Atenção: Ao salvar, esta taxa será aplicada a TODAS as empresas.</p>
+                          <p className="text-xs text-gray-500 mt-1">Valor fixo cobrado do cliente por pedido.</p>
                       </div>
                       <div>
                           <label className="text-sm font-bold text-gray-700">Saque Mínimo (R$)</label>
@@ -1054,13 +1068,15 @@ const AdminView: React.FC<AdminViewProps> = ({
 
                       <div className="grid grid-cols-2 gap-4">
                           <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase">Taxa (%)</label>
+                            <label className="text-xs font-bold text-gray-500 uppercase">Taxa de Transação Bancária (R$)</label>
                             <input 
                                 type="number"
                                 value={editingCompany.serviceFeePercentage} 
                                 onChange={e => setEditingCompany({...editingCompany, serviceFeePercentage: Number(e.target.value)})}
                                 className="w-full border rounded-lg px-3 py-2 mt-1"
+                                placeholder="Ex: 1.00"
                             />
+                            <p className="text-[10px] text-gray-400 mt-1">Valor fixo cobrado no saque.</p>
                           </div>
                           <div>
                             <label className="text-xs font-bold text-gray-500 uppercase">Status</label>

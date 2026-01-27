@@ -1,9 +1,7 @@
-
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem, WithdrawalRequest } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
-import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle, ArrowRight, Lock, Unlock, Banknote, AlertCircle } from 'lucide-react';
+import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle, ArrowRight, Lock, Unlock, Banknote, AlertCircle, Info } from 'lucide-react';
 import DashboardView from './DashboardView';
 import ForecastView from './ForecastView';
 import WhatsAppBotView from './WhatsAppBotView';
@@ -196,7 +194,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   
   const [editingProductId, setEditingProductId] = useState<string | null>(null); 
-  const [productToDelete, setProductToDelete] = useState<string | null>(null); 
+  const [productToDelete, setProductToDelete] = useState<string | null>(null);
+  const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false); // NEW STATE FOR MODAL
   
   const [newProduct, setNewProduct] = useState<Partial<Product>>({
       isAvailable: true,
@@ -232,15 +231,13 @@ const PartnerView: React.FC<PartnerViewProps> = ({
         const ordersToUnlock = orders.filter(o => 
             o.repasseStatus === 'blocked' && 
             o.repasseDate && 
-            o.paymentMethod !== 'cash' && // Filtra pedidos em dinheiro
-            (now.getTime() - new Date(o.repasseDate).getTime()) > 24 * 60 * 60 * 1000 // > 24 hours
+            o.paymentMethod !== 'cash' && 
+            o.status !== 'cancelled' && 
+            (now.getTime() - new Date(o.repasseDate).getTime()) > 24 * 60 * 60 * 1000 
         );
 
         if (ordersToUnlock.length > 0) {
             console.log(`Desbloqueando ${ordersToUnlock.length} pedidos para saque...`);
-            // Update local state first to reflect changes immediately
-            // Note: This relies on App.tsx refreshing or local logic being robust. 
-            // In a real app, we'd optimistically update or refetch.
             for (const order of ordersToUnlock) {
                  await supabase.from('orders').update({ repasseStatus: 'available' }).eq('id', order.id);
             }
@@ -267,14 +264,12 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   }, [view, company.id]);
 
   const financialSummary = useMemo(() => {
-      // 1. Blocked Balance: Delivered but < 24h (EXCLUDING CASH)
       const blocked = orders
-        .filter(o => o.repasseStatus === 'blocked' && o.paymentMethod !== 'cash')
+        .filter(o => o.repasseStatus === 'blocked' && o.paymentMethod !== 'cash' && o.status !== 'cancelled')
         .reduce((acc, o) => acc + (o.repasseValue || 0), 0);
 
-      // 2. Available Balance: Delivered > 24h (status 'available') MINUS Pending/Paid Withdrawals (EXCLUDING CASH)
       const totalAvailableFromOrders = orders
-        .filter(o => o.repasseStatus === 'available' && o.paymentMethod !== 'cash')
+        .filter(o => o.repasseStatus === 'available' && o.paymentMethod !== 'cash' && o.status !== 'cancelled')
         .reduce((acc, o) => acc + (o.repasseValue || 0), 0);
 
       const totalWithdrawals = withdrawHistory
@@ -290,7 +285,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       return { blocked, available, paid };
   }, [orders, withdrawHistory]);
 
-  const handleRequestWithdraw = async () => {
+  const handleRequestWithdraw = () => {
       if (!localCompany.pixKey) {
           alert("Configure sua chave Pix nas configurações antes de solicitar saque.");
           setView(ViewState.SETTINGS);
@@ -302,26 +297,68 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           return;
       }
 
-      if (confirm(`Confirmar solicitação de saque de R$ ${financialSummary.available.toFixed(2)} para o Pix ${localCompany.pixKey}?`)) {
-           const newRequest: WithdrawalRequest = {
-               id: `wd-${Date.now()}`,
-               userId: company.id,
-               userName: company.name,
-               userType: 'partner',
-               amount: financialSummary.available,
-               status: 'pending',
-               date: new Date().toISOString(),
-               bankInfo: `${localCompany.pixKeyType?.toUpperCase()}: ${localCompany.pixKey}`
-           };
+      setIsWithdrawModalOpen(true);
+  };
 
-           const { error } = await supabase.from('withdrawal_requests').insert([newRequest]);
+  const executeWithdrawal = async () => {
+       setIsWithdrawModalOpen(false); // Close Modal
+       setIsLoadingFinance(true);
+       try {
+           console.log("Enviando solicitação para Edge Function: smart-api ...");
+           
+           // Calculate values for display/record
+           const bankFee = localCompany.serviceFeePercentage || 0; // "Taxa Transação Bancária"
+           const netAmount = Math.max(0, financialSummary.available - bankFee);
+
+           // Invoke Supabase Function - USING 'smart-api' SLUG
+           const { data, error } = await supabase.functions.invoke('smart-api', {
+               body: {
+                   amount: financialSummary.available, // Bruto na função, mas vamos salvar o detalhamento
+                   pixKey: localCompany.pixKey,
+                   pixKeyType: localCompany.pixKeyType || 'email',
+                   userId: company.id,
+                   userName: company.name
+               }
+           });
+
            if (error) {
-               alert("Erro ao solicitar saque.");
-           } else {
-               alert("Solicitação enviada! O valor será transferido em breve.");
-               setWithdrawHistory([newRequest, ...withdrawHistory]);
+               console.error("Erro na Edge Function:", error);
+               let msg = error.message;
+               try {
+                   const body = typeof error === 'string' ? JSON.parse(error) : error;
+                   if (body && body.error) msg = body.error;
+               } catch(e) {}
+               throw new Error(msg);
            }
-      }
+
+           console.log("Edge Function Success:", data);
+           
+           // Se a função criou o registro, precisamos atualizar o campo 'bankInfo' para incluir o detalhamento das taxas
+           // Assumindo que a função retorna os dados criados em data.data[0]
+           if (data.data && data.data[0]) {
+               const withdrawalId = data.data[0].id;
+               const detailString = `${localCompany.pixKeyType || 'PIX'}: ${localCompany.pixKey} | Taxa: R$ ${bankFee.toFixed(2)} | Líquido: R$ ${netAmount.toFixed(2)}`;
+               
+               await supabase.from('withdrawal_requests').update({ bankInfo: detailString }).eq('id', withdrawalId);
+           }
+
+           alert("Solicitação enviada com sucesso! O pagamento será processado na próxima janela bancária.");
+           
+           // Refresh history
+           const { data: updatedHistory } = await supabase
+                .from('withdrawal_requests')
+                .select('*')
+                .eq('userId', company.id)
+                .order('date', {ascending: false});
+                
+           if (updatedHistory) setWithdrawHistory(updatedHistory);
+
+       } catch (e: any) {
+           console.error("Erro no catch:", e);
+           alert("Erro ao processar saque: " + (e.message || "Falha na comunicação com o servidor."));
+       } finally {
+           setIsLoadingFinance(false);
+       }
   };
 
   // --- END FINANCEIRO ---
@@ -627,6 +664,53 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   return (
     <div className="flex h-screen bg-gray-50 relative">
         
+        {/* WITHDRAWAL MODAL - UPDATED */}
+        {isWithdrawModalOpen && (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+                <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-scale-in">
+                    <h3 className="text-xl font-bold text-gray-900 mb-4 border-b pb-2">Resumo do Saque</h3>
+                    
+                    <div className="space-y-3 mb-6 text-sm">
+                        <div className="flex justify-between text-gray-600">
+                            <span>Saldo Disponível:</span>
+                            <span className="font-bold">R$ {financialSummary.available.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-red-500">
+                            <span>Taxa Transação Bancária:</span>
+                            <span className="font-bold">- R$ {(localCompany.serviceFeePercentage || 0).toFixed(2)}</span>
+                        </div>
+                        <div className="border-t pt-2 mt-2 flex justify-between text-lg text-gray-900 font-bold">
+                            <span>Valor Líquido (Pix):</span>
+                            <span>R$ {Math.max(0, financialSummary.available - (localCompany.serviceFeePercentage || 0)).toFixed(2)}</span>
+                        </div>
+                    </div>
+
+                    <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 mb-6 flex gap-3 items-start">
+                        <Info className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                        <p className="text-xs text-blue-800 leading-relaxed">
+                            O pagamento será realizado na próxima janela bancária <strong>(09h às 14h)</strong> para a chave: <br/>
+                            <span className="font-mono font-bold bg-white px-1 rounded border border-blue-200">{localCompany.pixKey}</span>
+                        </p>
+                    </div>
+
+                    <div className="flex gap-3">
+                        <button 
+                            onClick={() => setIsWithdrawModalOpen(false)}
+                            className="flex-1 py-3 rounded-xl bg-gray-100 font-bold text-gray-600 hover:bg-gray-200 transition-colors"
+                        >
+                            Cancelar
+                        </button>
+                        <button 
+                            onClick={executeWithdrawal}
+                            className="flex-1 py-3 rounded-xl bg-green-600 font-bold text-white hover:bg-green-700 shadow-lg shadow-green-200 transition-colors"
+                        >
+                            Confirmar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+
         {productToDelete && (
             <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
                 <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-scale-in">
@@ -655,6 +739,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             </div>
         )}
 
+        {/* ... Rest of existing JSX ... */}
         {editingOrder && (
              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
                  <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl animate-scale-in overflow-hidden max-h-[90vh] flex flex-col">
@@ -1077,8 +1162,10 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                 </div>
             )}
 
+            {/* ... other views ... */}
             {view === ViewState.MENU && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    {/* ... (Existing Menu View Code) ... */}
                     <div className="lg:col-span-1 bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-fit sticky top-8">
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
@@ -1104,7 +1191,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 )}
                                 <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={e => handleFileUpload(e, setProductImagePreview)} accept="image/*" />
                             </div>
-
+                            
+                            {/* ... Rest of Menu Form ... */}
                             <div className="grid grid-cols-2 gap-3">
                                 <div className="col-span-2">
                                     <label className="text-xs font-bold text-gray-500 uppercase ml-1">Nome</label>
@@ -1214,7 +1302,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                             </button>
                         </div>
                     </div>
-
+                    
+                    {/* ... Rest of existing Menu rendering ... */}
                     <div className="lg:col-span-2 space-y-6">
                         <div className="flex justify-between items-center">
                             <h2 className="text-2xl font-bold text-gray-800">Cardápio Atual</h2>
@@ -1259,7 +1348,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                     </div>
                 </div>
             )}
-
+            
             {view === ViewState.FORECAST && (
                 <ForecastView products={products} salesHistory={calculatedSalesHistory} />
             )}
@@ -1270,11 +1359,13 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
             {view === ViewState.SETTINGS && (
                 <div className="max-w-2xl mx-auto bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
+                    {/* ... (Existing Settings Code) ... */}
                     <h2 className="text-2xl font-bold text-gray-900 mb-6">Configurações da Loja</h2>
                     
                     <div className="space-y-6">
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="col-span-2">
+                            {/* ... Image, Name, Desc fields ... */}
+                             <div className="col-span-2">
                                 <label className="text-sm font-bold text-gray-700 mb-2 block">Identidade Visual</label>
                                 <div className="flex gap-6 items-start">
                                     <div className="flex flex-col items-center gap-2">
@@ -1304,7 +1395,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                     </div>
                                 </div>
                             </div>
-
+                            
                             <div className="col-span-2 mt-4">
                                 <label className="text-sm font-bold text-gray-700">Nome da Loja</label>
                                 <input 
@@ -1314,7 +1405,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 />
                             </div>
                             
-                            <div className="col-span-2">
+                             {/* ... Other inputs ... */}
+                             <div className="col-span-2">
                                 <label className="text-sm font-bold text-gray-700">Categoria</label>
                                 <select 
                                     value={localCompany.category} 
@@ -1485,35 +1577,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             )}
         </div>
       </div>
-
-      {showMapModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in h-full">
-            <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl flex flex-col h-[90%] relative">
-                <div className="absolute top-0 left-0 right-0 p-4 z-10 flex justify-between items-start pointer-events-none">
-                    <div className="bg-white/95 backdrop-blur px-4 py-2 rounded-xl shadow-md border border-gray-100 pointer-events-auto">
-                        <h3 className="font-bold text-gray-800 flex items-center gap-2">
-                            <Navigation className="w-4 h-4 text-red-600" /> Definir Localização
-                        </h3>
-                        <p className="text-xs text-gray-500">Mova o pin para o endereço correto.</p>
-                    </div>
-                    <button onClick={() => setShowMapModal(false)} className="bg-white p-2 rounded-full shadow-md hover:bg-gray-100 pointer-events-auto"><X className="w-6 h-6 text-gray-500" /></button>
-                </div>
-                <div className="flex-1 bg-gray-100 relative group overflow-hidden">
-                    {mapError ? (
-                        <div className="w-full h-full flex flex-col items-center justify-center text-center p-8"><MapIcon className="w-16 h-16 text-gray-300"/><p>Erro no Mapa</p></div>
-                    ) : (
-                        <>
-                        <div ref={mapContainerRef} className="w-full h-full" />
-                        <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-20 pointer-events-none transition-all duration-300 ease-out ${isMapDragging ? '-mt-16 scale-110' : '-mt-8'}`}>
-                            <div className="w-12 h-12 bg-red-600 rounded-full flex items-center justify-center shadow-2xl border-[3px] border-white"><MapPin className="w-6 h-6 text-white fill-current" /></div>
-                            <div className={`w-2 h-8 bg-black/80 rounded-full -mt-2 blur-[1px] transition-opacity duration-300 ${isMapDragging ? 'opacity-0' : 'opacity-20'}`}></div>
-                        </div>
-                        {!isMapDragging && <div className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-3 py-1.5 rounded-full pointer-events-none flex items-center gap-2 animate-pulse"><MousePointer2 className="w-3 h-3" /> Arraste o mapa</div>}
-                        </>
-                    )}
-                </div>
-                <div className="p-6 bg-white border-t border-gray-100 rounded-t-3xl -mt-6 relative z-30 shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
-                    <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"><div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"></div><div className="flex items-start gap-3 mb-6"><div className="p-2 bg-red-50 rounded-lg shrink-0"><MapPin className="w-6 h-6 text-red-600" /></div><div className="flex-1"><p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Endereço Selecionado</p><h4 className="font-bold text-gray-900 text-lg leading-tight line-clamp-2">{mapAddress || 'Carregando endereço...'}</h4></div></div><button onClick={() => setShowMapModal(false)} className="w-full bg-red-600 text-white font-bold py-3.5 rounded-xl hover:bg-red-700 shadow-lg flex items-center justify-center gap-2"><CheckCircle className="w-5 h-5" /> Confirmar</button></div></div></div></div>)}
     </div>
   );
 };

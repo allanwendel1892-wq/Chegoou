@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest } from './types';
 import AuthView from './components/AuthView';
@@ -53,7 +51,7 @@ const App: React.FC = () => {
   const [chats, setChats] = useState<Record<string, ChatMessage[]>>({});
 
   const [globalSettings, setGlobalSettings] = useState({
-      platformFee: 10,
+      platformFee: 0.49, // AGORA É VALOR FIXO EM REAIS (R$ 0,49)
       minWithdrawal: 50,
       maintenanceMode: false
   });
@@ -371,9 +369,27 @@ const App: React.FC = () => {
     const company = companies.find(c => c.id === companyId);
     if (!company) return false;
 
-    // LÓGICA FINANCEIRA: Se for dinheiro, o repasse para a carteira da plataforma é 0
+    // --- NOVA LÓGICA DE REPASSE ---
     const isOnlinePayment = paymentMethod !== 'cash';
-    const repasseValue = isOnlinePayment ? Math.max(0, finalTotal - serviceFee) : 0;
+    const FIXED_SERVICE_FEE = 0.49; // Agora fixo em 49 centavos
+    
+    let repasseValue = 0;
+
+    if (isOnlinePayment) {
+        if (company.deliveryType === 'own') {
+            // Entrega Própria: Restaurante recebe (Comida + Entrega) - 0.49
+            // Se retirada, não tem entrega, então (Comida) - 0.49
+            const amountToPartner = deliveryMethod === 'delivery' ? (subtotal + deliveryFee) : subtotal;
+            repasseValue = Math.max(0, amountToPartner - FIXED_SERVICE_FEE);
+        } else {
+            // Entrega Chegoou (Plataforma): Restaurante recebe SÓ a Comida.
+            // Plataforma fica com a taxa de entrega + 0.49
+            repasseValue = subtotal;
+        }
+    } else {
+        // Dinheiro: Restaurante recebe tudo na mão. Repasse é 0 (ou negativo se implementássemos dívida).
+        repasseValue = 0; 
+    }
 
     const newOrder: Order = {
         id: `ord-${Date.now()}`,
@@ -392,7 +408,7 @@ const App: React.FC = () => {
         total: finalTotal,
         subtotal: subtotal,
         deliveryFee: deliveryFee,
-        serviceFee: serviceFee,
+        serviceFee: FIXED_SERVICE_FEE, // Salva o valor fixo
         deliveryMethod: deliveryMethod,
         paymentMethod: paymentMethod,
         changeFor: changeFor,
