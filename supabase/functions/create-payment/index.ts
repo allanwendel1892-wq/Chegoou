@@ -1,6 +1,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
+// Evita erro de 'Deno is not defined' no editor
 declare const Deno: any;
 
 const corsHeaders = {
@@ -9,7 +10,7 @@ const corsHeaders = {
 }
 
 serve(async (req) => {
-  // Handle CORS preflight requests
+  // Lidar com Preflight Request do CORS
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -17,30 +18,35 @@ serve(async (req) => {
   try {
     const MP_TOKEN = Deno.env.get('MP_ACCESS_TOKEN');
     if (!MP_TOKEN) {
-      throw new Error("MP_ACCESS_TOKEN não configurado no Supabase.");
+      console.error("Erro: MP_ACCESS_TOKEN não encontrado.");
+      return new Response(JSON.stringify({ error: "Erro de configuração do servidor (Token ausente)." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    let body = {};
-    try {
-        body = await req.json();
-    } catch(e) {
-        // If body is empty or invalid JSON, ignore (body stays empty)
-    }
+    // Tenta fazer o parse do body com segurança
+    const body = await req.json().catch(() => ({}));
     
-    // Extrair action (padrão é 'create' se não vier nada)
-    const { action = 'create', paymentId, amount, payerEmail, description, method, orderId, origin } = body as any;
+    const { 
+      action = 'create', // Padrão é criar se não vier nada
+      paymentId, // Obrigatório para estorno
+      amount, 
+      payerEmail, 
+      description = 'Pedido Chegoou', 
+      method, 
+      orderId, 
+      origin 
+    } = body;
 
     // =================================================================
     // AÇÃO: ESTORNO (REFUND)
     // =================================================================
     if (action === 'refund') {
       if (!paymentId) {
-        return new Response(JSON.stringify({ error: "Payment ID é obrigatório para estorno." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ error: "ID do pagamento é obrigatório para estorno." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
-      console.log(`Iniciando estorno para pagamento: ${paymentId}`);
+      console.log(`Iniciando estorno para pagamento ID: ${paymentId}`);
 
-      // Endpoint de Reembolso Total do Mercado Pago
+      // Chamada para a API de Reembolso do Mercado Pago
       const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}/refunds`, {
         method: "POST",
         headers: {
@@ -48,19 +54,22 @@ serve(async (req) => {
           "Content-Type": "application/json",
           "X-Idempotency-Key": crypto.randomUUID(),
         },
-        body: JSON.stringify({}) // Empty body for full refund
+        body: JSON.stringify({}) // Body vazio = reembolso total
       });
 
       const result = await response.json();
 
       if (!response.ok) {
         console.error("Erro MP Refund:", result);
-        return new Response(JSON.stringify({ success: false, error: result.message || "Erro ao processar estorno no Mercado Pago" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ 
+            success: false, 
+            error: result.message || "Erro ao processar estorno no Mercado Pago" 
+        }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
       return new Response(JSON.stringify({
         success: true,
-        status: result.status, // 'approved' geralmente
+        status: result.status, // Geralmente 'approved'
         refundId: result.id
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -69,94 +78,94 @@ serve(async (req) => {
     // AÇÃO: CRIAR PAGAMENTO (CREATE)
     // =================================================================
     else {
-      if (!amount || !payerEmail) {
-        return new Response(JSON.stringify({ error: "Dados ausentes (amount ou email)" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-
-      // --- LÓGICA PIX: CHECKOUT TRANSPARENTE ---
-      if (method === 'pix') {
-        const response = await fetch("https://api.mercadopago.com/v1/payments", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${MP_TOKEN}`,
-            "Content-Type": "application/json",
-            "X-Idempotency-Key": crypto.randomUUID(),
-          },
-          body: JSON.stringify({
-            transaction_amount: Number(amount),
-            description: description || 'Pedido Chegoou',
-            payment_method_id: 'pix',
-            payer: { email: payerEmail.trim() },
-            external_reference: orderId, // Vinculo Importante
-            notification_url: "https://seusite.com/api/webhook" // Opcional
-          }),
-        });
-
-        const result = await response.json();
-        
-        if (!response.ok) {
-             throw new Error(result.message || "Erro ao criar Pix");
+        // Validação básica para criação
+        if (!amount || !payerEmail) {
+            return new Response(JSON.stringify({ error: "Dados ausentes (Valor ou Email)" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
 
-        return new Response(JSON.stringify({
-          success: true,
-          status: result.status,
-          id: result.id,
-          qrCode: result.point_of_interaction?.transaction_data?.qr_code,
-          qrCodeBase64: result.point_of_interaction?.transaction_data?.qr_code_base64,
-          ticketUrl: result.transaction_details?.external_resource_url
-        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
+        // --- LÓGICA PIX: CHECKOUT TRANSPARENTE ---
+        if (method === 'pix') {
+            const response = await fetch("https://api.mercadopago.com/v1/payments", {
+                method: "POST",
+                headers: {
+                "Authorization": `Bearer ${MP_TOKEN}`,
+                "Content-Type": "application/json",
+                "X-Idempotency-Key": crypto.randomUUID(),
+                },
+                body: JSON.stringify({
+                transaction_amount: Number(amount),
+                description: description,
+                payment_method_id: 'pix',
+                payer: { email: payerEmail.trim() },
+                external_reference: orderId, // Vincula ao pedido
+                notification_url: "https://seusite.com/api/webhook" // Opcional (Webhook)
+                }),
+            });
 
-      // --- LÓGICA CARTÃO: CHECKOUT PRO (REDIRECT) ---
-      else {
-        const response = await fetch("https://api.mercadopago.com/checkout/preferences", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${MP_TOKEN}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            items: [{
-              id: orderId,
-              title: description || 'Pedido Chegoou',
-              quantity: 1,
-              unit_price: Number(amount),
-              currency_id: 'BRL'
-            }],
-            payer: { email: payerEmail.trim() },
-            external_reference: orderId,
-            back_urls: {
-              success: origin || '',
-              failure: origin || '',
-              pending: origin || ''
-            },
-            auto_return: "approved",
-            payment_methods: {
-              excluded_payment_methods: [{ id: 'ticket' }],
-              excluded_payment_types: [{ id: 'bank_transfer' }],
-              installments: 12
+            const result = await response.json();
+            
+            if (!response.ok) {
+                console.error("Erro MP Pix:", result);
+                return new Response(JSON.stringify({ error: result.message || "Erro ao criar Pix" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
             }
-          }),
-        });
 
-        const result = await response.json();
-        
-        if (!response.ok) {
-             throw new Error(result.message || "Erro ao criar Preferência");
+            return new Response(JSON.stringify({
+                success: true,
+                status: result.status,
+                id: result.id,
+                qrCode: result.point_of_interaction?.transaction_data?.qr_code,
+                qrCodeBase64: result.point_of_interaction?.transaction_data?.qr_code_base64,
+                ticketUrl: result.transaction_details?.external_resource_url
+            }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
 
-        return new Response(JSON.stringify({
-          success: true,
-          status: 'pending',
-          ticketUrl: result.init_point, // URL de redirecionamento
-        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
+        // --- LÓGICA CARTÃO: CHECKOUT PRO (REDIRECT) ---
+        else {
+            const response = await fetch("https://api.mercadopago.com/checkout/preferences", {
+                method: "POST",
+                headers: {
+                "Authorization": `Bearer ${MP_TOKEN}`,
+                "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                items: [{
+                    title: description,
+                    quantity: 1,
+                    unit_price: Number(amount),
+                    currency_id: 'BRL'
+                }],
+                payer: { email: payerEmail.trim() },
+                external_reference: orderId,
+                back_urls: {
+                    success: origin || '',
+                    failure: origin || '',
+                    pending: origin || ''
+                },
+                auto_return: "approved",
+                payment_methods: {
+                    excluded_payment_methods: [{ id: 'ticket' }], // Remove boleto
+                    excluded_payment_types: [{ id: 'bank_transfer' }],
+                    installments: 12
+                }
+                }),
+            });
+
+            const result = await response.json();
+            
+            if (!response.ok) {
+                console.error("Erro MP Preference:", result);
+                return new Response(JSON.stringify({ error: result.message || "Erro ao criar Preferência" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+            }
+
+            return new Response(JSON.stringify({
+                success: true,
+                ticketUrl: result.init_point, // URL de redirecionamento
+            }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
     }
 
   } catch (error: any) {
-    console.error("Critical Error:", error);
-    return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    console.error("Edge Function Critical Error:", error);
+    return new Response(JSON.stringify({ error: error.message || "Erro interno no servidor de pagamento" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 })
-    
