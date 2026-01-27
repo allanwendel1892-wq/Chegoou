@@ -34,9 +34,11 @@ export const PaymentService = {
       console.log(`[PaymentService] Iniciando transação real via ${method}`);
       const currentUrl = window.location.origin.replace(/\/$/, "");
 
+      // Send request to Edge Function
+      // Note: Removed manual Authorization header to let Supabase client handle it
       const { data, error } = await supabase.functions.invoke('create-payment', {
         body: {
-          action: 'create', // IMPORTANTE: Define que é uma criação
+          action: 'create',
           amount,
           method,
           payerEmail: user.email,
@@ -44,16 +46,12 @@ export const PaymentService = {
           token: cardToken,
           orderId: orderId,
           origin: currentUrl,
-        },
-        headers: {
-            // Using explicit Authorization header for Anon access
-            Authorization: `Bearer ${SUPABASE_ANON_KEY}`
         }
       });
 
       if (error) {
         console.error("[PaymentService] Erro na Edge Function:", error);
-        throw new Error("Erro de comunicação com o servidor de pagamento (Edge Function).");
+        throw new Error(error.message || "Erro de comunicação com o servidor de pagamento (Edge Function).");
       }
 
       if (!data || data.error) {
@@ -88,9 +86,6 @@ export const PaymentService = {
               body: {
                   action: 'refund', // IMPORTANTE: Define que é um estorno
                   paymentId: paymentId
-              },
-              headers: {
-                  Authorization: `Bearer ${SUPABASE_ANON_KEY}`
               }
           });
 

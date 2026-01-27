@@ -22,12 +22,18 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Erro de configuração do servidor (Token ausente)." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Tenta fazer o parse do body com segurança
-    const body = await req.json().catch(() => ({}));
+    // Parse body robustamente
+    let body: any = {};
+    try {
+        const text = await req.text();
+        if (text) body = JSON.parse(text);
+    } catch (e) {
+        console.error("Erro parsing body:", e);
+    }
     
     const { 
-      action = 'create', // Padrão é criar se não vier nada
-      paymentId, // Obrigatório para estorno
+      action = 'create', 
+      paymentId, 
       amount, 
       payerEmail, 
       description = 'Pedido Chegoou', 
@@ -35,6 +41,8 @@ serve(async (req) => {
       orderId, 
       origin 
     } = body;
+
+    console.log(`Action: ${action}, Method: ${method}`);
 
     // =================================================================
     // AÇÃO: ESTORNO (REFUND)
@@ -169,3 +177,4 @@ serve(async (req) => {
     return new Response(JSON.stringify({ error: error.message || "Erro interno no servidor de pagamento" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 })
+    
