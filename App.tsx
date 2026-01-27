@@ -454,18 +454,23 @@ const App: React.FC = () => {
 
   const updateOrderStatus = async (orderId: string, status: Order['status']) => {
     // --- LÓGICA DE CANCELAMENTO COM ESTORNO ---
+    let extraUpdateData: any = {};
+
     if (status === 'cancelled') {
         const orderToCancel = orders.find(o => o.id === orderId);
         
+        // FINANCIAL FIX: When an order is cancelled, we must ZERO out the repasse value 
+        // and reset the status so it doesn't count in the partner wallet.
+        extraUpdateData.repasseValue = 0;
+        extraUpdateData.repasseStatus = 'pending'; // Removes from 'blocked'/'available' flow
+
         if (orderToCancel && orderToCancel.paymentId && orderToCancel.paymentMethod !== 'cash') {
             console.log("Cancelamento detectado. Iniciando estorno...", orderToCancel.paymentId);
             try {
                 const refundResult = await PaymentService.refundPayment(orderToCancel.paymentId);
                 if (refundResult.success) {
                     alert("Pedido cancelado e estorno processado com sucesso!");
-                    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status, paymentStatus: 'refunded' } : o));
-                    await supabase.from('orders').update({ status, paymentStatus: 'refunded' }).eq('id', orderId);
-                    return;
+                    extraUpdateData.paymentStatus = 'refunded';
                 } else {
                     alert("Aviso: O pedido foi cancelado, mas houve erro no estorno automático: " + refundResult.message);
                 }
@@ -478,7 +483,7 @@ const App: React.FC = () => {
     // --- LÓGICA DE REPASSE (24H LOCK) ---
     // Quando o pedido é entregue, marcamos o repasse como 'bloqueado' e setamos a data.
     // SOMENTE SE O PAGAMENTO NÃO FOR DINHEIRO (CASH)
-    let updateData: any = { status };
+    let updateData: any = { status, ...extraUpdateData };
     
     // Obter dados atuais do pedido para checar o método de pagamento
     const currentOrder = orders.find(o => o.id === orderId);

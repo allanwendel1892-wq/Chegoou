@@ -232,15 +232,13 @@ const PartnerView: React.FC<PartnerViewProps> = ({
         const ordersToUnlock = orders.filter(o => 
             o.repasseStatus === 'blocked' && 
             o.repasseDate && 
-            o.paymentMethod !== 'cash' && // Filtra pedidos em dinheiro
+            o.paymentMethod !== 'cash' && 
+            o.status !== 'cancelled' && // Security check: never unlock cancelled orders
             (now.getTime() - new Date(o.repasseDate).getTime()) > 24 * 60 * 60 * 1000 // > 24 hours
         );
 
         if (ordersToUnlock.length > 0) {
             console.log(`Desbloqueando ${ordersToUnlock.length} pedidos para saque...`);
-            // Update local state first to reflect changes immediately
-            // Note: This relies on App.tsx refreshing or local logic being robust. 
-            // In a real app, we'd optimistically update or refetch.
             for (const order of ordersToUnlock) {
                  await supabase.from('orders').update({ repasseStatus: 'available' }).eq('id', order.id);
             }
@@ -267,14 +265,16 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   }, [view, company.id]);
 
   const financialSummary = useMemo(() => {
-      // 1. Blocked Balance: Delivered but < 24h (EXCLUDING CASH)
+      // 1. Blocked Balance: Delivered but < 24h (EXCLUDING CASH AND CANCELLED)
+      // FIX: Added `&& o.status !== 'cancelled'` to double check data integrity.
       const blocked = orders
-        .filter(o => o.repasseStatus === 'blocked' && o.paymentMethod !== 'cash')
+        .filter(o => o.repasseStatus === 'blocked' && o.paymentMethod !== 'cash' && o.status !== 'cancelled')
         .reduce((acc, o) => acc + (o.repasseValue || 0), 0);
 
-      // 2. Available Balance: Delivered > 24h (status 'available') MINUS Pending/Paid Withdrawals (EXCLUDING CASH)
+      // 2. Available Balance: Delivered > 24h (status 'available') MINUS Pending/Paid Withdrawals (EXCLUDING CASH AND CANCELLED)
+      // FIX: Added `&& o.status !== 'cancelled'` to double check data integrity.
       const totalAvailableFromOrders = orders
-        .filter(o => o.repasseStatus === 'available' && o.paymentMethod !== 'cash')
+        .filter(o => o.repasseStatus === 'available' && o.paymentMethod !== 'cash' && o.status !== 'cancelled')
         .reduce((acc, o) => acc + (o.repasseValue || 0), 0);
 
       const totalWithdrawals = withdrawHistory
@@ -1077,8 +1077,10 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                 </div>
             )}
 
+            {/* ... other views ... */}
             {view === ViewState.MENU && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    {/* ... (Existing Menu View Code) ... */}
                     <div className="lg:col-span-1 bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-fit sticky top-8">
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
@@ -1104,7 +1106,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 )}
                                 <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={e => handleFileUpload(e, setProductImagePreview)} accept="image/*" />
                             </div>
-
+                            
+                            {/* ... Rest of Menu Form ... */}
                             <div className="grid grid-cols-2 gap-3">
                                 <div className="col-span-2">
                                     <label className="text-xs font-bold text-gray-500 uppercase ml-1">Nome</label>
@@ -1214,7 +1217,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                             </button>
                         </div>
                     </div>
-
+                    
+                    {/* ... Rest of existing Menu rendering ... */}
                     <div className="lg:col-span-2 space-y-6">
                         <div className="flex justify-between items-center">
                             <h2 className="text-2xl font-bold text-gray-800">Cardápio Atual</h2>
@@ -1259,7 +1263,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                     </div>
                 </div>
             )}
-
+            
             {view === ViewState.FORECAST && (
                 <ForecastView products={products} salesHistory={calculatedSalesHistory} />
             )}
@@ -1270,11 +1274,13 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
             {view === ViewState.SETTINGS && (
                 <div className="max-w-2xl mx-auto bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
+                    {/* ... (Existing Settings Code) ... */}
                     <h2 className="text-2xl font-bold text-gray-900 mb-6">Configurações da Loja</h2>
                     
                     <div className="space-y-6">
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="col-span-2">
+                            {/* ... Image, Name, Desc fields ... */}
+                             <div className="col-span-2">
                                 <label className="text-sm font-bold text-gray-700 mb-2 block">Identidade Visual</label>
                                 <div className="flex gap-6 items-start">
                                     <div className="flex flex-col items-center gap-2">
@@ -1304,7 +1310,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                     </div>
                                 </div>
                             </div>
-
+                            
                             <div className="col-span-2 mt-4">
                                 <label className="text-sm font-bold text-gray-700">Nome da Loja</label>
                                 <input 
@@ -1314,7 +1320,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 />
                             </div>
                             
-                            <div className="col-span-2">
+                             {/* ... Other inputs ... */}
+                             <div className="col-span-2">
                                 <label className="text-sm font-bold text-gray-700">Categoria</label>
                                 <select 
                                     value={localCompany.category} 
