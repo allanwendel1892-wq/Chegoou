@@ -37,6 +37,13 @@ export const PaymentService = {
       console.log(`[PaymentService] Iniciando transação real via ${method}`);
       const currentUrl = window.location.origin.replace(/\/$/, "");
 
+      // Ensure amount is valid and has max 2 decimal places
+      const safeAmount = Number(amount.toFixed(2));
+
+      if (safeAmount <= 0) {
+        throw new Error("Valor do pagamento inválido (deve ser maior que zero).");
+      }
+
       // Use native fetch instead of supabase.functions.invoke to avoid client library wrapper issues
       const response = await fetch(FUNCTION_URL, {
         method: 'POST',
@@ -46,7 +53,7 @@ export const PaymentService = {
         },
         body: JSON.stringify({
           action: 'create',
-          amount,
+          amount: safeAmount,
           method,
           payerEmail: user.email,
           description,

@@ -87,9 +87,16 @@ serve(async (req) => {
     // AÇÃO: CRIAR PAGAMENTO (CREATE)
     // =================================================================
     else {
-        // Validação básica para criação
-        if (!amount || !payerEmail) {
-            return new Response(JSON.stringify({ error: "Dados ausentes (Valor ou Email)" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        // Validação e Sanitização do Amount
+        const safeAmount = Number(parseFloat(String(amount)).toFixed(2));
+
+        if (isNaN(safeAmount) || safeAmount <= 0) {
+             console.error(`Amount inválido detectado: ${amount} -> ${safeAmount}`);
+             return new Response(JSON.stringify({ error: "Valor do pedido inválido (deve ser maior que zero)." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+
+        if (!payerEmail) {
+            return new Response(JSON.stringify({ error: "Email do pagador é obrigatório." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
 
         // --- LÓGICA PIX: CHECKOUT TRANSPARENTE ---
@@ -102,7 +109,7 @@ serve(async (req) => {
                 "X-Idempotency-Key": crypto.randomUUID(),
                 },
                 body: JSON.stringify({
-                transaction_amount: Number(amount),
+                transaction_amount: safeAmount,
                 description: description,
                 payment_method_id: 'pix',
                 payer: { email: payerEmail.trim() },
@@ -140,7 +147,7 @@ serve(async (req) => {
                 items: [{
                     title: description,
                     quantity: 1,
-                    unit_price: Number(amount),
+                    unit_price: safeAmount,
                     currency_id: 'BRL'
                 }],
                 payer: { email: payerEmail.trim() },
@@ -178,4 +185,3 @@ serve(async (req) => {
     return new Response(JSON.stringify({ error: error.message || "Erro interno no servidor de pagamento" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 })
-    
