@@ -114,7 +114,7 @@ export interface Order {
   id: string;
   companyId: string;
   companyName: string;
-  customerId: string;
+  customerId: string; // Made optional in DB, but TS keeps string for now (handled as empty string if needed)
   customerName: string;
   customerPhone: string; // Used for delivery code (last 4 digits)
   courierId?: string;
@@ -124,14 +124,20 @@ export interface Order {
   deliveryFee: number; // Part of Calculation A
   serviceFee: number; // Calculation B
   status: 'waiting_payment' | 'pending' | 'preparing' | 'ready' | 'waiting_courier' | 'delivering' | 'delivered' | 'cancelled';
-  paymentMethod: 'cash' | 'card' | 'pix'; // Updated payment methods
+  // Allow string to handle loose inputs from AI/N8N (e.g. "Pix", "PIX", "Whatsapp")
+  paymentMethod: 'cash' | 'card' | 'pix' | 'whatsapp' | string; 
   changeFor?: number; // Needed for cash payments
   timestamp: Date;
   deliveryCode: string; // Secret code for courier
   deliveryAddress: Address;
   pickupAddress: Address; // Address of the company
   deliveryType: 'own' | 'chegoou'; // inherited from company at time of order
-  deliveryMethod: 'delivery' | 'pickup'; // NEW: Choice of customer
+  // Allow string for deliveryMethod too (e.g. "Entrega")
+  deliveryMethod: 'delivery' | 'pickup' | string; 
+
+  // --- NOVOS CAMPOS PARA SUPORTE A IA/WHATSAPP ---
+  origin?: 'app' | 'whatsapp' | string; // Origem do pedido
+  raw_description?: string; // Texto livre do pedido (ex: "1 pizza de calabresa")
 
   // --- NOVOS CAMPOS DE CONTROLE FINANCEIRO (N8N) ---
   
@@ -142,7 +148,7 @@ export interface Order {
   paymentPixImage?: string; // BASE64 da imagem do QR Code
 
   // 2. Controle do Repasse
-  repasseStatus?: 'pending' | 'blocked' | 'available' | 'withdrawn'; // blocked = 24h lock
+  repasseStatus?: 'pending' | 'blocked' | 'available' | 'withdrawn' | 'ignored'; // 'ignored' para whats
   repasseValue?: number; // Valor líquido para o restaurante
   repasseDate?: string; // Data que o valor foi creditado (geralmente data da entrega)
   waitingFunds?: boolean; // deprecated, use repasseStatus logic

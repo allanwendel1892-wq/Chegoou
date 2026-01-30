@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Order, User, Address, WithdrawalRequest } from '../types';
-import { Navigation, Bike, CheckCircle, MapPin, DollarSign, LogOut, ArrowRight, Store, Loader2, Crosshair, AlertTriangle } from 'lucide-react';
+import { Navigation, Bike, CheckCircle, MapPin, DollarSign, LogOut, ArrowRight, Store, Loader2, Crosshair, AlertTriangle, MessageSquare } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
 interface CourierViewProps {
@@ -233,6 +233,8 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
       return { toPickup, toDrop };
   }, [activeOrder, currentLocation]);
 
+  const pMethod = activeOrder?.paymentMethod?.toLowerCase() || '';
+
   return (
     <div className="bg-gray-100 min-h-screen pb-20">
         {/* Header */}
@@ -345,11 +347,19 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
                         <p className="text-xs text-gray-500 mb-2">{activeOrder.deliveryAddress.street}, {activeOrder.deliveryAddress.number}</p>
                         
                         {/* PAYMENT ALERT FOR CASH */}
-                        {activeOrder.paymentMethod === 'cash' && (
+                        {(pMethod.includes('cash') || pMethod.includes('dinheiro')) && (
                             <div className="mb-3 p-2 bg-green-100 border border-green-200 rounded-lg text-green-800 text-xs font-bold flex items-center gap-2">
                                 <DollarSign className="w-4 h-4" />
                                 <span>Cobrar R$ {activeOrder.total.toFixed(2)} (Dinheiro)</span>
                                 {activeOrder.changeFor && <span className="bg-white px-1 rounded ml-auto">Troco p/ R$ {activeOrder.changeFor}</span>}
+                            </div>
+                        )}
+
+                        {/* PAYMENT ALERT FOR WHATSAPP */}
+                        {(pMethod.includes('whatsapp')) && (
+                            <div className="mb-3 p-2 bg-green-100 border border-green-200 rounded-lg text-green-800 text-xs font-bold flex items-center gap-2">
+                                <MessageSquare className="w-4 h-4" />
+                                <span>Verificar pagamento combinado (WhatsApp)</span>
                             </div>
                         )}
 

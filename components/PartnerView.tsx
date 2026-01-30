@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem, WithdrawalRequest } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
-import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle, ArrowRight, Lock, Unlock, Banknote, AlertCircle, Info } from 'lucide-react';
+import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle, ArrowRight, Lock, Unlock, Banknote, AlertCircle, Info, MessageSquare, CreditCard } from 'lucide-react';
 import DashboardView from './DashboardView';
 import ForecastView from './ForecastView';
 import WhatsAppBotView from './WhatsAppBotView';
@@ -80,6 +80,11 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
               const hasMessages = orderChats.length > 0;
               const lastMsg = hasMessages ? orderChats[orderChats.length - 1] : null;
               const hasUnread = lastMsg?.senderRole === 'client';
+              
+              // Normalize data from IA/N8N
+              const isWhatsapp = order.origin?.toLowerCase() === 'whatsapp';
+              const pMethod = order.paymentMethod?.toLowerCase() || '';
+              const dMethod = order.deliveryMethod?.toLowerCase() || '';
 
               return (
                   <div 
@@ -94,8 +99,14 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                           e.currentTarget.style.opacity = "1";
                       }}
                       onClick={() => onClickOrder(order)}
-                      className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all cursor-grab active:cursor-grabbing group select-none relative"
+                      className={`bg-white p-4 rounded-xl shadow-sm border ${isWhatsapp ? 'border-green-200 bg-green-50/30' : 'border-gray-100'} hover:shadow-md transition-all cursor-grab active:cursor-grabbing group select-none relative`}
                   >
+                      {isWhatsapp && (
+                          <div className="absolute -top-2 -right-2 bg-green-500 text-white rounded-full p-1 shadow-sm z-10" title="Pedido via WhatsApp (IA)">
+                              <MessageSquare className="w-3 h-3" fill="white" />
+                          </div>
+                      )}
+
                       <div className="flex justify-between items-start mb-2">
                           <span className="font-bold text-gray-900 group-hover:text-red-600 transition-colors">#{order.id.slice(-4)}</span>
                           <span className="text-xs text-gray-400 flex items-center gap-1">
@@ -104,7 +115,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                           </span>
                       </div>
                       <div className="mb-3">
-                          {order.deliveryMethod === 'pickup' ? (
+                          {dMethod.includes('pickup') || dMethod.includes('retirada') ? (
                               <span className="inline-flex items-center gap-1.5 bg-purple-50 text-purple-700 border border-purple-100 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide">
                                   <Store className="w-3 h-3" /> Retirada
                               </span>
@@ -114,59 +125,106 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                               </span>
                           )}
                       </div>
-                      <div className="flex items-center gap-2 mb-3">
-                          <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center font-bold text-gray-600 text-xs">
-                              {order.customerName.charAt(0)}
-                          </div>
-                          <span className="text-sm font-medium text-gray-800">{order.customerName}</span>
-                      </div>
-                      <div className="space-y-2 bg-gray-50 p-2.5 rounded-lg mb-3 border border-gray-100">
-                          {order.items.slice(0, 3).map((item, idx) => (
-                              <div key={idx} className="flex flex-col border-b border-gray-100 last:border-0 pb-1 last:pb-0">
-                                  <div className="text-xs text-gray-800 font-medium flex justify-between">
-                                      <span>{item.quantity}x {item.productName}</span>
-                                  </div>
-                                  {item.selectedOptions && item.selectedOptions.length > 0 && (
-                                      <div className="pl-3 mt-0.5 space-y-0.5">
-                                          {item.selectedOptions.map((opt, optIdx) => (
-                                              <p key={optIdx} className="text-[10px] text-gray-500 leading-tight">
-                                                  • {opt.optionName}
-                                              </p>
-                                          ))}
-                                      </div>
-                                  )}
+                      
+                      {/* Customer & Address */}
+                      <div className="mb-3">
+                          <div className="flex items-center gap-2 mb-1">
+                              <div className="w-6 h-6 bg-gray-100 rounded-full flex items-center justify-center font-bold text-gray-600 text-[10px]">
+                                  {order.customerName.charAt(0)}
                               </div>
-                          ))}
-                          {order.items.length > 3 && <div className="text-[10px] text-center text-gray-400 font-medium pt-1">Ver mais {order.items.length - 3} itens...</div>}
-                      </div>
-                      {order.paymentMethod === 'cash' && (
-                          <div className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-1 rounded mb-2 flex items-center gap-1 border border-green-200">
-                              <DollarSign className="w-3 h-3"/>
-                              Dinheiro {order.changeFor ? `(Troco p/ R$ ${order.changeFor.toFixed(2)})` : ''}
+                              <span className="text-sm font-medium text-gray-800 truncate">{order.customerName}</span>
                           </div>
-                      )}
-                      {order.status === 'waiting_payment' && (
+                          {order.deliveryAddress && (
+                              <p className="text-[10px] text-gray-500 flex items-center gap-1 pl-1">
+                                  <MapPin className="w-3 h-3"/> {order.deliveryAddress.street}, {order.deliveryAddress.number} - {order.deliveryAddress.neighborhood}
+                              </p>
+                          )}
+                      </div>
+
+                      {/* Items OR Description */}
+                      <div className="space-y-2 bg-gray-50 p-2.5 rounded-lg mb-3 border border-gray-100">
+                          {Array.isArray(order.items) && order.items.length > 0 ? (
+                              <>
+                                  {order.items.slice(0, 3).map((item, idx) => (
+                                      <div key={idx} className="flex flex-col border-b border-gray-100 last:border-0 pb-1 last:pb-0">
+                                          <div className="text-xs text-gray-800 font-medium flex justify-between">
+                                              <span>{item.quantity}x {item.productName}</span>
+                                          </div>
+                                          {item.selectedOptions && item.selectedOptions.length > 0 && (
+                                              <div className="pl-3 mt-0.5 space-y-0.5">
+                                                  {item.selectedOptions.map((opt, optIdx) => (
+                                                      <p key={optIdx} className="text-[10px] text-gray-500 leading-tight">
+                                                          • {opt.optionName}
+                                                      </p>
+                                                  ))}
+                                              </div>
+                                          )}
+                                      </div>
+                                  ))}
+                                  {order.items.length > 3 && <div className="text-[10px] text-center text-gray-400 font-medium pt-1">Ver mais {order.items.length - 3} itens...</div>}
+                              </>
+                          ) : (
+                              <p className="text-xs text-gray-600 italic whitespace-pre-wrap leading-relaxed">
+                                  {order.raw_description || "Sem descrição"}
+                              </p>
+                          )}
+                      </div>
+
+                      {/* Payment */}
+                      <div className="mb-2">
+                          {pMethod.includes('cash') || pMethod.includes('dinheiro') ? (
+                              <div className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-green-200">
+                                  <DollarSign className="w-3 h-3"/>
+                                  Dinheiro {order.changeFor ? `(Troco p/ R$ ${order.changeFor.toFixed(2)})` : ''}
+                              </div>
+                          ) : pMethod.includes('pix') ? (
+                              <div className="bg-teal-100 text-teal-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-teal-200">
+                                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-4.33-6.027l2.997 2.998 2.062-2.064-2.997-2.997 2.997-2.998-2.063-2.063-2.996 2.997-2.998-2.997-2.063 2.063 2.997 2.998-2.997 2.997 2.063 2.064 2.998-2.998z"/></svg>
+                                  Pix
+                              </div>
+                          ) : pMethod.includes('card') || pMethod.includes('cartao') || pMethod.includes('cartão') ? (
+                              <div className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-blue-200">
+                                  <CreditCard className="w-3 h-3"/>
+                                  Cartão
+                              </div>
+                          ) : (
+                              <div className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-green-200">
+                                  <MessageSquare className="w-3 h-3"/>
+                                  Combinado no Chat
+                              </div>
+                          )}
+                      </div>
+
+                      {order.status === 'waiting_payment' && !isWhatsapp && (
                            <div className="bg-yellow-100 text-yellow-800 text-[10px] font-bold px-2 py-1 rounded mb-2 flex items-center gap-1 border border-yellow-200">
                                <Clock className="w-3 h-3"/>
                                Aguardando Pagamento
                            </div>
                       )}
+
                       <div className="flex justify-between items-center pt-2 border-t border-gray-50 mt-2">
                           <span className="font-bold text-sm">R$ {order.total.toFixed(2)}</span>
                           <div className="flex items-center gap-2">
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); onOpenChat(order.id); }}
-                                className={`p-2 rounded-full transition-all flex items-center gap-1
-                                    ${hasUnread 
-                                        ? 'bg-red-600 text-white animate-pulse shadow-md shadow-red-200' 
-                                        : hasMessages ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
-                                    }
-                                `}
-                                title="Chat com Cliente"
-                              >
-                                  <MessageCircle className="w-4 h-4" />
-                                  {hasUnread && <span className="text-[10px] font-bold">Novo</span>}
-                              </button>
+                              {!isWhatsapp && (
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); onOpenChat(order.id); }}
+                                    className={`p-2 rounded-full transition-all flex items-center gap-1
+                                        ${hasUnread 
+                                            ? 'bg-red-600 text-white animate-pulse shadow-md shadow-red-200' 
+                                            : hasMessages ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+                                        }
+                                    `}
+                                    title="Chat com Cliente"
+                                >
+                                    <MessageCircle className="w-4 h-4" />
+                                    {hasUnread && <span className="text-[10px] font-bold">Novo</span>}
+                                </button>
+                              )}
+                              {isWhatsapp && (
+                                  <button onClick={() => window.open(`https://wa.me/${order.customerPhone}`, '_blank')} className="p-2 rounded-full bg-green-100 text-green-600 hover:bg-green-200">
+                                      <MessageSquare className="w-4 h-4"/>
+                                  </button>
+                              )}
                               <div className={`w-2 h-2 rounded-full ${color.replace('border-', 'bg-').replace('200', '500')}`}></div>
                           </div>
                       </div>
@@ -231,6 +289,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
         const ordersToUnlock = orders.filter(o => 
             o.repasseStatus === 'blocked' && 
             o.repasseDate && 
+            o.origin !== 'whatsapp' && // Ignora WhatsApp
             o.paymentMethod !== 'cash' && 
             o.status !== 'cancelled' && 
             (now.getTime() - new Date(o.repasseDate).getTime()) > 24 * 60 * 60 * 1000 
@@ -264,11 +323,18 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   }, [view, company.id]);
 
   const financialSummary = useMemo(() => {
-      const blocked = orders
+      // Pedidos WhatsApp ou Cash são ignorados do saldo da plataforma pois o restaurante recebe direto
+      const validOrders = orders.filter(o => {
+          const isWhatsapp = o.origin?.toLowerCase() === 'whatsapp';
+          const isIgnored = o.repasseStatus === 'ignored';
+          return !isWhatsapp && !isIgnored;
+      });
+
+      const blocked = validOrders
         .filter(o => o.repasseStatus === 'blocked' && o.paymentMethod !== 'cash' && o.status !== 'cancelled')
         .reduce((acc, o) => acc + (o.repasseValue || 0), 0);
 
-      const totalAvailableFromOrders = orders
+      const totalAvailableFromOrders = validOrders
         .filter(o => o.repasseStatus === 'available' && o.paymentMethod !== 'cash' && o.status !== 'cancelled')
         .reduce((acc, o) => acc + (o.repasseValue || 0), 0);
 
@@ -649,6 +715,9 @@ const PartnerView: React.FC<PartnerViewProps> = ({
     alert('Configurações da loja salvas com sucesso!');
   };
 
+  const editingOrderPaymentMethod = editingOrder?.paymentMethod?.toLowerCase() || '';
+  const editingOrderOrigin = editingOrder?.origin?.toLowerCase() || '';
+
   return (
     <div className="flex h-screen bg-gray-50 relative">
         
@@ -698,9 +767,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                 </div>
             </div>
         )}
-
-        {/* ... Rest of existing JSX ... */}
-        {/* ... (Omitted primarily for brevity, but the file content remains the same until the next change) ... */}
         
         {productToDelete && (
             <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
@@ -734,21 +800,47 @@ const PartnerView: React.FC<PartnerViewProps> = ({
              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
                  <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl animate-scale-in overflow-hidden max-h-[90vh] flex flex-col">
                      <div className="bg-white border-b border-gray-100 p-6 flex justify-between items-center">
-                         <h3 className="text-xl font-bold text-gray-900">Editar Pedido <span className="text-gray-400">#{editingOrder.id.slice(-4)}</span></h3>
+                         <h3 className="text-xl font-bold text-gray-900">
+                             {editingOrderOrigin === 'whatsapp' ? (
+                                 <span className="flex items-center gap-2">
+                                     <MessageSquare className="w-5 h-5 text-green-600" /> Pedido IA #{editingOrder.id.slice(-4)}
+                                 </span>
+                             ) : (
+                                 `Editar Pedido #${editingOrder.id.slice(-4)}`
+                             )}
+                         </h3>
                          <button onClick={() => setEditingOrder(null)} className="p-2 hover:bg-gray-100 rounded-full"><X className="w-5 h-5"/></button>
                      </div>
                      <div className="p-6 overflow-y-auto space-y-6 flex-1">
+                         
+                         {editingOrderOrigin === 'whatsapp' && (
+                             <div className="bg-green-50 p-4 rounded-xl border border-green-200 mb-4">
+                                 <p className="text-sm text-green-800 font-bold flex items-center gap-2">
+                                     <Info className="w-4 h-4"/> Pedido Externo (WhatsApp)
+                                 </p>
+                                 <p className="text-xs text-green-700 mt-1">
+                                     Este pedido foi gerado pela IA. O pagamento é tratado diretamente com o cliente. Não contabiliza no saldo da plataforma.
+                                 </p>
+                             </div>
+                         )}
+
                          <div className="bg-yellow-50 border border-yellow-100 p-4 rounded-xl">
                              <div className="flex justify-between items-center mb-2">
                                  <h4 className="font-bold text-sm text-yellow-800 uppercase">Pagamento</h4>
-                                 <span className="bg-white px-2 py-1 rounded text-xs font-bold shadow-sm">{editingOrder.paymentMethod === 'cash' ? 'DINHEIRO' : 'ONLINE'}</span>
+                                 <span className="bg-white px-2 py-1 rounded text-xs font-bold shadow-sm">
+                                     {editingOrderPaymentMethod.includes('cash') ? 'DINHEIRO' : 
+                                      (editingOrderPaymentMethod.includes('pix') ? 'PIX' : 
+                                      (editingOrderPaymentMethod.includes('whatsapp') ? 'WHATSAPP' : 'ONLINE'))}
+                                 </span>
                              </div>
-                             {editingOrder.paymentMethod === 'cash' ? (
+                             {editingOrderPaymentMethod.includes('cash') ? (
                                  <p className="text-sm text-yellow-900 font-bold">
                                      Levar troco para: <span className="text-lg">R$ {editingOrder.changeFor ? editingOrder.changeFor.toFixed(2) : editingOrder.total.toFixed(2)}</span>
                                  </p>
                              ) : (
-                                 <p className="text-sm text-green-700 font-medium">Pago via App/Pix/Cartão</p>
+                                 <p className="text-sm text-green-700 font-medium">
+                                     {editingOrderPaymentMethod.includes('whatsapp') ? 'Combinado via Chat' : (editingOrderOrigin === 'whatsapp' ? 'Combinado via WhatsApp' : 'Pago via App/Pix/Cartão')}
+                                 </p>
                              )}
                          </div>
 
@@ -772,12 +864,21 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                      />
                                  </div>
                              </div>
+                             {editingOrder.deliveryAddress && (
+                                 <div>
+                                     <label className="text-xs font-bold text-gray-400">Endereço</label>
+                                     <p className="text-sm font-medium bg-gray-50 p-2 rounded border border-gray-200">
+                                         {editingOrder.deliveryAddress.street}, {editingOrder.deliveryAddress.number} <br/>
+                                         {editingOrder.deliveryAddress.neighborhood} - {editingOrder.deliveryAddress.city}
+                                     </p>
+                                 </div>
+                             )}
                          </div>
 
                          <div className="space-y-4">
                              <h4 className="font-bold text-sm text-gray-500 uppercase tracking-wide">Itens do Pedido</h4>
                              <div className="bg-gray-50 rounded-xl p-4 space-y-4">
-                                 {editingOrder.items.map((item, idx) => (
+                                 {Array.isArray(editingOrder.items) && editingOrder.items.length > 0 ? editingOrder.items.map((item, idx) => (
                                      <div key={idx} className="flex flex-col bg-white p-3 rounded-lg shadow-sm border border-gray-100">
                                          <div className="flex justify-between items-center mb-1">
                                              <div className="flex items-center gap-3">
@@ -805,8 +906,11 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                               </div>
                                          )}
                                      </div>
-                                 ))}
-                                 {editingOrder.items.length === 0 && <p className="text-center text-sm text-gray-400">Nenhum item.</p>}
+                                 )) : (
+                                     <div className="bg-white p-4 rounded-lg border border-gray-200">
+                                         <p className="text-sm font-mono whitespace-pre-wrap">{editingOrder.raw_description || "Sem descrição disponível."}</p>
+                                     </div>
+                                 )}
                              </div>
                          </div>
 
@@ -832,7 +936,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                          <div className="flex-1">
                              <p className="text-xs text-gray-500 font-bold uppercase">Total Atualizado</p>
                              <p className="text-xl font-bold text-gray-900">
-                                 R$ {((editingOrder.items.reduce((a,b) => a + (b.price * b.quantity), 0)) + editingOrder.deliveryFee + editingOrder.serviceFee).toFixed(2)}
+                                 R$ {editingOrder.total.toFixed(2)}
                              </p>
                          </div>
                          
@@ -841,7 +945,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                             className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-4 py-3 rounded-xl font-bold flex items-center gap-2 transition-colors text-sm"
                             title="Cancela o pedido e estorna pagamento (se houver)"
                          >
-                             <XCircle className="w-5 h-5" /> Cancelar (Estornar)
+                             <XCircle className="w-5 h-5" /> Cancelar
                          </button>
 
                          <button onClick={handleSaveEditingOrder} className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-green-200 transition-colors">
@@ -954,7 +1058,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         <AlertCircle className="w-5 h-5 text-blue-600 shrink-0" />
                         <p className="text-sm text-blue-800 font-medium">
                             Os valores abaixo referem-se <strong>apenas a vendas online</strong> (Pix e Cartão pelo App). 
-                            Pagamentos em dinheiro são recebidos diretamente por você no ato da entrega.
+                            Pagamentos em dinheiro ou <strong>via WhatsApp (IA)</strong> são recebidos diretamente por você.
                         </p>
                     </div>
 
@@ -1152,10 +1256,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                 </div>
             )}
 
-            {/* ... other views ... */}
             {view === ViewState.MENU && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    {/* ... (Existing Menu View Code) ... */}
                     <div className="lg:col-span-1 bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-fit sticky top-8">
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
@@ -1182,7 +1284,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={e => handleFileUpload(e, setProductImagePreview)} accept="image/*" />
                             </div>
                             
-                            {/* ... Rest of Menu Form ... */}
                             <div className="grid grid-cols-2 gap-3">
                                 <div className="col-span-2">
                                     <label className="text-xs font-bold text-gray-500 uppercase ml-1">Nome</label>
@@ -1293,7 +1394,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         </div>
                     </div>
                     
-                    {/* ... Rest of existing Menu rendering ... */}
                     <div className="lg:col-span-2 space-y-6">
                         <div className="flex justify-between items-center">
                             <h2 className="text-2xl font-bold text-gray-800">Cardápio Atual</h2>
@@ -1349,12 +1449,10 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
             {view === ViewState.SETTINGS && (
                 <div className="max-w-2xl mx-auto bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
-                    {/* ... (Existing Settings Code) ... */}
                     <h2 className="text-2xl font-bold text-gray-900 mb-6">Configurações da Loja</h2>
                     
                     <div className="space-y-6">
                         <div className="grid grid-cols-2 gap-4">
-                            {/* ... Image, Name, Desc fields ... */}
                              <div className="col-span-2">
                                 <label className="text-sm font-bold text-gray-700 mb-2 block">Identidade Visual</label>
                                 <div className="flex gap-6 items-start">
@@ -1395,7 +1493,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 />
                             </div>
                             
-                             {/* ... Other inputs ... */}
                              <div className="col-span-2">
                                 <label className="text-sm font-bold text-gray-700">Categoria</label>
                                 <select 
@@ -1479,88 +1576,97 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                     </button>
                                     <button 
                                         onClick={handleGetCurrentLocation}
-                                        className="px-3 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50"
+                                        className="px-3 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 flex items-center justify-center"
                                         title="Usar GPS"
                                     >
                                         {loadingLocation ? <Loader2 className="w-4 h-4 animate-spin"/> : <Crosshair className="w-4 h-4"/>}
                                     </button>
                                 </div>
-
                                 <div className="grid grid-cols-2 gap-3">
                                     <div className="col-span-2">
                                         <input 
                                             value={localCompany.address?.street || ''}
-                                            onChange={e => setLocalCompany(prev => ({...prev, address: {...prev.address!, street: e.target.value}}))}
-                                            className="w-full border rounded-lg px-3 py-2"
-                                            placeholder="Rua..."
+                                            onChange={e => setLocalCompany({...localCompany, address: {...localCompany.address!, street: e.target.value}})}
+                                            className="w-full border rounded-lg px-3 py-2 text-sm"
+                                            placeholder="Rua"
                                         />
                                     </div>
                                     <div>
                                         <input 
                                             value={localCompany.address?.number || ''}
-                                            onChange={e => setLocalCompany(prev => ({...prev, address: {...prev.address!, number: e.target.value}}))}
-                                            className="w-full border rounded-lg px-3 py-2"
-                                            placeholder="Nº"
+                                            onChange={e => setLocalCompany({...localCompany, address: {...localCompany.address!, number: e.target.value}})}
+                                            className="w-full border rounded-lg px-3 py-2 text-sm"
+                                            placeholder="Número"
                                         />
                                     </div>
                                     <div>
                                         <input 
                                             value={localCompany.address?.neighborhood || ''}
-                                            onChange={e => setLocalCompany(prev => ({...prev, address: {...prev.address!, neighborhood: e.target.value}}))}
-                                            className="w-full border rounded-lg px-3 py-2"
+                                            onChange={e => setLocalCompany({...localCompany, address: {...localCompany.address!, neighborhood: e.target.value}})}
+                                            className="w-full border rounded-lg px-3 py-2 text-sm"
                                             placeholder="Bairro"
                                         />
                                     </div>
                                     <div>
                                         <input 
                                             value={localCompany.address?.city || ''}
-                                            onChange={e => setLocalCompany(prev => ({...prev, address: {...prev.address!, city: e.target.value}}))}
-                                            className="w-full border rounded-lg px-3 py-2"
+                                            onChange={e => setLocalCompany({...localCompany, address: {...localCompany.address!, city: e.target.value}})}
+                                            className="w-full border rounded-lg px-3 py-2 text-sm"
                                             placeholder="Cidade"
                                         />
                                     </div>
                                 </div>
-                                {localCompany.address && localCompany.address.lat !== 0 && (
-                                    <div className="text-[10px] text-green-600 flex items-center gap-1">
-                                        <CheckCircle className="w-3 h-3"/> Localização exata (GPS) confirmada.
-                                    </div>
-                                )}
                             </div>
                         </div>
 
-                        <div className="border-t border-gray-100 pt-6">
-                            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-                                <Truck className="w-5 h-5 text-gray-500" /> Logística
-                            </h3>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="text-sm font-bold text-gray-700">Raio de Entrega (km)</label>
-                                    <input 
-                                        type="number"
-                                        value={localCompany.deliveryRadiusKm} 
-                                        onChange={e => setLocalCompany({...localCompany, deliveryRadiusKm: parseFloat(e.target.value)})}
-                                        className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" 
-                                    />
-                                </div>
-                                <div>
-                                    <label className="text-sm font-bold text-gray-700">Taxa Própria (se aplicável)</label>
-                                    <input 
-                                        type="number"
-                                        value={localCompany.ownDeliveryFee || 0} 
-                                        onChange={e => setLocalCompany({...localCompany, ownDeliveryFee: parseFloat(e.target.value)})}
-                                        className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" 
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div className="flex justify-end pt-4">
+                        <div className="flex justify-end mt-8 border-t border-gray-100 pt-6">
                             <button 
                                 onClick={handleSaveSettings}
-                                className="bg-red-600 text-white font-bold px-8 py-3 rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-all"
+                                className="bg-gray-900 text-white px-8 py-3 rounded-xl font-bold hover:bg-black transition-colors shadow-lg"
                             >
                                 Salvar Alterações
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
+            {showMapModal && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in h-full">
+                    <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl flex flex-col h-[90%] relative">
+                        <div className="absolute top-0 left-0 right-0 p-4 z-10 flex justify-between items-start pointer-events-none">
+                            <div className="bg-white/95 backdrop-blur px-4 py-2 rounded-xl shadow-md border border-gray-100 pointer-events-auto">
+                                <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                                    <Navigation className="w-4 h-4 text-red-600" /> Definir Localização
+                                </h3>
+                                <p className="text-xs text-gray-500">Mova o pin para o endereço da loja.</p>
+                            </div>
+                            <button onClick={() => setShowMapModal(false)} className="bg-white p-2 rounded-full shadow-md hover:bg-gray-100 pointer-events-auto"><X className="w-6 h-6 text-gray-500" /></button>
+                        </div>
+                        <div className="flex-1 bg-gray-100 relative group overflow-hidden">
+                            {mapError ? (
+                                <div className="w-full h-full flex flex-col items-center justify-center text-center p-8"><MapIcon className="w-16 h-16 text-gray-300"/><p>Erro no Mapa</p></div>
+                            ) : (
+                                <>
+                                <div ref={mapContainerRef} className="w-full h-full" />
+                                <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-20 pointer-events-none transition-all duration-300 ease-out ${isMapDragging ? '-mt-16 scale-110' : '-mt-8'}`}>
+                                    <div className="w-12 h-12 bg-red-600 rounded-full flex items-center justify-center shadow-2xl border-[3px] border-white"><MapPin className="w-6 h-6 text-white fill-current" /></div>
+                                    <div className={`w-2 h-8 bg-black/80 rounded-full -mt-2 blur-[1px] transition-opacity duration-300 ${isMapDragging ? 'opacity-0' : 'opacity-20'}`}></div>
+                                </div>
+                                {!isMapDragging && <div className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-3 py-1.5 rounded-full pointer-events-none flex items-center gap-2 animate-pulse"><MousePointer2 className="w-3 h-3" /> Arraste o mapa</div>}
+                                </>
+                            )}
+                        </div>
+                        <div className="p-6 bg-white border-t border-gray-100 rounded-t-3xl -mt-6 relative z-30 shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
+                            <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"></div>
+                            <div className="flex items-start gap-3 mb-6">
+                                <div className="p-2 bg-red-50 rounded-lg shrink-0"><MapPin className="w-6 h-6 text-red-600" /></div>
+                                <div className="flex-1">
+                                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Endereço Selecionado</p>
+                                    <h4 className="font-bold text-gray-900 text-lg leading-tight line-clamp-2">{mapAddress || 'Carregando endereço...'}</h4>
+                                </div>
+                            </div>
+                            <button onClick={() => setShowMapModal(false)} className="w-full bg-red-600 text-white font-bold py-3.5 rounded-xl hover:bg-red-700 shadow-lg flex items-center justify-center gap-2"><CheckCircle className="w-5 h-5" /> Confirmar</button>
                         </div>
                     </div>
                 </div>
