@@ -525,41 +525,41 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
                         />
                         
                         <div className="p-4 bg-white rounded-xl border border-gray-200 space-y-3 shadow-sm">
-                            <div className="flex justify-between items-center mb-1">
-                                <p className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1">
-                                    <MapPin className="w-3 h-3" /> Endereço de Entrega
-                                </p>
+                            <p className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1 mb-1">
+                                <MapPin className="w-3 h-3" /> Endereço de Entrega
+                            </p>
+                            
+                            <div className="flex gap-2 mb-2">
                                 <button 
                                     type="button" 
                                     onClick={handleGetCurrentLocation}
                                     disabled={loadingLocation}
-                                    className="text-xs text-brand font-bold hover:text-brandHover flex items-center gap-1"
+                                    className="flex-1 bg-red-50 text-brand border border-red-100 hover:bg-red-100 font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 transition-all"
                                 >
-                                    {loadingLocation ? <Loader2 className="w-3 h-3 animate-spin"/> : <Crosshair className="w-3 h-3" />}
-                                    Usar localização atual
+                                    {loadingLocation ? <Loader2 className="w-3 h-3 animate-spin"/> : <Crosshair className="w-4 h-4" />}
+                                    Usar GPS
+                                </button>
+                                <button 
+                                    type="button" 
+                                    onClick={() => setShowMapModal(true)}
+                                    className="flex-1 bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100 font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 transition-all"
+                                >
+                                    <MapIcon className="w-4 h-4 text-gray-500" />
+                                    Abrir Mapa
                                 </button>
                             </div>
                             
                             {/* CEP Search */}
-                            <div className="flex gap-2">
-                                <div className="w-1/3 relative">
-                                    <input 
-                                        type="text" placeholder="CEP" 
-                                        className="w-full px-3 py-2 border rounded-lg bg-gray-50 focus:bg-white transition-colors outline-none focus:ring-2 focus:ring-brandLight"
-                                        value={formData.zipCode} 
-                                        onChange={handleCepChange}
-                                        maxLength={8}
-                                        required
-                                    />
-                                    {loadingCep && <Loader2 className="absolute right-2 top-2.5 w-4 h-4 text-brand animate-spin" />}
-                                </div>
-                                <button 
-                                    type="button" 
-                                    onClick={() => setShowMapModal(true)}
-                                    className="flex-1 text-xs bg-brandLight text-brand font-bold rounded-lg hover:bg-red-100 flex items-center justify-center gap-2 border border-red-100 transition-colors"
-                                >
-                                    <MapPin className="w-3 h-3" /> Abrir Mapa
-                                </button>
+                            <div className="relative">
+                                <input 
+                                    type="text" placeholder="Ou digite seu CEP" 
+                                    className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-brandLight outline-none transition-all placeholder:text-gray-400"
+                                    value={formData.zipCode} 
+                                    onChange={handleCepChange}
+                                    maxLength={8}
+                                    required
+                                />
+                                {loadingCep && <Loader2 className="absolute right-3 top-3 w-4 h-4 text-brand animate-spin" />}
                             </div>
 
                             {/* Address Fields */}
