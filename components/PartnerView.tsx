@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem, WithdrawalRequest } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
-import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle, ArrowRight, Lock, Unlock, Banknote, AlertCircle, Info, MessageSquare, CreditCard } from 'lucide-react';
+import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle, ArrowRight, Lock, Unlock, Banknote, AlertCircle, Info, MessageSquare, CreditCard, Printer } from 'lucide-react';
 import DashboardView from './DashboardView';
 import ForecastView from './ForecastView';
 import WhatsAppBotView from './WhatsAppBotView';
@@ -40,9 +40,10 @@ interface KanbanColumnProps {
   onDrop: (orderId: string, status: Order['status']) => void;
   chats: Record<string, ChatMessage[]>;
   onOpenChat: (orderId: string) => void;
+  onPrintOrder: (order: Order) => void;
 }
 
-const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color, isLast, onClickOrder, onDrop, chats, onOpenChat }) => {
+const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color, isLast, onClickOrder, onDrop, chats, onOpenChat, onPrintOrder }) => {
   const [isOver, setIsOver] = useState(false);
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -179,7 +180,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                               </div>
                           ) : pMethod.includes('pix') ? (
                               <div className="bg-teal-100 text-teal-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-teal-200">
-                                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-4.33-6.027l2.997 2.998 2.062-2.064-2.997-2.997 2.997-2.998-2.063-2.063-2.996 2.997-2.998-2.997-2.063 2.063 2.997 2.998-2.997 2.997 2.063 2.064 2.998-2.998z"/></svg>
+                                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-4.33-6.027l2.997 2.998 2.062-2.064-2.997-2.997 2.997-2.998-2.063-2.063-2.996 2.997-2.998-2.997-2.063 2.063 2.997 2.998-2.997 2.063 2.064 2.998-2.998z"/></svg>
                                   Pix
                               </div>
                           ) : pMethod.includes('card') || pMethod.includes('cartao') || pMethod.includes('cartão') ? (
@@ -205,6 +206,14 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                       <div className="flex justify-between items-center pt-2 border-t border-gray-50 mt-2">
                           <span className="font-bold text-sm">R$ {order.total.toFixed(2)}</span>
                           <div className="flex items-center gap-2">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); onPrintOrder(order); }}
+                                className="p-2 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-800 transition-colors"
+                                title="Imprimir Pedido"
+                              >
+                                  <Printer className="w-4 h-4" />
+                              </button>
+
                               {!isWhatsapp && (
                                 <button 
                                     onClick={(e) => { e.stopPropagation(); onOpenChat(order.id); }}
@@ -281,6 +290,123 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const [isLoadingFinance, setIsLoadingFinance] = useState(false);
   
   useEffect(() => { setLocalCompany(company); }, [company]);
+
+  // --- LOGIC: PRINT THERMAL RECEIPT ---
+  const handlePrintOrder = (order: Order) => {
+      const printWindow = window.open('', '', 'width=400,height=600');
+      if (!printWindow) {
+          alert("Pop-up bloqueado. Permita pop-ups para imprimir.");
+          return;
+      }
+
+      const itemsHtml = Array.isArray(order.items) ? order.items.map(item => `
+          <div style="display:flex; justify-content:space-between; margin-bottom: 5px;">
+              <span style="font-weight:bold;">${item.quantity}x</span>
+              <span style="flex:1; margin-left: 5px;">${item.productName}</span>
+              <span>R$ ${(item.price * item.quantity).toFixed(2)}</span>
+          </div>
+          ${item.selectedOptions && item.selectedOptions.length > 0 ? 
+              `<div style="font-size: 10px; color: #555; margin-left: 20px; margin-bottom: 5px;">
+                  ${item.selectedOptions.map(opt => `+ ${opt.optionName}`).join('<br/>')}
+              </div>` : ''
+          }
+      `).join('') : `<p>${order.raw_description || 'Itens não estruturados'}</p>`;
+
+      const addressHtml = order.deliveryMethod === 'pickup' 
+        ? '<p style="text-align:center; font-weight:bold; font-size:14px; margin: 10px 0;">RETIRADA NO BALCÃO</p>'
+        : `
+          <p style="font-weight:bold;">ENTREGA</p>
+          <p>${order.deliveryAddress?.street}, ${order.deliveryAddress?.number}</p>
+          <p>${order.deliveryAddress?.neighborhood} - ${order.deliveryAddress?.city}</p>
+          ${order.deliveryAddress?.zipCode ? `<p>CEP: ${order.deliveryAddress.zipCode}</p>` : ''}
+        `;
+
+      const paymentInfo = order.paymentMethod === 'cash' 
+        ? `DINHEIRO ${order.changeFor ? `(Troco p/ R$ ${order.changeFor.toFixed(2)})` : ''}`
+        : order.paymentMethod.toUpperCase();
+
+      const htmlContent = `
+          <html>
+              <head>
+                  <title>Pedido #${order.id.slice(-4)}</title>
+                  <style>
+                      body { 
+                          font-family: 'Courier New', monospace; 
+                          width: 80mm; 
+                          margin: 0; 
+                          padding: 10px; 
+                          font-size: 12px; 
+                          color: #000;
+                      }
+                      .center { text-align: center; }
+                      .line { border-bottom: 1px dashed #000; margin: 10px 0; }
+                      h2, h3 { margin: 5px 0; }
+                      .bold { font-weight: bold; }
+                      .flex { display: flex; justify-content: space-between; }
+                      @media print {
+                          @page { margin: 0; size: 80mm auto; }
+                          body { margin: 0; padding: 5px; }
+                      }
+                  </style>
+              </head>
+              <body>
+                  <div class="center">
+                      <h3 class="bold">${company.name}</h3>
+                      <p>${new Date(order.timestamp).toLocaleString()}</p>
+                      <h2 style="font-size: 24px; margin: 10px 0;">#${order.id.slice(-4)}</h2>
+                  </div>
+                  
+                  <div class="line"></div>
+                  
+                  <div style="margin-bottom: 10px;">
+                      <span class="bold">Cliente:</span> ${order.customerName}<br/>
+                      <span class="bold">Tel:</span> ${order.customerPhone}
+                  </div>
+
+                  <div class="line"></div>
+                  
+                  ${itemsHtml}
+                  
+                  <div class="line"></div>
+                  
+                  <div class="flex">
+                      <span>Subtotal:</span>
+                      <span>R$ ${order.subtotal.toFixed(2)}</span>
+                  </div>
+                  <div class="flex">
+                      <span>Entrega:</span>
+                      <span>R$ {order.deliveryFee.toFixed(2)}</span>
+                  </div>
+                  <div class="flex" style="font-size: 16px; font-weight: bold; margin-top: 5px;">
+                      <span>TOTAL:</span>
+                      <span>R$ {order.total.toFixed(2)}</span>
+                  </div>
+
+                  <div class="line"></div>
+                  
+                  <p class="center bold">${paymentInfo}</p>
+                  
+                  <div class="line"></div>
+                  
+                  <div style="margin-top: 10px;">
+                      ${addressHtml}
+                  </div>
+
+                  <div class="center" style="margin-top: 20px;">
+                      <p>*** NÃO É DOCUMENTO FISCAL ***</p>
+                      <p>Chegoou Delivery</p>
+                  </div>
+
+                  <script>
+                      window.onload = function() { window.print(); window.close(); }
+                  </script>
+              </body>
+          </html>
+      `;
+
+      printWindow.document.write(htmlContent);
+      printWindow.document.close();
+  };
 
   // --- FINANCEIRO: Lógica de Desbloqueio de Saldo (24h) ---
   useEffect(() => {
@@ -767,6 +893,9 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                 </div>
             </div>
         )}
+
+        {/* ... Rest of existing JSX ... */}
+        {/* ... (Omitted primarily for brevity, but the file content remains the same until the next change) ... */}
         
         {productToDelete && (
             <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
@@ -1199,6 +1328,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 onDrop={handleDragDropOrder}
                                 chats={chats}
                                 onOpenChat={setActiveChatOrder}
+                                onPrintOrder={handlePrintOrder}
                             />
                             <KanbanColumn 
                                 title="Pendentes" 
@@ -1209,6 +1339,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 onDrop={handleDragDropOrder}
                                 chats={chats}
                                 onOpenChat={setActiveChatOrder}
+                                onPrintOrder={handlePrintOrder}
                             />
                             <KanbanColumn 
                                 title="Em Preparo" 
@@ -1219,6 +1350,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 onDrop={handleDragDropOrder}
                                 chats={chats}
                                 onOpenChat={setActiveChatOrder}
+                                onPrintOrder={handlePrintOrder}
                             />
                             <KanbanColumn 
                                 title="Pronto" 
@@ -1229,6 +1361,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 onDrop={handleDragDropOrder}
                                 chats={chats}
                                 onOpenChat={setActiveChatOrder}
+                                onPrintOrder={handlePrintOrder}
                             />
                             <KanbanColumn 
                                 title="Em Entrega" 
@@ -1239,6 +1372,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 onDrop={handleDragDropOrder}
                                 chats={chats}
                                 onOpenChat={setActiveChatOrder}
+                                onPrintOrder={handlePrintOrder}
                             />
                             <KanbanColumn 
                                 title="Concluídos" 
@@ -1250,14 +1384,17 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 onDrop={handleDragDropOrder}
                                 chats={chats}
                                 onOpenChat={setActiveChatOrder}
+                                onPrintOrder={handlePrintOrder}
                             />
                         </div>
                     </div>
                 </div>
             )}
 
+            {/* ... other views ... */}
             {view === ViewState.MENU && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    {/* ... (Existing Menu View Code) ... */}
                     <div className="lg:col-span-1 bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-fit sticky top-8">
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
@@ -1284,6 +1421,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={e => handleFileUpload(e, setProductImagePreview)} accept="image/*" />
                             </div>
                             
+                            {/* ... Rest of Menu Form ... */}
                             <div className="grid grid-cols-2 gap-3">
                                 <div className="col-span-2">
                                     <label className="text-xs font-bold text-gray-500 uppercase ml-1">Nome</label>
@@ -1394,6 +1532,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         </div>
                     </div>
                     
+                    {/* ... Rest of existing Menu rendering ... */}
                     <div className="lg:col-span-2 space-y-6">
                         <div className="flex justify-between items-center">
                             <h2 className="text-2xl font-bold text-gray-800">Cardápio Atual</h2>
@@ -1449,10 +1588,12 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
             {view === ViewState.SETTINGS && (
                 <div className="max-w-2xl mx-auto bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
+                    {/* ... (Existing Settings Code) ... */}
                     <h2 className="text-2xl font-bold text-gray-900 mb-6">Configurações da Loja</h2>
                     
                     <div className="space-y-6">
                         <div className="grid grid-cols-2 gap-4">
+                            {/* ... Image, Name, Desc fields ... */}
                              <div className="col-span-2">
                                 <label className="text-sm font-bold text-gray-700 mb-2 block">Identidade Visual</label>
                                 <div className="flex gap-6 items-start">
@@ -1493,6 +1634,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 />
                             </div>
                             
+                             {/* ... Other inputs ... */}
                              <div className="col-span-2">
                                 <label className="text-sm font-bold text-gray-700">Categoria</label>
                                 <select 
@@ -1576,97 +1718,88 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                     </button>
                                     <button 
                                         onClick={handleGetCurrentLocation}
-                                        className="px-3 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 flex items-center justify-center"
+                                        className="px-3 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50"
                                         title="Usar GPS"
                                     >
                                         {loadingLocation ? <Loader2 className="w-4 h-4 animate-spin"/> : <Crosshair className="w-4 h-4"/>}
                                     </button>
                                 </div>
+
                                 <div className="grid grid-cols-2 gap-3">
                                     <div className="col-span-2">
                                         <input 
                                             value={localCompany.address?.street || ''}
-                                            onChange={e => setLocalCompany({...localCompany, address: {...localCompany.address!, street: e.target.value}})}
-                                            className="w-full border rounded-lg px-3 py-2 text-sm"
-                                            placeholder="Rua"
+                                            onChange={e => setLocalCompany(prev => ({...prev, address: {...prev.address!, street: e.target.value}}))}
+                                            className="w-full border rounded-lg px-3 py-2"
+                                            placeholder="Rua..."
                                         />
                                     </div>
                                     <div>
                                         <input 
                                             value={localCompany.address?.number || ''}
-                                            onChange={e => setLocalCompany({...localCompany, address: {...localCompany.address!, number: e.target.value}})}
-                                            className="w-full border rounded-lg px-3 py-2 text-sm"
-                                            placeholder="Número"
+                                            onChange={e => setLocalCompany(prev => ({...prev, address: {...prev.address!, number: e.target.value}}))}
+                                            className="w-full border rounded-lg px-3 py-2"
+                                            placeholder="Nº"
                                         />
                                     </div>
                                     <div>
                                         <input 
                                             value={localCompany.address?.neighborhood || ''}
-                                            onChange={e => setLocalCompany({...localCompany, address: {...localCompany.address!, neighborhood: e.target.value}})}
-                                            className="w-full border rounded-lg px-3 py-2 text-sm"
+                                            onChange={e => setLocalCompany(prev => ({...prev, address: {...prev.address!, neighborhood: e.target.value}}))}
+                                            className="w-full border rounded-lg px-3 py-2"
                                             placeholder="Bairro"
                                         />
                                     </div>
                                     <div>
                                         <input 
                                             value={localCompany.address?.city || ''}
-                                            onChange={e => setLocalCompany({...localCompany, address: {...localCompany.address!, city: e.target.value}})}
-                                            className="w-full border rounded-lg px-3 py-2 text-sm"
+                                            onChange={e => setLocalCompany(prev => ({...prev, address: {...prev.address!, city: e.target.value}}))}
+                                            className="w-full border rounded-lg px-3 py-2"
                                             placeholder="Cidade"
                                         />
                                     </div>
                                 </div>
+                                {localCompany.address && localCompany.address.lat !== 0 && (
+                                    <div className="text-[10px] text-green-600 flex items-center gap-1">
+                                        <CheckCircle className="w-3 h-3"/> Localização exata (GPS) confirmada.
+                                    </div>
+                                )}
                             </div>
                         </div>
 
-                        <div className="flex justify-end mt-8 border-t border-gray-100 pt-6">
+                        <div className="border-t border-gray-100 pt-6">
+                            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                                <Truck className="w-5 h-5 text-gray-500" /> Logística
+                            </h3>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-sm font-bold text-gray-700">Raio de Entrega (km)</label>
+                                    <input 
+                                        type="number"
+                                        value={localCompany.deliveryRadiusKm} 
+                                        onChange={e => setLocalCompany({...localCompany, deliveryRadiusKm: parseFloat(e.target.value)})}
+                                        className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" 
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-sm font-bold text-gray-700">Taxa Própria (se aplicável)</label>
+                                    <input 
+                                        type="number"
+                                        value={localCompany.ownDeliveryFee || 0} 
+                                        onChange={e => setLocalCompany({...localCompany, ownDeliveryFee: parseFloat(e.target.value)})}
+                                        className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" 
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div className="flex justify-end pt-4">
                             <button 
                                 onClick={handleSaveSettings}
-                                className="bg-gray-900 text-white px-8 py-3 rounded-xl font-bold hover:bg-black transition-colors shadow-lg"
+                                className="bg-red-600 text-white font-bold px-8 py-3 rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-all"
                             >
                                 Salvar Alterações
                             </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-            
-            {showMapModal && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in h-full">
-                    <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl flex flex-col h-[90%] relative">
-                        <div className="absolute top-0 left-0 right-0 p-4 z-10 flex justify-between items-start pointer-events-none">
-                            <div className="bg-white/95 backdrop-blur px-4 py-2 rounded-xl shadow-md border border-gray-100 pointer-events-auto">
-                                <h3 className="font-bold text-gray-800 flex items-center gap-2">
-                                    <Navigation className="w-4 h-4 text-red-600" /> Definir Localização
-                                </h3>
-                                <p className="text-xs text-gray-500">Mova o pin para o endereço da loja.</p>
-                            </div>
-                            <button onClick={() => setShowMapModal(false)} className="bg-white p-2 rounded-full shadow-md hover:bg-gray-100 pointer-events-auto"><X className="w-6 h-6 text-gray-500" /></button>
-                        </div>
-                        <div className="flex-1 bg-gray-100 relative group overflow-hidden">
-                            {mapError ? (
-                                <div className="w-full h-full flex flex-col items-center justify-center text-center p-8"><MapIcon className="w-16 h-16 text-gray-300"/><p>Erro no Mapa</p></div>
-                            ) : (
-                                <>
-                                <div ref={mapContainerRef} className="w-full h-full" />
-                                <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-20 pointer-events-none transition-all duration-300 ease-out ${isMapDragging ? '-mt-16 scale-110' : '-mt-8'}`}>
-                                    <div className="w-12 h-12 bg-red-600 rounded-full flex items-center justify-center shadow-2xl border-[3px] border-white"><MapPin className="w-6 h-6 text-white fill-current" /></div>
-                                    <div className={`w-2 h-8 bg-black/80 rounded-full -mt-2 blur-[1px] transition-opacity duration-300 ${isMapDragging ? 'opacity-0' : 'opacity-20'}`}></div>
-                                </div>
-                                {!isMapDragging && <div className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-3 py-1.5 rounded-full pointer-events-none flex items-center gap-2 animate-pulse"><MousePointer2 className="w-3 h-3" /> Arraste o mapa</div>}
-                                </>
-                            )}
-                        </div>
-                        <div className="p-6 bg-white border-t border-gray-100 rounded-t-3xl -mt-6 relative z-30 shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
-                            <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6"></div>
-                            <div className="flex items-start gap-3 mb-6">
-                                <div className="p-2 bg-red-50 rounded-lg shrink-0"><MapPin className="w-6 h-6 text-red-600" /></div>
-                                <div className="flex-1">
-                                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Endereço Selecionado</p>
-                                    <h4 className="font-bold text-gray-900 text-lg leading-tight line-clamp-2">{mapAddress || 'Carregando endereço...'}</h4>
-                                </div>
-                            </div>
-                            <button onClick={() => setShowMapModal(false)} className="w-full bg-red-600 text-white font-bold py-3.5 rounded-xl hover:bg-red-700 shadow-lg flex items-center justify-center gap-2"><CheckCircle className="w-5 h-5" /> Confirmar</button>
                         </div>
                     </div>
                 </div>

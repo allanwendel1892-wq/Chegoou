@@ -163,40 +163,69 @@ const App: React.FC = () => {
       };
   }, [currentUser]);
 
+  // --- CORREÇÃO DO POLLING ---
+  // Antes ele só atualizava status. Agora ele busca novos pedidos (INSERT) também.
   useEffect(() => {
       if (!currentUser) return;
 
       const interval = setInterval(async () => {
-          const hasActiveOrders = ordersRef.current.some(o => 
+          // Se for parceiro, busca sempre para garantir que pedidos da IA apareçam
+          // Se for cliente, busca se tiver pedidos ativos
+          const shouldFetch = currentUser.role === 'partner' || ordersRef.current.some(o => 
               o.status === 'waiting_payment' || o.status === 'pending' || o.status === 'preparing'
           );
 
-          if (!hasActiveOrders && currentUser.role !== 'partner') return;
+          if (!shouldFetch) return;
 
           let query = supabase.from('orders').select('*');
           
           if (currentUser.role === 'client') {
               query = query.eq('customerId', currentUser.id).in('status', ['waiting_payment', 'pending', 'preparing', 'ready', 'delivering', 'cancelled']);
           } else if (currentUser.role === 'partner') {
-              query = query.eq('companyId', currentUser.id).in('status', ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering', 'cancelled']);
+              // Partner vê tudo, incluindo 'pending' que vem da IA
+              query = query.eq('companyId', currentUser.id).in('status', ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering', 'delivered', 'cancelled', 'waiting_payment']);
           } else {
               return; 
           }
 
+          // Busca mais recente primeiro
+          query = query.order('timestamp', { ascending: false }).limit(50);
+
           const { data, error } = await query;
 
-          if (!error && data && data.length > 0) {
-               setOrders(prevOrders => {
+          if (!error && data) {
+               setOrders((prevOrders) => {
+                   // Fix: Explicitly type map to avoid 'unknown' inference
+                   const newOrdersMap = new Map<string, Order>(prevOrders.map(o => [o.id, o]));
                    let hasChanges = false;
-                   const updatedList = prevOrders.map(prevOrder => {
-                       const freshOrder = data.find((f: any) => f.id === prevOrder.id);
-                       if (freshOrder && freshOrder.status !== prevOrder.status) {
+
+                   // Fix: Cast data to any[] to safely iterate
+                   (data as any[]).forEach((freshOrder: any) => {
+                       const existing = newOrdersMap.get(freshOrder.id);
+                       
+                       // Formata data e força tipo Order
+                       const formattedFreshOrder: Order = {
+                           ...freshOrder,
+                           timestamp: new Date(freshOrder.timestamp)
+                       };
+
+                       if (!existing) {
+                           // NOVO PEDIDO ENCONTRADO (CRÍTICO PARA IA)
+                           newOrdersMap.set(freshOrder.id, formattedFreshOrder);
                            hasChanges = true;
-                           return { ...prevOrder, status: freshOrder.status, paymentStatus: freshOrder.paymentStatus };
+                       } else if (existing.status !== freshOrder.status || existing.paymentStatus !== freshOrder.paymentStatus) {
+                           // ATUALIZAÇÃO DE STATUS
+                           newOrdersMap.set(freshOrder.id, formattedFreshOrder);
+                           hasChanges = true;
                        }
-                       return prevOrder;
                    });
-                   return hasChanges ? updatedList : prevOrders;
+
+                   if (hasChanges) {
+                       // Retorna array ordenado por data
+                       return Array.from(newOrdersMap.values()).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+                   }
+                   
+                   return prevOrders;
                });
           }
       }, 3000); 
@@ -224,6 +253,8 @@ const App: React.FC = () => {
                   ...o,
                   timestamp: new Date(o.timestamp)
               }));
+              // Sort by date desc
+              formattedOrders.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
               setOrders(formattedOrders);
           }
 
