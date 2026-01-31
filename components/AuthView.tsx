@@ -601,29 +601,32 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
                 </button>
             </form>
             
-            <div className="flex items-center gap-4 my-6">
-                <div className="h-px bg-gray-200 flex-1"></div>
-                <span className="text-gray-400 text-sm">ou</span>
-                <div className="h-px bg-gray-200 flex-1"></div>
-            </div>
+            <div className="mt-8">
+                <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                        <div className="w-full border-t border-gray-200"></div>
+                    </div>
+                    <div className="relative flex justify-center text-sm">
+                        <span className="px-4 bg-gray-50 text-gray-400">ou</span>
+                    </div>
+                </div>
 
-            <div className="text-center space-y-4">
                 <button 
                     type="button" 
                     onClick={() => setIsRegistering(!isRegistering)}
-                    className="text-gray-600 font-medium hover:text-brand transition-colors"
+                    className="mt-6 w-full bg-white border border-gray-200 text-brand font-bold py-3.5 rounded-xl hover:bg-red-50 hover:border-red-100 transition-all shadow-sm text-sm"
                 >
-                    {isRegistering ? 'Já tem uma conta? Faça Login' : 'Não tem conta? Cadastre-se'}
+                    {isRegistering ? 'Já tem uma conta? Fazer Login' : 'Criar nova conta'}
                 </button>
 
-                <div 
-                    onClick={openWhatsAppPartner}
-                    className="mt-6 p-4 bg-green-50 rounded-xl border border-green-100 cursor-pointer hover:bg-green-100 transition-colors group"
-                >
-                    <p className="text-green-800 font-medium text-sm flex items-center justify-center gap-2">
-                        Possui um restaurante? 
-                        <span className="font-bold underline decoration-green-500 group-hover:decoration-2">Seja um Parceiro</span>
-                    </p>
+                <div className="mt-6 text-center">
+                     <button
+                        type="button"
+                        onClick={openWhatsAppPartner}
+                        className="text-sm text-gray-500 hover:text-brand font-medium transition-colors"
+                    >
+                        Possui um restaurante? <span className="font-bold underline decoration-brand">Seja um Parceiro</span>
+                    </button>
                 </div>
             </div>
         </div>
