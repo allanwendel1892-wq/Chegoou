@@ -68,6 +68,12 @@ export interface Company {
   // --- NOVOS CAMPOS FINANCEIROS (PIX DO RESTAURANTE) ---
   pixKey?: string;
   pixKeyType?: 'cpf' | 'cnpj' | 'email' | 'phone' | 'random';
+
+  // --- NOVOS CAMPOS DE MARKETING / WHATSAPP ---
+  dailyMessageLimit?: number; // Quantos disparos por dia (ex: 5)
+  leadsPerBlastLimit?: number; // Quantos leads por disparo (ex: 20)
+  messagesSentToday?: number; // Contador de disparos hoje
+  lastMessageDate?: string; // Data do último disparo para resetar o contador
 }
 
 // --- PRODUCT STRUCTURE UPDATE FOR PIZZA LOGIC ---

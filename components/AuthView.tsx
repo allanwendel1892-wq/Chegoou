@@ -335,7 +335,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
   };
 
   const openWhatsAppPartner = () => {
-    window.open(`https://wa.me/5581996855381?text=Olá, quero ser um parceiro Chegoou!`, '_blank');
+    window.open(`https://wa.me/5581973147355?text=Olá, quero ser um parceiro Chegoou!`, '_blank');
   };
 
   return (

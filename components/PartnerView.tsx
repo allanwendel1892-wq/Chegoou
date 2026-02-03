@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem, WithdrawalRequest } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
@@ -1583,7 +1584,12 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             )}
 
             {view === ViewState.WHATSAPP && (
-                <WhatsAppBotView products={products} />
+                <WhatsAppBotView 
+                    products={products} 
+                    orders={orders} // ADDED: Passing orders for CRM
+                    company={localCompany} // ADDED: Passing company for limits
+                    updateCompany={updateCompany} // ADDED: Update function for limits
+                />
             )}
 
             {view === ViewState.SETTINGS && (

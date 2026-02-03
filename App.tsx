@@ -545,7 +545,7 @@ const App: React.FC = () => {
       if (!currentUser) return;
       
       const updateData = {
-          status: 'delivering',
+          status: 'delivering' as Order['status'], // Fix type inference
           courierId: currentUser.id
       };
 

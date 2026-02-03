@@ -1,6 +1,7 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { User, Company, Order, WithdrawalRequest, UserRole, Address } from '../types';
-import { Users, Building2, DollarSign, Settings, Trash2, CheckCircle, Ban, TrendingUp, Search, Lock, Unlock, Edit, X, Save, Bike, LogOut, MapPin, Truck, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, Store, Wallet } from 'lucide-react';
+import { Users, Building2, DollarSign, Settings, Trash2, CheckCircle, Ban, TrendingUp, Search, Lock, Unlock, Edit, X, Save, Bike, LogOut, MapPin, Truck, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, Store, Wallet, MessageSquare } from 'lucide-react';
 
 interface AdminViewProps {
   users: User[];
@@ -1089,6 +1090,33 @@ const AdminView: React.FC<AdminViewProps> = ({
                                 <option value="closed">Fechado</option>
                             </select>
                           </div>
+                      </div>
+                      
+                      {/* MARKETING LIMITS CONFIGURATION */}
+                      <div className="bg-green-50 p-3 rounded-lg border border-green-100">
+                           <label className="text-xs font-bold text-green-700 uppercase block mb-1 flex items-center gap-1">
+                               <MessageSquare className="w-3 h-3"/> Limites de Marketing (WhatsApp)
+                           </label>
+                           <div className="grid grid-cols-2 gap-3">
+                               <div>
+                                   <label className="text-[10px] font-bold text-gray-500 uppercase">Disparos/Dia</label>
+                                   <input 
+                                       type="number"
+                                       value={editingCompany.dailyMessageLimit || 5}
+                                       onChange={e => setEditingCompany({...editingCompany, dailyMessageLimit: parseInt(e.target.value)})}
+                                       className="w-full border rounded-lg px-2 py-1 mt-1 text-sm"
+                                   />
+                               </div>
+                               <div>
+                                   <label className="text-[10px] font-bold text-gray-500 uppercase">Leads/Disparo</label>
+                                   <input 
+                                       type="number"
+                                       value={editingCompany.leadsPerBlastLimit || 20}
+                                       onChange={e => setEditingCompany({...editingCompany, leadsPerBlastLimit: parseInt(e.target.value)})}
+                                       className="w-full border rounded-lg px-2 py-1 mt-1 text-sm"
+                                   />
+                               </div>
+                           </div>
                       </div>
                       
                       {/* NEW: PIX FIELDS FOR ADMIN */}
