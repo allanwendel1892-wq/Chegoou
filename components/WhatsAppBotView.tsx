@@ -1,7 +1,7 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Product, Order, Company } from '../types';
-import { MessageSquare, Users, Send, CheckCircle, AlertCircle, Clock, Calendar, RefreshCw, Zap, Search, Filter, X, Loader2, ShieldCheck } from 'lucide-react';
+import { MessageSquare, Users, Send, CheckCircle, AlertCircle, Clock, Calendar, RefreshCw, Zap, Search, Filter, X, Loader2, ShieldCheck, Play, Pause } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
 interface WhatsAppBotViewProps {
@@ -30,6 +30,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
   // Estados de Controle de Envio
   const [isSending, setIsSending] = useState(false);
   const [sendProgress, setSendProgress] = useState({ current: 0, total: 0 });
+  const [currentStatusText, setCurrentStatusText] = useState("");
   const [completedCampaign, setCompletedCampaign] = useState<{ sent: number, total: number } | null>(null);
   
   const [viewMode, setViewMode] = useState<'list' | 'compose'>('list');
@@ -121,7 +122,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
       }
   };
 
-  // --- FUNÇÃO DE ENVIO HUMANIZADO (ANTI-BAN) ---
+  // --- FUNÇÃO DE ENVIO SEQUENCIAL (ANTI-BAN RIGOROSO) ---
   const handleSendMessages = async () => {
       // 1. Validações
       if (selectedLeads.length === 0) {
@@ -140,15 +141,16 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
       let successCount = 0;
 
       try {
-        // 2. Loop Sequencial com Pausa
+        // 2. Loop Sequencial
         for (let i = 0; i < selectedLeads.length; i++) {
             const phone = selectedLeads[i];
             
-            // Atualiza progresso visual
+            // Atualiza status UI
             setSendProgress({ current: i + 1, total: selectedLeads.length });
+            setCurrentStatusText(`Enviando para ${phone}...`);
 
+            // ENVIO
             try {
-                // Envio
                 const response = await fetch(webhookUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -159,26 +161,33 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
                     }),
                 });
                 
-                if (response.ok) successCount++;
-                else console.error(`Falha webhook para ${phone}`);
-                
+                if (response.ok) {
+                    successCount++;
+                    console.log(`[${i+1}/${selectedLeads.length}] Sucesso: ${phone}`);
+                } else {
+                    console.error(`Falha no envio para ${phone}`);
+                }
             } catch (error) {
-                console.error(`Erro ao enviar para ${phone}:`, error);
+                console.error(`Erro de rede para ${phone}:`, error);
             }
 
-            // 3. O Segredo: Delay Aleatório entre envios (exceto no último)
+            // DELAY (Exceto no último)
             if (i < selectedLeads.length - 1) {
-                // Gera um tempo entre 5 e 15 segundos (5000 a 15000 ms)
-                const randomDelay = Math.floor(Math.random() * (15000 - 5000 + 1) + 5000);
-                await sleep(randomDelay); 
+                // Random entre 25000 (25s) e 60000 (60s)
+                const delayMs = Math.floor(Math.random() * (60000 - 25000 + 1) + 25000);
+                const delaySec = Math.ceil(delayMs / 1000);
+                
+                // Countdown Visual
+                for (let s = delaySec; s > 0; s--) {
+                    setCurrentStatusText(`Aguardando ${s}s para o próximo...`);
+                    await sleep(1000);
+                }
             }
         }
 
-        // 4. Atualização do Banco (só ocorre após terminar o loop para garantir integridade)
-        // A regra é: 1 Campanha = 1 "Disparo" consumido do limite diário, independente de quantos leads (respeitando o limite de leads por disparo)
+        // 4. Atualização do Banco
         if (company) {
             const newTotal = (messagesSentToday || 0) + 1;
-            
             const { error } = await supabase
               .from('companies')
               .update({ 
@@ -195,19 +204,18 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
             }
         }
 
-        // 5. Mostrar Tela de Finalização
+        // 5. Finalização
         setCompletedCampaign({ sent: successCount, total: selectedLeads.length });
-        
-        // Limpa formulário
         setSelectedLeads([]);
         setMessageText("");
         setViewMode('list'); 
 
       } catch (error) {
-        console.error("Erro geral no envio:", error);
-        alert("Houve um erro crítico durante o processo de envio.");
+        console.error("Erro fatal no loop:", error);
+        alert("Ocorreu um erro inesperado e o processo foi interrompido.");
       } finally {
         setIsSending(false);
+        setCurrentStatusText("");
       }
    };
 
@@ -218,33 +226,45 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
       return (
           <div className="flex flex-col h-[calc(100vh-6rem)] max-w-4xl mx-auto relative">
               
-              {/* OVERLAY DE PROGRESSO (IMPEDE CLIQUES) */}
+              {/* OVERLAY DE PROGRESSO COM COUNTDOWN */}
               {isSending && (
-                  <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center p-8 animate-fade-in">
-                      <div className="w-24 h-24 relative mb-6">
+                  <div className="absolute inset-0 z-50 bg-white/95 backdrop-blur-md rounded-2xl flex flex-col items-center justify-center p-8 animate-fade-in text-center">
+                      <div className="w-32 h-32 relative mb-8">
                           <svg className="w-full h-full transform -rotate-90">
-                              <circle cx="48" cy="48" r="40" stroke="#eee" strokeWidth="8" fill="none" />
+                              <circle cx="64" cy="64" r="56" stroke="#eee" strokeWidth="8" fill="none" />
                               <circle 
-                                cx="48" cy="48" r="40" stroke="#16a34a" strokeWidth="8" fill="none" 
-                                strokeDasharray="251.2" 
-                                strokeDashoffset={251.2 - (251.2 * sendProgress.current / sendProgress.total)}
-                                className="transition-all duration-1000 ease-linear"
+                                cx="64" cy="64" r="56" stroke="#16a34a" strokeWidth="8" fill="none" 
+                                strokeDasharray="351.8" 
+                                strokeDashoffset={351.8 - (351.8 * sendProgress.current / sendProgress.total)}
+                                className="transition-all duration-500 ease-linear"
                               />
                           </svg>
-                          <div className="absolute inset-0 flex items-center justify-center font-bold text-xl text-green-600">
-                              {Math.round((sendProgress.current / sendProgress.total) * 100)}%
+                          <div className="absolute inset-0 flex flex-col items-center justify-center">
+                              <span className="text-3xl font-bold text-gray-800">
+                                  {sendProgress.current}<span className="text-lg text-gray-400">/{sendProgress.total}</span>
+                              </span>
                           </div>
                       </div>
-                      <h3 className="text-xl font-bold text-gray-800 mb-2">Enviando Mensagens...</h3>
-                      <p className="text-gray-500 text-sm mb-6 text-center max-w-xs">
-                          Disparando {sendProgress.current} de {sendProgress.total}. <br/>
-                          Aguardando delay de segurança (Anti-Ban).
-                      </p>
-                      <div className="flex items-center gap-2 text-xs bg-yellow-50 text-yellow-800 px-3 py-1.5 rounded-full">
-                          <ShieldCheck className="w-4 h-4"/> Modo Seguro Ativo
+                      
+                      <h3 className="text-2xl font-bold text-gray-800 mb-2">Processando Campanha</h3>
+                      
+                      <div className="bg-gray-100 px-6 py-3 rounded-xl mb-6">
+                          <p className="text-gray-600 font-mono font-medium animate-pulse">
+                              {currentStatusText || "Iniciando..."}
+                          </p>
                       </div>
-                      <p className="text-xs text-red-500 font-bold mt-8 animate-pulse">
-                          Não feche esta janela!
+
+                      <div className="flex flex-col items-center gap-3 bg-yellow-50 text-yellow-800 px-6 py-4 rounded-xl max-w-sm border border-yellow-100">
+                          <div className="flex items-center gap-2 font-bold text-sm">
+                              <ShieldCheck className="w-5 h-5 text-green-600"/> Modo Anti-Ban Ativo
+                          </div>
+                          <p className="text-xs text-center opacity-90">
+                              Delay aleatório de 25s a 60s entre mensagens aplicado para proteger seu número.
+                          </p>
+                      </div>
+                      
+                      <p className="text-xs text-red-500 font-bold mt-12 animate-pulse uppercase tracking-wide">
+                          ⚠️ Não feche esta janela
                       </p>
                   </div>
               )}
@@ -316,7 +336,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
                                   className="flex-1 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition-colors shadow-lg shadow-green-200 flex items-center justify-center gap-2 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed"
                               >
                                   {isSending ? <Loader2 className="w-5 h-5 animate-spin"/> : <Send className="w-5 h-5"/>}
-                                  {isSending ? 'Enviando...' : 'Iniciar Disparos'}
+                                  {isSending ? 'Processando...' : 'Iniciar Sequência'}
                               </button>
                           </div>
                       </div>
