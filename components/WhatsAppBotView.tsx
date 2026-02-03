@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { Product, Order, Company } from '../types';
-import { MessageSquare, Users, Send, CheckCircle, AlertCircle, Clock, Calendar, RefreshCw, Zap, Search, Filter } from 'lucide-react';
+import { MessageSquare, Users, Send, CheckCircle, AlertCircle, Clock, Calendar, RefreshCw, Zap, Search, Filter, X, Loader2, ShieldCheck } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
 interface WhatsAppBotViewProps {
@@ -19,11 +19,19 @@ interface CustomerCRM {
     status: 'recente' | 'morno' | 'inativo';
 }
 
+// Função auxiliar de pausa
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, updateCompany }) => {
   const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
   const [messageText, setMessageText] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
+  
+  // Estados de Controle de Envio
   const [isSending, setIsSending] = useState(false);
+  const [sendProgress, setSendProgress] = useState({ current: 0, total: 0 });
+  const [completedCampaign, setCompletedCampaign] = useState<{ sent: number, total: number } | null>(null);
+  
   const [viewMode, setViewMode] = useState<'list' | 'compose'>('list');
 
   // --- 1. LÓGICA DE CLIENTES (CRM) ---
@@ -32,7 +40,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
       const now = new Date();
 
       orders.forEach(order => {
-          // Filtra apenas pedidos vindos do WhatsApp
+          // Filtra apenas pedidos vindos do WhatsApp (ou todos se preferir, mas ajustado para whats)
           if (order.origin?.toLowerCase() !== 'whatsapp') return;
           
           const phone = order.customerPhone.replace(/\D/g, '');
@@ -113,9 +121,9 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
       }
   };
 
-  // --- FUNÇÃO OTIMIZADA COM PROMISE.ALL ---
+  // --- FUNÇÃO DE ENVIO HUMANIZADO (ANTI-BAN) ---
   const handleSendMessages = async () => {
-      // Validações iniciais
+      // 1. Validações
       if (selectedLeads.length === 0) {
         alert("Selecione pelo menos um cliente.");
         return;
@@ -126,13 +134,21 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
       }
 
       setIsSending(true);
+      setSendProgress({ current: 0, total: selectedLeads.length });
       
       const webhookUrl = 'https://n8n-webhook.znzrqn.easypanel.host/webhook/chegooudisparo'; 
+      let successCount = 0;
 
       try {
-        // PREPARAÇÃO: Cria um "pacote" de envios (Promessas) em paralelo
-        const sendPromises = selectedLeads.map(async (phone) => {
+        // 2. Loop Sequencial com Pausa
+        for (let i = 0; i < selectedLeads.length; i++) {
+            const phone = selectedLeads[i];
+            
+            // Atualiza progresso visual
+            setSendProgress({ current: i + 1, total: selectedLeads.length });
+
             try {
+                // Envio
                 const response = await fetch(webhookUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -143,20 +159,23 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
                     }),
                 });
                 
-                return response.ok; // Retorna true se deu certo
+                if (response.ok) successCount++;
+                else console.error(`Falha webhook para ${phone}`);
+                
             } catch (error) {
                 console.error(`Erro ao enviar para ${phone}:`, error);
-                return false; // Retorna false se falhar
             }
-        });
 
-        // DISPARO: O Promise.all dispara todos simultaneamente
-        const results = await Promise.all(sendPromises);
+            // 3. O Segredo: Delay Aleatório entre envios (exceto no último)
+            if (i < selectedLeads.length - 1) {
+                // Gera um tempo entre 5 e 15 segundos (5000 a 15000 ms)
+                const randomDelay = Math.floor(Math.random() * (15000 - 5000 + 1) + 5000);
+                await sleep(randomDelay); 
+            }
+        }
 
-        // Opcional: Contar sucessos se quiser logar (mas o limite é por campanha/disparo)
-        const successCount = results.filter(result => result === true).length;
-
-        // Atualização do Banco (Supabase) - Consome 1 Disparo do Limite
+        // 4. Atualização do Banco (só ocorre após terminar o loop para garantir integridade)
+        // A regra é: 1 Campanha = 1 "Disparo" consumido do limite diário, independente de quantos leads (respeitando o limite de leads por disparo)
         if (company) {
             const newTotal = (messagesSentToday || 0) + 1;
             
@@ -173,20 +192,20 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
                     messagesSentToday: newTotal,
                     lastMessageDate: todayStr
                 });
-                
-                alert(`Campanha enviada! ${successCount} mensagens processadas.`);
-                setViewMode('list');
-                setSelectedLeads([]);
-                setMessageText("");
-            } else {
-                console.error("Erro ao atualizar limite:", error);
-                alert("Mensagens enviadas, mas erro ao atualizar o limite diário.");
             }
         }
 
+        // 5. Mostrar Tela de Finalização
+        setCompletedCampaign({ sent: successCount, total: selectedLeads.length });
+        
+        // Limpa formulário
+        setSelectedLeads([]);
+        setMessageText("");
+        setViewMode('list'); 
+
       } catch (error) {
-        console.error("Erro geral no envio em massa:", error);
-        alert("Houve um erro ao processar os envios.");
+        console.error("Erro geral no envio:", error);
+        alert("Houve um erro crítico durante o processo de envio.");
       } finally {
         setIsSending(false);
       }
@@ -197,9 +216,41 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
 
   if (viewMode === 'compose') {
       return (
-          <div className="flex flex-col h-[calc(100vh-6rem)] max-w-4xl mx-auto">
+          <div className="flex flex-col h-[calc(100vh-6rem)] max-w-4xl mx-auto relative">
+              
+              {/* OVERLAY DE PROGRESSO (IMPEDE CLIQUES) */}
+              {isSending && (
+                  <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center p-8 animate-fade-in">
+                      <div className="w-24 h-24 relative mb-6">
+                          <svg className="w-full h-full transform -rotate-90">
+                              <circle cx="48" cy="48" r="40" stroke="#eee" strokeWidth="8" fill="none" />
+                              <circle 
+                                cx="48" cy="48" r="40" stroke="#16a34a" strokeWidth="8" fill="none" 
+                                strokeDasharray="251.2" 
+                                strokeDashoffset={251.2 - (251.2 * sendProgress.current / sendProgress.total)}
+                                className="transition-all duration-1000 ease-linear"
+                              />
+                          </svg>
+                          <div className="absolute inset-0 flex items-center justify-center font-bold text-xl text-green-600">
+                              {Math.round((sendProgress.current / sendProgress.total) * 100)}%
+                          </div>
+                      </div>
+                      <h3 className="text-xl font-bold text-gray-800 mb-2">Enviando Mensagens...</h3>
+                      <p className="text-gray-500 text-sm mb-6 text-center max-w-xs">
+                          Disparando {sendProgress.current} de {sendProgress.total}. <br/>
+                          Aguardando delay de segurança (Anti-Ban).
+                      </p>
+                      <div className="flex items-center gap-2 text-xs bg-yellow-50 text-yellow-800 px-3 py-1.5 rounded-full">
+                          <ShieldCheck className="w-4 h-4"/> Modo Seguro Ativo
+                      </div>
+                      <p className="text-xs text-red-500 font-bold mt-8 animate-pulse">
+                          Não feche esta janela!
+                      </p>
+                  </div>
+              )}
+
               <div className="mb-6 flex items-center gap-4">
-                  <button onClick={() => setViewMode('list')} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                  <button onClick={() => setViewMode('list')} disabled={isSending} className="p-2 hover:bg-gray-100 rounded-full transition-colors disabled:opacity-50">
                       <Users className="w-6 h-6 text-gray-600"/>
                   </button>
                   <h2 className="text-2xl font-bold text-gray-800">Nova Campanha</h2>
@@ -239,6 +290,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
                                   onChange={e => setMessageText(e.target.value)}
                                   placeholder="Olá! Temos uma oferta especial hoje..."
                                   className="w-full h-full bg-white rounded-lg p-3 resize-none outline-none text-sm shadow-sm"
+                                  disabled={isSending}
                                />
                                <div className="absolute bottom-6 right-6 text-xs text-gray-400">
                                    {messageText.length} caracteres
@@ -253,17 +305,18 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
                           <div className="flex gap-3">
                               <button 
                                   onClick={() => setViewMode('list')}
-                                  className="flex-1 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 transition-colors"
+                                  disabled={isSending}
+                                  className="flex-1 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 transition-colors disabled:opacity-50"
                               >
                                   Cancelar
                               </button>
                               <button 
-                                  onClick={handleSendMessages} // Corrigido para plural
+                                  onClick={handleSendMessages} 
                                   disabled={isSending}
-                                  className="flex-1 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition-colors shadow-lg shadow-green-200 flex items-center justify-center gap-2"
+                                  className="flex-1 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition-colors shadow-lg shadow-green-200 flex items-center justify-center gap-2 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed"
                               >
-                                  {isSending ? <RefreshCw className="w-5 h-5 animate-spin"/> : <Send className="w-5 h-5"/>}
-                                  Enviar Agora
+                                  {isSending ? <Loader2 className="w-5 h-5 animate-spin"/> : <Send className="w-5 h-5"/>}
+                                  {isSending ? 'Enviando...' : 'Iniciar Disparos'}
                               </button>
                           </div>
                       </div>
@@ -275,8 +328,44 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
 
   // --- VIEW MODE: LIST ---
   return (
-    <div className="flex flex-col h-[calc(100vh-6rem)] gap-6">
+    <div className="flex flex-col h-[calc(100vh-6rem)] gap-6 relative">
       
+      {/* MODAL DE FINALIZAÇÃO DA CAMPANHA */}
+      {completedCampaign && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+              <div className="bg-white rounded-2xl p-8 max-w-sm w-full shadow-2xl animate-scale-in text-center relative">
+                  <button onClick={() => setCompletedCampaign(null)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
+                      <X className="w-5 h-5"/>
+                  </button>
+                  <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <CheckCircle className="w-8 h-8 text-green-600" />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900 mb-2">Envio Finalizado!</h3>
+                  <p className="text-gray-500 text-sm mb-6">
+                      Sua campanha foi processada com sucesso.
+                  </p>
+                  
+                  <div className="bg-gray-50 rounded-xl p-4 mb-6 grid grid-cols-2 gap-4">
+                      <div>
+                          <p className="text-xs text-gray-500 uppercase font-bold">Enviados</p>
+                          <p className="text-lg font-bold text-gray-900">{completedCampaign.sent} / {completedCampaign.total}</p>
+                      </div>
+                      <div>
+                          <p className="text-xs text-gray-500 uppercase font-bold">Limite Restante</p>
+                          <p className="text-lg font-bold text-green-600">{remainingBlasts} Hoje</p>
+                      </div>
+                  </div>
+
+                  <button 
+                      onClick={() => setCompletedCampaign(null)}
+                      className="w-full py-3 bg-gray-900 text-white rounded-xl font-bold hover:bg-black transition-colors"
+                  >
+                      Fechar
+                  </button>
+              </div>
+          </div>
+      )}
+
       {/* Header Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4">
