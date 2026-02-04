@@ -88,8 +88,9 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
       );
   }, [customers, searchTerm]);
 
-  // --- 2. LÓGICA DE LIMITES DIÁRIOS ---
-  const todayStr = new Date().toISOString().split('T')[0];
+  // --- 2. LÓGICA DE LIMITES DIÁRIOS (CORRIGIDO TIMEZONE) ---
+  // 'en-CA' retorna YYYY-MM-DD baseado no horário LOCAL do navegador, não UTC.
+  const todayStr = new Date().toLocaleDateString('en-CA');
   
   // Reseta contador visualmente se mudou o dia
   const messagesSentToday = company.lastMessageDate === todayStr ? (company.messagesSentToday || 0) : 0;
@@ -188,11 +189,12 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
         // 4. Atualização do Banco
         if (company) {
             const newTotal = (messagesSentToday || 0) + 1;
+            // Usa 'todayStr' local calculado acima
             const { error } = await supabase
               .from('companies')
               .update({ 
                 messagesSentToday: newTotal,
-                lastMessageDate: todayStr
+                lastMessageDate: todayStr 
               })
               .eq('id', company.id);
 

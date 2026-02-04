@@ -1,5 +1,4 @@
 
-
 import React from 'react';
 import { LayoutDashboard, UtensilsCrossed, TrendingUp, MessageSquare, ShoppingBag, LogOut, Settings, Wallet } from 'lucide-react';
 import { ViewState } from '../types';
@@ -82,7 +81,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, isMobileOpen, s
         </nav>
 
         {/* Footer */}
-        <div className="p-6 border-t border-gray-50">
+        <div className="p-6 pb-20 border-t border-gray-50">
             <div className="bg-gray-50 rounded-2xl p-4 mb-4">
                 <p className="text-xs font-bold text-gray-500 mb-1">Status da Loja</p>
                 <div className="flex items-center gap-2">
