@@ -1,9 +1,26 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Product, SalesHistoryItem, ForecastData } from "../types";
 
-// Initialize with fallback to prevent app crash if env var is missing or undefined
-// The actual API calls will fail gracefully in the try/catch blocks below if the key is invalid
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "missing_api_key" });
+// HELPER: Safe API Key retrieval to prevent "process is not defined" crash in Vite/Browser
+const getApiKey = () => {
+  try {
+    // 1. Vite Environment
+    // @ts-ignore
+    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_KEY) {
+      // @ts-ignore
+      return import.meta.env.VITE_API_KEY;
+    }
+    // 2. Node/Next Environment (Safe check)
+    if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+      return process.env.API_KEY;
+    }
+  } catch (e) {
+    console.warn("Error accessing environment variables", e);
+  }
+  return "missing_api_key_fallback";
+};
+
+const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
 // Forecast Logic (Real AI Implementation)
 export const generateSalesForecast = async (history: SalesHistoryItem[], products: Product[]): Promise<ForecastData> => {
