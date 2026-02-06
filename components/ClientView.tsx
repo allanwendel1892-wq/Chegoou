@@ -678,7 +678,26 @@ const ClientView: React.FC<ClientViewProps> = ({
        )}
 
        {subView === 'chat' && chatOrderId && (
-            <div className="fixed inset-0 bg-gray-50 z-[60] flex flex-col animate-slide-up"><div className="bg-white p-4 border-b flex items-center gap-3"><button onClick={()=>setSubView('none')}><ArrowLeft/></button><h2 className="font-bold">Chat</h2></div><div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#E5DDD5]">{(chats[chatOrderId]||[]).map(m=>(<div key={m.id} className={`flex ${m.senderRole==='client'?'justify-end':'justify-start'}`}><div className={`p-3 rounded-xl text-sm max-w-[80%] ${m.senderRole==='client'?'bg-[#DCF8C6]':'bg-white'}`}>{m.text}</div></div>))}<div ref={messagesEndRef}/></div><div className="p-3 bg-white border-t flex gap-2"><input value={chatInput} onChange={e=>setChatInput(e.target.value)} className="flex-1 bg-gray-100 rounded-full px-4 py-3 outline-none" /><button onClick={handleSendMessage} className="bg-brand text-white p-3 rounded-full"><Send/></button></div></div>
+            <div className="fixed inset-0 bg-gray-50 z-[60] flex flex-col animate-slide-up">
+                <div className="bg-white p-4 border-b flex items-center gap-3">
+                    <button onClick={()=>setSubView('none')}><ArrowLeft/></button>
+                    <h2 className="font-bold">Chat</h2>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#E5DDD5]">
+                    {(chats[chatOrderId]||[]).map(m=>(
+                        <div key={m.id} className={`flex ${m.senderRole==='client'?'justify-end':'justify-start'}`}>
+                            <div className={`p-3 rounded-xl text-sm max-w-[80%] ${m.senderRole==='client'?'bg-[#DCF8C6]':'bg-white'}`}>
+                                {m.text}
+                            </div>
+                        </div>
+                    ))}
+                    <div ref={messagesEndRef}/>
+                </div>
+                <div className="p-3 bg-white border-t flex gap-2 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+                    <input value={chatInput} onChange={e=>setChatInput(e.target.value)} className="flex-1 bg-gray-100 rounded-full px-4 py-3 outline-none" />
+                    <button onClick={handleSendMessage} className="bg-brand text-white p-3 rounded-full"><Send/></button>
+                </div>
+            </div>
        )}
        
        {isCartOpen && (

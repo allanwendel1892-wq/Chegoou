@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest } from './types';
 import AuthView from './components/AuthView';
@@ -36,6 +37,17 @@ const prepareProductPayload = (product: Product) => {
         stock: product.stock !== undefined ? product.stock : null
     };
 };
+
+// Helper to handle diverse DB column naming conventions
+const normalizeMessage = (msg: any): ChatMessage => ({
+    id: msg.id,
+    // Check for camelCase, snake_case, and PascalCase to ensure compatibility with manual DB tables
+    orderId: msg.orderId || msg.order_id || msg.OrderId || '',
+    senderId: msg.senderId || msg.sender_id || msg.SenderId || '',
+    senderRole: msg.senderRole || msg.sender_role || msg.Role || msg.role || 'system',
+    text: msg.text || msg.Text || msg.content || '',
+    timestamp: new Date(msg.timestamp || msg.created_at || Date.now())
+});
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -98,7 +110,9 @@ const App: React.FC = () => {
     const messagesSub = supabase
       .channel('public:messages')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-          const newMsg = payload.new as ChatMessage;
+          const rawMsg = payload.new;
+          const newMsg = normalizeMessage(rawMsg);
+          
           setChats(prev => ({
               ...prev,
               [newMsg.orderId]: [...(prev[newMsg.orderId] || []), newMsg]
@@ -271,12 +285,10 @@ const App: React.FC = () => {
             const { data: messagesData, error: msgError } = await supabase.from('messages').select('*').order('timestamp', { ascending: true });
             if (!msgError && messagesData) {
                 const groupedChats: Record<string, ChatMessage[]> = {};
-                messagesData.forEach((msg: ChatMessage) => {
+                messagesData.forEach((rawMsg: any) => {
+                    const msg = normalizeMessage(rawMsg);
                     if (!groupedChats[msg.orderId]) groupedChats[msg.orderId] = [];
-                    groupedChats[msg.orderId].push({
-                        ...msg,
-                        timestamp: new Date(msg.timestamp)
-                    });
+                    groupedChats[msg.orderId].push(msg);
                 });
                 setChats(groupedChats);
             }
@@ -382,6 +394,10 @@ const App: React.FC = () => {
           text,
           timestamp: new Date().toISOString()
       };
+      
+      // Attempt insert. Note: If DB columns are snake_case (e.g. order_id), 
+      // you must have columns aliased or Supabase must map them.
+      // Ideally, the DB columns should match these keys.
       await supabase.from('messages').insert([newMessage]);
   };
 
