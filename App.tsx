@@ -39,15 +39,20 @@ const prepareProductPayload = (product: Product) => {
 };
 
 // Helper to handle diverse DB column naming conventions
-const normalizeMessage = (msg: any): ChatMessage => ({
-    id: msg.id,
-    // Check for camelCase, snake_case, and PascalCase to ensure compatibility with manual DB tables
-    orderId: msg.orderId || msg.order_id || msg.OrderId || '',
-    senderId: msg.senderId || msg.sender_id || msg.SenderId || '',
-    senderRole: msg.senderRole || msg.sender_role || msg.Role || msg.role || 'system',
-    text: msg.text || msg.Text || msg.content || '',
-    timestamp: new Date(msg.timestamp || msg.created_at || Date.now())
-});
+const normalizeMessage = (msg: any): ChatMessage => {
+    // Normalize role to lowercase to ensure UI logic works (e.g. 'Client' -> 'client')
+    const rawRole = msg.senderRole || msg.sender_role || msg.Role || msg.role || 'system';
+    
+    return {
+        id: msg.id ? String(msg.id) : `msg-${Date.now()}`,
+        // Robust check for Order ID variations
+        orderId: String(msg.orderId || msg.order_id || msg.OrderId || '').trim(),
+        senderId: String(msg.senderId || msg.sender_id || msg.SenderId || ''),
+        senderRole: rawRole.toLowerCase(), // Force lowercase
+        text: msg.text || msg.Text || msg.content || '',
+        timestamp: new Date(msg.timestamp || msg.created_at || Date.now())
+    };
+};
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);

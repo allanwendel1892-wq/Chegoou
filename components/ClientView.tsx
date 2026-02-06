@@ -693,8 +693,8 @@ const ClientView: React.FC<ClientViewProps> = ({
                     ))}
                     <div ref={messagesEndRef}/>
                 </div>
-                <div className="p-3 bg-white border-t flex gap-2 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
-                    <input value={chatInput} onChange={e=>setChatInput(e.target.value)} className="flex-1 bg-gray-100 rounded-full px-4 py-3 outline-none" />
+                <div className="p-3 bg-white border-t flex gap-2 pb-[calc(env(safe-area-inset-bottom)+3rem)]">
+                    <input value={chatInput} onChange={e=>setChatInput(e.target.value)} className="flex-1 bg-gray-100 rounded-full px-4 py-3 outline-none" placeholder="Digite sua mensagem..." />
                     <button onClick={handleSendMessage} className="bg-brand text-white p-3 rounded-full"><Send/></button>
                 </div>
             </div>
