@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest } from './types';
+import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest, MarketingAsset } from './types';
 import AuthView from './components/AuthView';
 import AdminView from './components/AdminView';
 import PartnerView from './components/PartnerView';
@@ -54,6 +54,18 @@ const normalizeMessage = (msg: any): ChatMessage => {
     };
 };
 
+// HELPER: Normalize Marketing Assets (Snake Case DB -> Camel Case Frontend)
+const normalizeAsset = (data: any): MarketingAsset => ({
+    id: data.id,
+    companyId: data.company_id, // DB column is company_id
+    type: data.type,
+    name: data.name,
+    discountType: data.discount_type, // DB column is discount_type
+    discountValue: data.discount_value, // DB column is discount_value
+    description: data.description,
+    active: data.active
+});
+
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -65,6 +77,7 @@ const App: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
+  const [marketingAssets, setMarketingAssets] = useState<MarketingAsset[]>([]); // NEW STATE
   const [chats, setChats] = useState<Record<string, ChatMessage[]>>({});
 
   const [globalSettings, setGlobalSettings] = useState({
@@ -141,6 +154,36 @@ const App: React.FC = () => {
         supabase.removeChannel(withdrawalsSub);
     };
   }, []);
+
+  // --- MARKETING ASSETS REALTIME ---
+  useEffect(() => {
+      if (!currentUser || currentUser.role !== 'partner') return;
+
+      const marketingSub = supabase
+          .channel('public:marketing_assets')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'marketing_assets' }, (payload) => {
+              // Note: We filter by companyId in logic because filter string on connection sometimes is tricky with Supabase
+              if (payload.eventType === 'INSERT') {
+                  const newAsset = normalizeAsset(payload.new);
+                  if (newAsset.companyId === currentUser.id) {
+                      setMarketingAssets(prev => [...prev, newAsset]);
+                  }
+              } else if (payload.eventType === 'UPDATE') {
+                  const updatedAsset = normalizeAsset(payload.new);
+                  if (updatedAsset.companyId === currentUser.id) {
+                      setMarketingAssets(prev => prev.map(a => a.id === updatedAsset.id ? updatedAsset : a));
+                  }
+              } else if (payload.eventType === 'DELETE') {
+                  setMarketingAssets(prev => prev.filter(a => a.id !== payload.old.id));
+              }
+          })
+          .subscribe();
+
+      return () => {
+          supabase.removeChannel(marketingSub);
+      };
+  }, [currentUser]);
+
 
   useEffect(() => {
       if (!currentUser) return;
@@ -287,6 +330,16 @@ const App: React.FC = () => {
           } catch (e) {}
 
           try {
+            // Load Marketing Assets
+            const { data: mktData, error: mktError } = await supabase.from('marketing_assets').select('*');
+            if (!mktError && mktData) {
+                // Map snake_case to CamelCase
+                const formattedAssets = mktData.map(normalizeAsset);
+                setMarketingAssets(formattedAssets);
+            }
+          } catch (e) {}
+
+          try {
             const { data: messagesData, error: msgError } = await supabase.from('messages').select('*').order('timestamp', { ascending: true });
             if (!msgError && messagesData) {
                 const groupedChats: Record<string, ChatMessage[]> = {};
@@ -399,10 +452,6 @@ const App: React.FC = () => {
           text,
           timestamp: new Date().toISOString()
       };
-      
-      // Attempt insert. Note: If DB columns are snake_case (e.g. order_id), 
-      // you must have columns aliased or Supabase must map them.
-      // Ideally, the DB columns should match these keys.
       await supabase.from('messages').insert([newMessage]);
   };
 
@@ -410,6 +459,51 @@ const App: React.FC = () => {
       await supabase.from('withdrawal_requests').update({ status }).eq('id', id);
   };
 
+  // --- MARKETING CRUD ---
+  const handleUpsertAsset = async (asset: MarketingAsset) => {
+      // Correct Mapping: camelCase (Frontend) -> snake_case (Database)
+      const payload = {
+          id: asset.id,
+          company_id: asset.companyId,
+          type: asset.type,
+          name: asset.name,
+          discount_type: asset.discountType,
+          discount_value: asset.discountValue,
+          description: asset.description,
+          active: asset.active
+      };
+
+      const { data, error } = await supabase.from('marketing_assets').upsert(payload).select();
+      
+      if (error) {
+          console.error("Erro ao salvar marketing asset:", error);
+          alert("Erro ao salvar: " + error.message);
+      }
+      
+      if (!error && data) {
+          // Optimistic update handled by Realtime subscription or local state
+          const returnedAsset = normalizeAsset(data[0]);
+          setMarketingAssets(prev => {
+              const exists = prev.find(a => a.id === asset.id);
+              if (exists) return prev.map(a => a.id === asset.id ? returnedAsset : a);
+              return [...prev, returnedAsset];
+          });
+      }
+  };
+
+  const handleDeleteAsset = async (assetId: string) => {
+      const { error } = await supabase.from('marketing_assets').delete().eq('id', assetId);
+      
+      if (error) {
+          console.error("Erro ao excluir asset:", error);
+          alert("Erro ao excluir item: " + error.message);
+          return;
+      }
+
+      setMarketingAssets(prev => prev.filter(a => a.id !== assetId));
+  };
+
+  // ... (handlePlaceOrder, updateOrderStatus, handleCourierAcceptOrder, handleCancelOrder, handleUpdateFullOrder, handleDeleteOrder, handleAddProduct, handleUpdateProduct, handleDeleteProduct, handleUpdateCompany, handleAddAddress, handleRemoveAddress, handleAddCard, handleRemoveCard - KEEP AS IS)
   const handlePlaceOrder = async (
       cartItems: any[], companyId: string, finalTotal: number, deliveryMethod: 'delivery' | 'pickup', serviceFee: number, deliveryFee: number, subtotal: number, paymentMethod: 'cash' | 'card' | 'pix', changeFor?: number
   ): Promise<boolean> => {
@@ -698,6 +792,7 @@ const App: React.FC = () => {
         
         return <PartnerView 
             company={myCompany} 
+            userPhone={currentUser.phone}
             orders={orders.filter(o => o.companyId === myCompany.id)}
             products={products.filter(p => p.companyId === myCompany.id)}
             updateOrderStatus={updateOrderStatus}
@@ -710,6 +805,11 @@ const App: React.FC = () => {
             onSendMessage={handleSendMessage}
             onUpdateFullOrder={handleUpdateFullOrder}
             onDeleteOrder={handleDeleteOrder}
+            // Marketing Props
+            marketingAssets={marketingAssets.filter(a => a.companyId === myCompany.id)}
+            onAddAsset={handleUpsertAsset}
+            onUpdateAsset={handleUpsertAsset}
+            onDeleteAsset={handleDeleteAsset}
         />;
 
     case 'courier':
