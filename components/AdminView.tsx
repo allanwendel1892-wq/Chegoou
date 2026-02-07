@@ -1,4 +1,5 @@
 
+
 import React, { useState, useRef, useEffect } from 'react';
 import { User, Company, Order, WithdrawalRequest, UserRole, Address } from '../types';
 import { Users, Building2, DollarSign, Settings, Trash2, CheckCircle, Ban, TrendingUp, Search, Lock, Unlock, Edit, X, Save, Bike, LogOut, MapPin, Truck, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, Store, Wallet, MessageSquare } from 'lucide-react';
@@ -415,7 +416,21 @@ const AdminView: React.FC<AdminViewProps> = ({
   const totalRevenue = orders.reduce((acc, o) => o.status !== 'cancelled' ? acc + o.total : acc, 0);
   const totalOrders = orders.length;
   const activeCompaniesCount = companies.filter(c => !c.isSuspended).length;
-  const platformRevenue = totalRevenue * (0.15); // Estimativa de 15% apenas para dashboard visual
+  
+  // Platform Revenue Logic: Sum of all Service Fees + Delivery Fees (where type=chegoou)
+  const platformRevenue = orders.reduce((acc, o) => {
+      if (o.status === 'cancelled') return acc;
+      
+      // Add Service Fee (always goes to platform)
+      let fee = o.serviceFee || 0;
+      
+      // Add Delivery Fee ONLY if it's platform delivery
+      if (o.deliveryType === 'chegoou') {
+          fee += o.deliveryFee;
+      }
+      
+      return acc + fee;
+  }, 0);
 
   return (
     <div className="p-6 md:p-10 max-w-7xl mx-auto bg-gray-50 min-h-screen">
@@ -663,7 +678,7 @@ const AdminView: React.FC<AdminViewProps> = ({
                       <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-6 rounded-2xl border border-green-100">
                           <p className="text-sm text-green-600 font-bold uppercase tracking-wider mb-2">Receita Plataforma</p>
                           <h4 className="text-3xl font-bold text-green-900">R$ {platformRevenue.toFixed(2)}</h4>
-                          <p className="text-xs text-green-600 mt-2 opacity-80">Estimativa baseada em taxas</p>
+                          <p className="text-xs text-green-600 mt-2 opacity-80">Taxas Fixas + Entregas (Chegoou)</p>
                       </div>
                   </div>
               </div>

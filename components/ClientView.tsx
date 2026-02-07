@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Company, Product, Order, ChatMessage, Address, CreditCard as CreditCardType, ProductOption, User } from '../types';
 import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, Timer, Settings, LogOut, Crosshair, AlertCircle, ClipboardCheck, ScanLine, XCircle } from 'lucide-react';
@@ -678,26 +677,7 @@ const ClientView: React.FC<ClientViewProps> = ({
        )}
 
        {subView === 'chat' && chatOrderId && (
-            <div className="fixed inset-0 bg-gray-50 z-[60] flex flex-col animate-slide-up">
-                <div className="bg-white p-4 border-b flex items-center gap-3">
-                    <button onClick={()=>setSubView('none')}><ArrowLeft/></button>
-                    <h2 className="font-bold">Chat</h2>
-                </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#E5DDD5]">
-                    {(chats[chatOrderId]||[]).map(m=>(
-                        <div key={m.id} className={`flex ${m.senderRole==='client'?'justify-end':'justify-start'}`}>
-                            <div className={`p-3 rounded-xl text-sm max-w-[80%] ${m.senderRole==='client'?'bg-[#DCF8C6]':'bg-white'}`}>
-                                {m.text}
-                            </div>
-                        </div>
-                    ))}
-                    <div ref={messagesEndRef}/>
-                </div>
-                <div className="p-3 bg-white border-t flex gap-2 pb-[calc(env(safe-area-inset-bottom)+3rem)]">
-                    <input value={chatInput} onChange={e=>setChatInput(e.target.value)} className="flex-1 bg-gray-100 rounded-full px-4 py-3 outline-none" placeholder="Digite sua mensagem..." />
-                    <button onClick={handleSendMessage} className="bg-brand text-white p-3 rounded-full"><Send/></button>
-                </div>
-            </div>
+            <div className="fixed inset-0 bg-gray-50 z-[60] flex flex-col animate-slide-up"><div className="bg-white p-4 border-b flex items-center gap-3"><button onClick={()=>setSubView('none')}><ArrowLeft/></button><h2 className="font-bold">Chat</h2></div><div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#E5DDD5]">{(chats[chatOrderId]||[]).map(m=>(<div key={m.id} className={`flex ${m.senderRole==='client'?'justify-end':'justify-start'}`}><div className={`p-3 rounded-xl text-sm max-w-[80%] ${m.senderRole==='client'?'bg-[#DCF8C6]':'bg-white'}`}>{m.text}</div></div>))}<div ref={messagesEndRef}/></div><div className="p-3 bg-white border-t flex gap-2"><input value={chatInput} onChange={e=>setChatInput(e.target.value)} className="flex-1 bg-gray-100 rounded-full px-4 py-3 outline-none" /><button onClick={handleSendMessage} className="bg-brand text-white p-3 rounded-full"><Send/></button></div></div>
        )}
        
        {isCartOpen && (
@@ -739,9 +719,9 @@ const ClientView: React.FC<ClientViewProps> = ({
                             <span>R$ {serviceFeeValue.toFixed(2)}</span>
                         </div>
                     </div>
-                    <div className="mt-4 border-t pt-4 pb-6"><p className="text-xs font-bold text-gray-500 mb-2 uppercase">Pagamento</p><div className="flex gap-2 mb-4"><button onClick={() => setPaymentMethod('cash')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'cash' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-100'}`}><DollarSign/><span className="text-xs font-bold">Dinheiro</span></button><button onClick={() => setPaymentMethod('card')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'card' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-100'}`}><CreditCard/><span className="text-xs font-bold">Cartão</span></button><button onClick={() => setPaymentMethod('pix')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'pix' ? 'border-teal-500 bg-teal-50 text-teal-700' : 'border-gray-100'}`}><QrCode/><span className="text-xs font-bold">Pix</span></button></div>{paymentMethod === 'cash' && (<div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200 mb-4"><label className="text-xs font-bold text-yellow-800 block mb-1">Troco para quanto?</label><input type="number" placeholder="Ex: 50.00" value={changeAmount} onChange={e => setChangeAmount(e.target.value)} className="w-full py-2 outline-none text-gray-800 font-bold bg-transparent border-b border-yellow-300"/></div>)}</div>
+                    <div className="mt-4 border-t pt-4"><p className="text-xs font-bold text-gray-500 mb-2 uppercase">Pagamento</p><div className="flex gap-2 mb-4"><button onClick={() => setPaymentMethod('cash')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'cash' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-100'}`}><DollarSign/><span className="text-xs font-bold">Dinheiro</span></button><button onClick={() => setPaymentMethod('card')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'card' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-100'}`}><CreditCard/><span className="text-xs font-bold">Cartão</span></button><button onClick={() => setPaymentMethod('pix')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'pix' ? 'border-teal-500 bg-teal-50 text-teal-700' : 'border-gray-100'}`}><QrCode/><span className="text-xs font-bold">Pix</span></button></div>{paymentMethod === 'cash' && (<div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200 mb-4"><label className="text-xs font-bold text-yellow-800 block mb-1">Troco para quanto?</label><input type="number" placeholder="Ex: 50.00" value={changeAmount} onChange={e => setChangeAmount(e.target.value)} className="w-full py-2 outline-none text-gray-800 font-bold bg-transparent border-b border-yellow-300"/></div>)}</div>
                     <div className="mt-2 flex justify-between font-bold text-xl text-gray-900 border-t pt-2"><span>Total</span><span>R$ {finalTotal.toFixed(2)}</span></div>
-                    <div className="pb-8"><button onClick={handleFinalizeOrder} disabled={isProcessingPayment} className={`w-full text-white font-bold py-3.5 rounded-xl mt-4 transition-colors flex items-center justify-center gap-2 ${isProcessingPayment ? 'bg-gray-400' : 'bg-brand hover:bg-brandHover'}`}>{isProcessingPayment && <Loader2 className="w-5 h-5 animate-spin" />}{isProcessingPayment ? 'Processando...' : (paymentMethod === 'cash' ? 'Finalizar Pedido' : 'Pagar Agora')}</button></div>
+                    <button onClick={handleFinalizeOrder} disabled={isProcessingPayment} className={`w-full text-white font-bold py-3.5 rounded-xl mt-4 transition-colors flex items-center justify-center gap-2 ${isProcessingPayment ? 'bg-gray-400' : 'bg-brand hover:bg-brandHover'}`}>{isProcessingPayment && <Loader2 className="w-5 h-5 animate-spin" />}{isProcessingPayment ? 'Processando...' : (paymentMethod === 'cash' ? 'Finalizar Pedido' : 'Pagar Agora')}</button>
                </div>
            </div>
        )}

@@ -1,4 +1,5 @@
 
+
 export type UserRole = 'admin' | 'partner' | 'courier' | 'client';
 
 export interface Address {
@@ -180,18 +181,6 @@ export interface WithdrawalRequest {
   bankInfo: string; // Chave PIX e Tipo
 }
 
-// --- NEW MARKETING TYPES ---
-export interface MarketingAsset {
-  id: string;
-  companyId: string;
-  type: 'coupon' | 'promotion';
-  name?: string; // Nome do Cupom
-  discountType?: 'percentage' | 'fixed';
-  discountValue?: number;
-  description?: string; // Descrição da Promoção
-  active: boolean;
-}
-
 export enum ViewState {
   DASHBOARD = 'dashboard',
   ORDERS = 'orders', // Kanban
@@ -199,8 +188,7 @@ export enum ViewState {
   FORECAST = 'forecast',
   WHATSAPP = 'whatsapp',
   SETTINGS = 'settings',
-  FINANCE = 'finance',
-  MARKETING = 'marketing' // NEW
+  FINANCE = 'finance' // NEW
 }
 
 export interface SalesHistoryItem {

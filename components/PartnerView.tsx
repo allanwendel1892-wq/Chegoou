@@ -1,18 +1,17 @@
 
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem, WithdrawalRequest, MarketingAsset } from '../types';
+import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem, WithdrawalRequest } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
 import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle, ArrowRight, Lock, Unlock, Banknote, AlertCircle, Info, MessageSquare, CreditCard, Printer } from 'lucide-react';
 import DashboardView from './DashboardView';
 import ForecastView from './ForecastView';
 import WhatsAppBotView from './WhatsAppBotView';
-import MarketingView from './MarketingView';
 import Sidebar from './Sidebar';
 import { supabase } from '../services/supabaseClient';
 
 interface PartnerViewProps {
   company: Company;
-  userPhone: string; // Passed from CurrentUser
   orders: Order[];
   products: Product[];
   updateOrderStatus: (orderId: string, status: Order['status']) => void;
@@ -25,14 +24,8 @@ interface PartnerViewProps {
   onSendMessage: (orderId: string, text: string, senderId: string, role: 'client' | 'partner') => void;
   onUpdateFullOrder: (order: Order) => void;
   onDeleteOrder: (orderId: string) => void;
-  // Marketing
-  marketingAssets: MarketingAsset[];
-  onAddAsset: (asset: MarketingAsset) => void;
-  onUpdateAsset: (asset: MarketingAsset) => void;
-  onDeleteAsset: (id: string) => void;
 }
 
-// ... (KanbanColumn and other helper components remain the same) ...
 const COMPANY_CATEGORIES = [
     "Lanches", "Pizza", "Japonesa", "Brasileira", "Açaí", 
     "Doces & Bolos", "Saudável", "Italiana", "Bebidas", "Padaria", 
@@ -262,10 +255,15 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
   );
 };
 
+// --- HELPER PARA CÁLCULO FINANCEIRO ARREDONDADO ---
+const calculateBankFee = (amount: number, percentage: number) => {
+    const rawFee = amount * (percentage / 100);
+    return Math.ceil(rawFee * 100) / 100;
+};
+
 const PartnerView: React.FC<PartnerViewProps> = ({ 
-    company, userPhone, orders, products, updateOrderStatus, updateCompany, onAddProduct, onUpdateProduct, onDeleteProduct, onLogout,
-    chats, onSendMessage, onUpdateFullOrder, onDeleteOrder,
-    marketingAssets, onAddAsset, onUpdateAsset, onDeleteAsset
+    company, orders, products, updateOrderStatus, updateCompany, onAddProduct, onUpdateProduct, onDeleteProduct, onLogout,
+    chats, onSendMessage, onUpdateFullOrder, onDeleteOrder
 }) => {
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
@@ -301,13 +299,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   
   useEffect(() => { setLocalCompany(company); }, [company]);
 
-  // --- CALCULO VENDAS IA ---
-  // Filtra pedidos onde o ID começa com 'ord-ia'
-  const aiSalesCount = useMemo(() => {
-      return orders.filter(o => o.id.startsWith('ord-ia')).length;
-  }, [orders]);
-
-  // ... (handlePrintOrder, UnlockFunds, Finance Logic, Map Logic, etc...)
+  // --- LOGIC: PRINT THERMAL RECEIPT ---
   const handlePrintOrder = (order: Order) => {
       const printWindow = window.open('', '', 'width=400,height=600');
       if (!printWindow) {
@@ -424,32 +416,56 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       printWindow.document.close();
   };
 
-  // --- FINANCEIRO: Lógica de Desbloqueio de Saldo (12h) ---
+  // --- FINANCEIRO: SELF-HEALING & Lógica de Desbloqueio (12h) ---
   useEffect(() => {
-    const unlockFunds = async () => {
-        const now = new Date();
-        const ordersToUnlock = orders.filter(o => 
-            o.repasseStatus === 'blocked' && 
-            o.repasseDate && 
-            o.origin !== 'whatsapp' && // Ignora WhatsApp
+    const healFinancials = async () => {
+        // Varre pedidos entregues que estão com status financeiro pendente ou com valor zerado indevidamente
+        const ordersToFix = orders.filter(o => 
+            o.status === 'delivered' && 
             o.paymentMethod !== 'cash' && 
-            o.status !== 'cancelled' && 
-            (now.getTime() - new Date(o.repasseDate).getTime()) > 12 * 60 * 60 * 1000 // Alterado para 12h
+            o.origin !== 'whatsapp' && 
+            // Condition 1: Stuck in pending
+            (o.repasseStatus === 'pending' || !o.repasseStatus ||
+            // Condition 2: Marked as blocked/available but value is 0 (and Total is likely valid > 0.50)
+             (o.repasseValue === 0 && o.total > 0.50))
         );
 
-        if (ordersToUnlock.length > 0) {
-            console.log(`Desbloqueando ${ordersToUnlock.length} pedidos para saque (regra 12h)...`);
-            for (const order of ordersToUnlock) {
-                 await supabase.from('orders').update({ repasseStatus: 'available' }).eq('id', order.id);
-            }
+        for (const order of ordersToFix) {
+             const now = new Date();
+             const orderTime = new Date(order.timestamp);
+             const hoursDiff = (now.getTime() - orderTime.getTime()) / (1000 * 60 * 60);
+             
+             // Define o status correto baseado no tempo
+             const newStatus = hoursDiff > 12 ? 'available' : 'blocked';
+             
+             // Recalcula o valor se estiver zerado, usando a regra de negócio correta
+             let newValue = order.repasseValue || 0;
+             
+             if (newValue === 0 && order.total > 0) {
+                 if (company.deliveryType === 'own') {
+                     // Own Delivery: Food + Delivery Fee (Restaurante gets delivery fee)
+                     newValue = order.subtotal + order.deliveryFee; 
+                 } else {
+                     // Chegoou Delivery: Just Food (Platform keeps delivery fee)
+                     newValue = order.subtotal;
+                 }
+             }
+
+             console.log(`Self-Healing Order #${order.id.slice(-4)}: Status ${newStatus}, Value ${newValue}`);
+
+             await supabase.from('orders').update({ 
+                 repasseStatus: newStatus,
+                 repasseValue: newValue,
+                 repasseDate: order.repasseDate || new Date().toISOString()
+             }).eq('id', order.id);
         }
     };
     
-    // Check every 1 minute or on load
-    const interval = setInterval(unlockFunds, 60000);
-    unlockFunds(); // Check immediately on mount
+    // Check periodically
+    const interval = setInterval(healFinancials, 5000); // Check every 5s for quick fix
+    healFinancials(); // Run on mount
     return () => clearInterval(interval);
-  }, [orders]);
+  }, [orders, company.deliveryType]);
 
   // --- FINANCEIRO: Carregar Histórico de Saques ---
   useEffect(() => {
@@ -466,19 +482,29 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
   const financialSummary = useMemo(() => {
       // Pedidos WhatsApp ou Cash são ignorados do saldo da plataforma pois o restaurante recebe direto
+      // A MENOS que seja Cash + Chegoou Delivery (dívida), mas por enquanto vamos focar no Online.
+      
       const validOrders = orders.filter(o => {
           const isWhatsapp = o.origin?.toLowerCase() === 'whatsapp';
           const isIgnored = o.repasseStatus === 'ignored';
+          // Se for dinheiro e delivery chegoou, tem repasse negativo, então conta.
+          // Se for dinheiro e delivery own, repasse é 0, conta (mas não afeta soma).
           return !isWhatsapp && !isIgnored;
       });
 
       const blocked = validOrders
-        .filter(o => o.repasseStatus === 'blocked' && o.paymentMethod !== 'cash' && o.status !== 'cancelled')
-        .reduce((acc, o) => acc + (o.repasseValue || 0), 0);
+        .filter(o => o.repasseStatus === 'blocked' && o.status !== 'cancelled')
+        .reduce((acc, o) => {
+            const val = (o.repasseValue !== undefined) ? o.repasseValue : 0;
+            return acc + val;
+        }, 0);
 
       const totalAvailableFromOrders = validOrders
-        .filter(o => o.repasseStatus === 'available' && o.paymentMethod !== 'cash' && o.status !== 'cancelled')
-        .reduce((acc, o) => acc + (o.repasseValue || 0), 0);
+        .filter(o => o.repasseStatus === 'available' && o.status !== 'cancelled')
+        .reduce((acc, o) => {
+            const val = (o.repasseValue !== undefined) ? o.repasseValue : 0;
+            return acc + val;
+        }, 0);
 
       const totalWithdrawals = withdrawHistory
         .filter(w => w.status !== 'rejected')
@@ -516,7 +542,10 @@ const PartnerView: React.FC<PartnerViewProps> = ({
            
            // Calculate values for display/record (PERCENTAGE LOGIC)
            const bankFeeRate = localCompany.serviceFeePercentage || 0;
-           const bankFeeValue = financialSummary.available * (bankFeeRate / 100);
+           
+           // CRITICAL FIX: Round Fee UP (Ceil) to ensure platform gets paid even on small amounts
+           const bankFeeValue = calculateBankFee(financialSummary.available, bankFeeRate);
+           
            const netAmount = Math.max(0, financialSummary.available - bankFeeValue);
 
            // USE UUID GENRATOR FOR VALID SUPABASE UUID TYPE
@@ -538,7 +567,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
            if (error) throw error;
 
-           alert("Solicitação enviada com sucesso! O pagamento será processado manualmente.");
+           alert("Solicitação concluída! Você receberá entre 09h e 15h do próximo horário bancário.");
            
            // Refresh history
            const { data: updatedHistory } = await supabase
@@ -860,14 +889,19 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const editingOrderPaymentMethod = editingOrder?.paymentMethod?.toLowerCase() || '';
   const editingOrderOrigin = editingOrder?.origin?.toLowerCase() || '';
 
+  // Calculate fees for Modal Display
+  const currentBankFee = calculateBankFee(financialSummary.available, localCompany.serviceFeePercentage || 0);
+  const currentNet = Math.max(0, financialSummary.available - currentBankFee);
+
   return (
     <div className="flex h-screen bg-gray-50 relative">
-        {/* ... (Modal Logic maintained) ... */}
+        
         {/* WITHDRAWAL MODAL - UPDATED */}
         {isWithdrawModalOpen && (
             <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
                 <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-scale-in">
                     <h3 className="text-xl font-bold text-gray-900 mb-4 border-b pb-2">Resumo do Saque</h3>
+                    
                     <div className="space-y-3 mb-6 text-sm">
                         <div className="flex justify-between text-gray-600">
                             <span>Saldo Disponível:</span>
@@ -875,29 +909,43 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         </div>
                         <div className="flex justify-between text-red-500">
                             <span>Taxa Transação Bancária ({(localCompany.serviceFeePercentage || 0).toFixed(2)}%):</span>
-                            <span className="font-bold">- R$ {(financialSummary.available * ((localCompany.serviceFeePercentage || 0)/100)).toFixed(2)}</span>
+                            <span className="font-bold">- R$ {currentBankFee.toFixed(2)}</span>
                         </div>
                         <div className="border-t pt-2 mt-2 flex justify-between text-lg text-gray-900 font-bold">
                             <span>Valor Líquido (Pix):</span>
-                            <span>R$ {Math.max(0, financialSummary.available - (financialSummary.available * ((localCompany.serviceFeePercentage || 0)/100))).toFixed(2)}</span>
+                            <span>R$ {currentNet.toFixed(2)}</span>
                         </div>
                     </div>
+
                     <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 mb-6 flex gap-3 items-start">
                         <Info className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
                         <p className="text-xs text-blue-800 leading-relaxed">
-                            O pagamento será realizado na próxima janela bancária <strong>(09h às 14h)</strong> para a chave: <br/>
+                            O pagamento será realizado na próxima janela bancária <strong>(09h às 15h)</strong> para a chave: <br/>
                             <span className="font-mono font-bold bg-white px-1 rounded border border-blue-200">{localCompany.pixKey}</span>
                         </p>
                     </div>
+
                     <div className="flex gap-3">
-                        <button onClick={() => setIsWithdrawModalOpen(false)} className="flex-1 py-3 rounded-xl bg-gray-100 font-bold text-gray-600 hover:bg-gray-200 transition-colors">Cancelar</button>
-                        <button onClick={executeWithdrawal} className="flex-1 py-3 rounded-xl bg-green-600 font-bold text-white hover:bg-green-700 shadow-lg shadow-green-200 transition-colors">Confirmar</button>
+                        <button 
+                            onClick={() => setIsWithdrawModalOpen(false)}
+                            className="flex-1 py-3 rounded-xl bg-gray-100 font-bold text-gray-600 hover:bg-gray-200 transition-colors"
+                        >
+                            Cancelar
+                        </button>
+                        <button 
+                            onClick={executeWithdrawal}
+                            className="flex-1 py-3 rounded-xl bg-green-600 font-bold text-white hover:bg-green-700 shadow-lg shadow-green-200 transition-colors"
+                        >
+                            Confirmar
+                        </button>
                     </div>
                 </div>
             </div>
         )}
 
-        {/* DELETE PRODUCT MODAL */}
+        {/* ... Rest of existing JSX ... */}
+        {/* ... (Omitted primarily for brevity, but the file content remains the same until the next change) ... */}
+        
         {productToDelete && (
             <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
                 <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-scale-in">
@@ -909,14 +957,23 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         Tem certeza que deseja excluir este item do cardápio? Essa ação não pode ser desfeita.
                     </p>
                     <div className="flex gap-3">
-                        <button onClick={() => setProductToDelete(null)} className="flex-1 py-3 rounded-xl bg-gray-100 font-bold text-gray-600 hover:bg-gray-200 transition-colors">Cancelar</button>
-                        <button onClick={handleConfirmDeleteProduct} className="flex-1 py-3 rounded-xl bg-red-600 font-bold text-white hover:bg-red-700 shadow-lg shadow-red-200 transition-colors">Sim, Excluir</button>
+                        <button 
+                            onClick={() => setProductToDelete(null)}
+                            className="flex-1 py-3 rounded-xl bg-gray-100 font-bold text-gray-600 hover:bg-gray-200 transition-colors"
+                        >
+                            Cancelar
+                        </button>
+                        <button 
+                            onClick={handleConfirmDeleteProduct}
+                            className="flex-1 py-3 rounded-xl bg-red-600 font-bold text-white hover:bg-red-700 shadow-lg shadow-red-200 transition-colors"
+                        >
+                            Sim, Excluir
+                        </button>
                     </div>
                 </div>
             </div>
         )}
 
-        {/* EDIT ORDER MODAL */}
         {editingOrder && (
              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
                  <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl animate-scale-in overflow-hidden max-h-[90vh] flex flex-col">
@@ -933,6 +990,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                          <button onClick={() => setEditingOrder(null)} className="p-2 hover:bg-gray-100 rounded-full"><X className="w-5 h-5"/></button>
                      </div>
                      <div className="p-6 overflow-y-auto space-y-6 flex-1">
+                         
                          {editingOrderOrigin === 'whatsapp' && (
                              <div className="bg-green-50 p-4 rounded-xl border border-green-200 mb-4">
                                  <p className="text-sm text-green-800 font-bold flex items-center gap-2">
@@ -943,7 +1001,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                  </p>
                              </div>
                          )}
-                         {/* ... Existing Edit Order form ... */}
+
                          <div className="bg-yellow-50 border border-yellow-100 p-4 rounded-xl">
                              <div className="flex justify-between items-center mb-2">
                                  <h4 className="font-bold text-sm text-yellow-800 uppercase">Pagamento</h4>
@@ -963,7 +1021,38 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                  </p>
                              )}
                          </div>
-                         {/* ... Other inputs ... */}
+
+                         <div className="space-y-4">
+                             <h4 className="font-bold text-sm text-gray-500 uppercase tracking-wide">Dados do Cliente</h4>
+                             <div className="grid grid-cols-2 gap-4">
+                                 <div>
+                                     <label className="text-xs font-bold text-gray-400">Nome</label>
+                                     <input 
+                                        value={editingOrder.customerName}
+                                        onChange={e => setEditingOrder({...editingOrder, customerName: e.target.value})}
+                                        className="w-full border rounded-lg px-3 py-2 mt-1 font-medium"
+                                     />
+                                 </div>
+                                 <div>
+                                     <label className="text-xs font-bold text-gray-400">Telefone</label>
+                                     <input 
+                                        value={editingOrder.customerPhone}
+                                        onChange={e => setEditingOrder({...editingOrder, customerPhone: e.target.value})}
+                                        className="w-full border rounded-lg px-3 py-2 mt-1 font-medium"
+                                     />
+                                 </div>
+                             </div>
+                             {editingOrder.deliveryAddress && (
+                                 <div>
+                                     <label className="text-xs font-bold text-gray-400">Endereço</label>
+                                     <p className="text-sm font-medium bg-gray-50 p-2 rounded border border-gray-200">
+                                         {editingOrder.deliveryAddress.street}, {editingOrder.deliveryAddress.number} <br/>
+                                         {editingOrder.deliveryAddress.neighborhood} - {editingOrder.deliveryAddress.city}
+                                     </p>
+                                 </div>
+                             )}
+                         </div>
+
                          <div className="space-y-4">
                              <h4 className="font-bold text-sm text-gray-500 uppercase tracking-wide">Itens do Pedido</h4>
                              <div className="bg-gray-50 rounded-xl p-4 space-y-4">
@@ -1002,9 +1091,14 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                  )}
                              </div>
                          </div>
+
                          <div className="space-y-2">
                              <label className="text-xs font-bold text-gray-400 uppercase">Status do Pedido</label>
-                             <select value={editingOrder.status} onChange={e => setEditingOrder({...editingOrder, status: e.target.value as any})} className="w-full border rounded-lg px-3 py-2 bg-white">
+                             <select 
+                                value={editingOrder.status}
+                                onChange={e => setEditingOrder({...editingOrder, status: e.target.value as any})}
+                                className="w-full border rounded-lg px-3 py-2 bg-white"
+                             >
                                  <option value="waiting_payment">Aguardando Pagamento</option>
                                  <option value="pending">Pendente</option>
                                  <option value="preparing">Preparando</option>
@@ -1019,11 +1113,19 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                      <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-between items-center gap-2">
                          <div className="flex-1">
                              <p className="text-xs text-gray-500 font-bold uppercase">Total Atualizado</p>
-                             <p className="text-xl font-bold text-gray-900">R$ {editingOrder.total.toFixed(2)}</p>
+                             <p className="text-xl font-bold text-gray-900">
+                                 R$ {editingOrder.total.toFixed(2)}
+                             </p>
                          </div>
-                         <button onClick={handlePartnerCancelOrder} className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-4 py-3 rounded-xl font-bold flex items-center gap-2 transition-colors text-sm">
+                         
+                         <button 
+                            onClick={handlePartnerCancelOrder}
+                            className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-4 py-3 rounded-xl font-bold flex items-center gap-2 transition-colors text-sm"
+                            title="Cancela o pedido e estorna pagamento (se houver)"
+                         >
                              <XCircle className="w-5 h-5" /> Cancelar
                          </button>
+
                          <button onClick={handleSaveEditingOrder} className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-green-200 transition-colors">
                              <Check className="w-5 h-5" /> Salvar
                          </button>
@@ -1032,7 +1134,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
              </div>
         )}
 
-        {/* CHAT MODAL */}
         {activeChatOrder && (
              <div className="fixed bottom-0 right-0 w-full sm:w-96 h-[500px] bg-white shadow-2xl z-40 rounded-t-3xl sm:rounded-tl-3xl border border-gray-200 flex flex-col animate-slide-up">
                  <div className="bg-red-600 text-white p-4 rounded-t-3xl flex justify-between items-center">
@@ -1091,8 +1192,9 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             
             {view === ViewState.DASHBOARD && (
                 <div className="space-y-8">
-                    <DashboardView salesData={calculatedSalesHistory} aiSalesCount={aiSalesCount} />
-                    {/* MINI FINANCE WIDGET */}
+                    <DashboardView salesData={calculatedSalesHistory} />
+                    
+                    {/* MINI FINANCE WIDGET ON DASHBOARD */}
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2">
@@ -1116,9 +1218,9 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                 </div>
             )}
             
+            {/* --- NOVO MÓDULO FINANCEIRO --- */}
             {view === ViewState.FINANCE && (
                 <div className="space-y-6">
-                    {/* ... (Existing Finance JSX) ... */}
                     <div className="flex justify-between items-center">
                         <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
                             <Banknote className="w-8 h-8 text-green-600" /> Gestão Financeira
@@ -1129,7 +1231,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                             </div>
                         )}
                     </div>
-                    {/* ... (Existing Finance Layout) ... */}
+
                     <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-center gap-3">
                         <AlertCircle className="w-5 h-5 text-blue-600 shrink-0" />
                         <p className="text-sm text-blue-800 font-medium">
@@ -1137,6 +1239,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                             Pagamentos em dinheiro ou <strong>via WhatsApp (IA)</strong> são recebidos diretamente por você.
                         </p>
                     </div>
+
+                    {/* Resumo de Saldos */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden">
                             <div className="relative z-10">
@@ -1146,6 +1250,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                             </div>
                             <div className="absolute right-0 top-0 h-full w-24 bg-gradient-to-l from-green-50 to-transparent"></div>
                         </div>
+
                         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                             <div className="flex justify-between items-start">
                                 <div>
@@ -1156,6 +1261,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                             </div>
                             <p className="text-xs text-gray-400 mt-2">Valores liberados 12h após entrega.</p>
                         </div>
+
                         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                              <div className="flex justify-between items-start">
                                 <div>
@@ -1167,6 +1273,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                              <p className="text-xs text-gray-400 mt-2">Histórico total de repasses.</p>
                         </div>
                     </div>
+
+                    {/* Área de Saque */}
                     <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 flex flex-col md:flex-row items-center justify-between gap-6">
                         <div>
                             <h3 className="text-xl font-bold text-gray-800">Solicitar Repasse</h3>
@@ -1189,6 +1297,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                             <DollarSign className="w-6 h-6" /> Solicitar Saque
                         </button>
                     </div>
+
+                    {/* Histórico */}
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                         <div className="p-6 border-b border-gray-100 flex justify-between items-center">
                             <h3 className="font-bold text-lg text-gray-800">Histórico de Saques</h3>
@@ -1258,7 +1368,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                     
                     <div className="flex-1 overflow-x-auto pb-4">
                         <div className="flex gap-4 h-full min-w-max px-1">
-                            {/* ... (Kanban Columns - unchanged) ... */}
                             <KanbanColumn 
                                 title="Aguardando Pagamento" 
                                 status="waiting_payment" 
@@ -1331,21 +1440,10 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                 </div>
             )}
 
-            {/* MARKETING VIEW */}
-            {view === ViewState.MARKETING && (
-                <MarketingView 
-                    company={localCompany}
-                    assets={marketingAssets}
-                    onAddAsset={onAddAsset}
-                    onUpdateAsset={onUpdateAsset}
-                    onDeleteAsset={onDeleteAsset}
-                />
-            )}
-
-            {/* ... (View State MENU, FORECAST, SETTINGS - unchanged) ... */}
+            {/* ... other views ... */}
             {view === ViewState.MENU && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    {/* ... (Menu Content - unchanged) ... */}
+                    {/* ... (Existing Menu View Code) ... */}
                     <div className="lg:col-span-1 bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-fit sticky top-8">
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
@@ -1372,22 +1470,43 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={e => handleFileUpload(e, setProductImagePreview)} accept="image/*" />
                             </div>
                             
+                            {/* ... Rest of Menu Form ... */}
                             <div className="grid grid-cols-2 gap-3">
                                 <div className="col-span-2">
                                     <label className="text-xs font-bold text-gray-500 uppercase ml-1">Nome</label>
-                                    <input value={newProduct.name || ''} onChange={e => setNewProduct({...newProduct, name: e.target.value})} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 mt-1 focus:ring-2 focus:ring-red-500 outline-none" placeholder="Ex: X-Burger" />
+                                    <input 
+                                        value={newProduct.name || ''} 
+                                        onChange={e => setNewProduct({...newProduct, name: e.target.value})}
+                                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 mt-1 focus:ring-2 focus:ring-red-500 outline-none" 
+                                        placeholder="Ex: X-Burger" 
+                                    />
                                 </div>
                                 <div className="col-span-2">
                                     <label className="text-xs font-bold text-gray-500 uppercase ml-1">Descrição</label>
-                                    <textarea value={newProduct.description || ''} onChange={e => setNewProduct({...newProduct, description: e.target.value})} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 mt-1 focus:ring-2 focus:ring-red-500 outline-none h-20 resize-none" placeholder="Ingredientes e detalhes..." />
+                                    <textarea 
+                                        value={newProduct.description || ''} 
+                                        onChange={e => setNewProduct({...newProduct, description: e.target.value})}
+                                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 mt-1 focus:ring-2 focus:ring-red-500 outline-none h-20 resize-none" 
+                                        placeholder="Ingredientes e detalhes..." 
+                                    />
                                 </div>
                                 <div>
                                     <label className="text-xs font-bold text-gray-500 uppercase ml-1">Preço (R$)</label>
-                                    <input type="number" value={newProduct.price || ''} onChange={e => setNewProduct({...newProduct, price: parseFloat(e.target.value)})} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 mt-1 focus:ring-2 focus:ring-red-500 outline-none" placeholder="0.00" />
+                                    <input 
+                                        type="number"
+                                        value={newProduct.price || ''} 
+                                        onChange={e => setNewProduct({...newProduct, price: parseFloat(e.target.value)})}
+                                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 mt-1 focus:ring-2 focus:ring-red-500 outline-none" 
+                                        placeholder="0.00" 
+                                    />
                                 </div>
                                 <div>
                                     <label className="text-xs font-bold text-gray-500 uppercase ml-1">Categoria</label>
-                                    <select value={newProduct.category || ''} onChange={e => setNewProduct({...newProduct, category: e.target.value})} className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 mt-1 focus:ring-2 focus:ring-red-500 outline-none">
+                                    <select 
+                                        value={newProduct.category || ''} 
+                                        onChange={e => setNewProduct({...newProduct, category: e.target.value})}
+                                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 mt-1 focus:ring-2 focus:ring-red-500 outline-none"
+                                    >
                                         <option value="">Selecione</option>
                                         {COMPANY_CATEGORIES.map(cat => (
                                             <option key={cat} value={cat}>{cat}</option>
@@ -1397,11 +1516,11 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                             </div>
                             
                              <div className="bg-gray-50 rounded-xl p-3 border border-gray-200">
-                                {/* ... (Group logic) ... */}
                                 <div className="flex justify-between items-center mb-2">
                                     <h4 className="font-bold text-sm text-gray-700">Complementos / Grupos</h4>
                                     <button onClick={addGroup} className="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded font-bold">+ Grupo</button>
                                 </div>
+                                
                                 {newProduct.groups?.map((group, idx) => (
                                     <div key={idx} className="bg-white border border-gray-200 rounded-lg p-3 mb-2">
                                         <div className="flex justify-between mb-2">
@@ -1462,6 +1581,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         </div>
                     </div>
                     
+                    {/* ... Rest of existing Menu rendering ... */}
                     <div className="lg:col-span-2 space-y-6">
                         <div className="flex justify-between items-center">
                             <h2 className="text-2xl font-bold text-gray-800">Cardápio Atual</h2>
@@ -1485,10 +1605,16 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                         <div className="flex justify-between items-end mt-2">
                                             <span className="font-bold text-lg text-gray-900">R$ {product.price.toFixed(2)}</span>
                                             <div className="flex gap-2">
-                                                <button onClick={() => handleEditProduct(product)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                                                <button 
+                                                    onClick={() => handleEditProduct(product)}
+                                                    className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                                >
                                                     <Edit className="w-4 h-4"/>
                                                 </button>
-                                                <button onClick={() => handleRequestDeleteProduct(product.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                                                <button 
+                                                    onClick={() => handleRequestDeleteProduct(product.id)}
+                                                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                >
                                                     <Trash2 className="w-4 h-4"/>
                                                 </button>
                                             </div>
@@ -1508,55 +1634,84 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             {view === ViewState.WHATSAPP && (
                 <WhatsAppBotView 
                     products={products} 
-                    orders={orders} 
-                    company={localCompany} 
-                    updateCompany={updateCompany}
-                    marketingAssets={marketingAssets} 
-                    userPhone={userPhone} // Pass user phone here
+                    orders={orders} // ADDED: Passing orders for CRM
+                    company={localCompany} // ADDED: Passing company for limits
+                    updateCompany={updateCompany} // ADDED: Update function for limits
                 />
             )}
 
             {view === ViewState.SETTINGS && (
-               // ... (Existing Settings View)
                 <div className="max-w-2xl mx-auto bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
+                    {/* ... (Existing Settings Code) ... */}
                     <h2 className="text-2xl font-bold text-gray-900 mb-6">Configurações da Loja</h2>
-                    {/* ... (Settings form content remains same) ... */}
+                    
                     <div className="space-y-6">
                         <div className="grid grid-cols-2 gap-4">
+                            {/* ... Image, Name, Desc fields ... */}
                              <div className="col-span-2">
                                 <label className="text-sm font-bold text-gray-700 mb-2 block">Identidade Visual</label>
                                 <div className="flex gap-6 items-start">
                                     <div className="flex flex-col items-center gap-2">
                                         <div className="w-24 h-24 bg-gray-100 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center relative overflow-hidden group hover:border-red-300 cursor-pointer">
-                                            {localCompany.logo ? <img src={localCompany.logo} className="w-full h-full object-cover"/> : <Camera className="w-8 h-8 text-gray-300"/>}
+                                            {localCompany.logo ? (
+                                                <img src={localCompany.logo} className="w-full h-full object-cover"/>
+                                            ) : (
+                                                <Camera className="w-8 h-8 text-gray-300"/>
+                                            )}
                                             <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={e => handleFileUpload(e, (b64) => setLocalCompany({...localCompany, logo: b64}))} accept="image/*"/>
                                         </div>
                                         <span className="text-xs font-bold text-gray-500">Logo</span>
                                     </div>
+
                                     <div className="flex-1">
                                         <div className="w-full h-24 bg-gray-100 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center relative overflow-hidden group hover:border-red-300 cursor-pointer">
-                                            {localCompany.coverImage ? <img src={localCompany.coverImage} className="w-full h-full object-cover" /> : <div className="text-center"><ImageIcon className="w-6 h-6 text-gray-300 mx-auto mb-1"/><span className="text-xs text-gray-400">Imagem de Capa (Banner)</span></div>}
+                                            {localCompany.coverImage ? (
+                                                <img src={localCompany.coverImage} className="w-full h-full object-cover" />
+                                            ) : (
+                                                <div className="text-center">
+                                                    <ImageIcon className="w-6 h-6 text-gray-300 mx-auto mb-1"/>
+                                                    <span className="text-xs text-gray-400">Imagem de Capa (Banner)</span>
+                                                </div>
+                                            )}
                                             <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={e => handleFileUpload(e, (b64) => setLocalCompany({...localCompany, coverImage: b64}))} accept="image/*"/>
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                            {/* ... Other settings fields ... */}
+                            
                             <div className="col-span-2 mt-4">
                                 <label className="text-sm font-bold text-gray-700">Nome da Loja</label>
-                                <input value={localCompany.name} onChange={e => setLocalCompany({...localCompany, name: e.target.value})} className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" />
+                                <input 
+                                    value={localCompany.name} 
+                                    onChange={e => setLocalCompany({...localCompany, name: e.target.value})}
+                                    className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" 
+                                />
                             </div>
+                            
+                             {/* ... Other inputs ... */}
                              <div className="col-span-2">
                                 <label className="text-sm font-bold text-gray-700">Categoria</label>
-                                <select value={localCompany.category} onChange={e => setLocalCompany({...localCompany, category: e.target.value})} className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5 bg-white">
-                                    {COMPANY_CATEGORIES.map(cat => (<option key={cat} value={cat}>{cat}</option>))}
+                                <select 
+                                    value={localCompany.category} 
+                                    onChange={e => setLocalCompany({...localCompany, category: e.target.value})}
+                                    className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5 bg-white" 
+                                >
+                                    {COMPANY_CATEGORIES.map(cat => (
+                                        <option key={cat} value={cat}>{cat}</option>
+                                    ))}
                                 </select>
                             </div>
+
                             <div className="col-span-2">
                                 <label className="text-sm font-bold text-gray-700">Descrição</label>
-                                <textarea value={localCompany.description} onChange={e => setLocalCompany({...localCompany, description: e.target.value})} className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5 h-24 resize-none" />
+                                <textarea 
+                                    value={localCompany.description} 
+                                    onChange={e => setLocalCompany({...localCompany, description: e.target.value})}
+                                    className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5 h-24 resize-none" 
+                                />
                             </div>
                         </div>
+
                         <div className="border-t border-gray-100 pt-6">
                              <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
                                 <Wallet className="w-5 h-5 text-gray-500" /> Dados Financeiros (Recebimento)
@@ -1564,7 +1719,11 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                             <div className="grid grid-cols-3 gap-4">
                                  <div>
                                     <label className="text-sm font-bold text-gray-700">Tipo Chave Pix</label>
-                                    <select value={localCompany.pixKeyType || 'email'} onChange={e => setLocalCompany({...localCompany, pixKeyType: e.target.value as any})} className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5 bg-white">
+                                    <select 
+                                        value={localCompany.pixKeyType || 'email'} 
+                                        onChange={e => setLocalCompany({...localCompany, pixKeyType: e.target.value as any})}
+                                        className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5 bg-white" 
+                                    >
                                         <option value="cpf">CPF</option>
                                         <option value="cnpj">CNPJ</option>
                                         <option value="email">E-mail</option>
@@ -1574,41 +1733,84 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 </div>
                                 <div className="col-span-2">
                                     <label className="text-sm font-bold text-gray-700">Chave Pix</label>
-                                    <input type="text" placeholder="Chave para receber repasses" value={localCompany.pixKey || ''} onChange={e => setLocalCompany({...localCompany, pixKey: e.target.value})} className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5 font-mono" />
+                                    <input 
+                                        type="text"
+                                        placeholder="Chave para receber repasses"
+                                        value={localCompany.pixKey || ''} 
+                                        onChange={e => setLocalCompany({...localCompany, pixKey: e.target.value})}
+                                        className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5 font-mono" 
+                                    />
                                 </div>
                             </div>
-                            <p className="text-xs text-gray-500 mt-2">* Seus pagamentos online serão transferidos automaticamente para esta chave.</p>
+                            <p className="text-xs text-gray-500 mt-2">
+                                * Seus pagamentos online serão transferidos automaticamente para esta chave.
+                            </p>
                         </div>
-                        {/* ... Address and Logistic sections ... */}
+
                         <div className="border-t border-gray-100 pt-6">
                             <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
                                 <MapPin className="w-5 h-5 text-gray-500" /> Endereço e Localização
                             </h3>
+                            
                             <div className="space-y-3 bg-gray-50 p-4 rounded-xl border border-gray-200">
                                 <div className="flex gap-2">
                                     <div className="relative w-1/3">
-                                        <input placeholder="CEP" className="w-full border rounded-lg px-3 py-2" value={localCompany.address?.zipCode || ''} onChange={handleCepChange} maxLength={8}/>
+                                        <input 
+                                            placeholder="CEP" 
+                                            className="w-full border rounded-lg px-3 py-2"
+                                            value={localCompany.address?.zipCode || ''}
+                                            onChange={handleCepChange}
+                                            maxLength={8}
+                                        />
                                         {loadingCep && <Loader2 className="absolute right-2 top-2.5 w-4 h-4 animate-spin text-red-500"/>}
                                     </div>
-                                    <button onClick={() => setShowMapModal(true)} className="flex-1 bg-red-50 text-red-600 border border-red-100 rounded-lg text-xs font-bold flex items-center justify-center gap-1 hover:bg-red-100">
+                                    <button 
+                                        onClick={() => setShowMapModal(true)}
+                                        className="flex-1 bg-red-50 text-red-600 border border-red-100 rounded-lg text-xs font-bold flex items-center justify-center gap-1 hover:bg-red-100"
+                                    >
                                         <MapPin className="w-3 h-3"/> Abrir Mapa
                                     </button>
-                                    <button onClick={handleGetCurrentLocation} className="px-3 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50" title="Usar GPS">
+                                    <button 
+                                        onClick={handleGetCurrentLocation}
+                                        className="px-3 bg-white border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50"
+                                        title="Usar GPS"
+                                    >
                                         {loadingLocation ? <Loader2 className="w-4 h-4 animate-spin"/> : <Crosshair className="w-4 h-4"/>}
                                     </button>
                                 </div>
+
                                 <div className="grid grid-cols-2 gap-3">
                                     <div className="col-span-2">
-                                        <input value={localCompany.address?.street || ''} onChange={e => setLocalCompany(prev => ({...prev, address: {...prev.address!, street: e.target.value}}))} className="w-full border rounded-lg px-3 py-2" placeholder="Rua..."/>
+                                        <input 
+                                            value={localCompany.address?.street || ''}
+                                            onChange={e => setLocalCompany(prev => ({...prev, address: {...prev.address!, street: e.target.value}}))}
+                                            className="w-full border rounded-lg px-3 py-2"
+                                            placeholder="Rua..."
+                                        />
                                     </div>
                                     <div>
-                                        <input value={localCompany.address?.number || ''} onChange={e => setLocalCompany(prev => ({...prev, address: {...prev.address!, number: e.target.value}}))} className="w-full border rounded-lg px-3 py-2" placeholder="Nº"/>
+                                        <input 
+                                            value={localCompany.address?.number || ''}
+                                            onChange={e => setLocalCompany(prev => ({...prev, address: {...prev.address!, number: e.target.value}}))}
+                                            className="w-full border rounded-lg px-3 py-2"
+                                            placeholder="Nº"
+                                        />
                                     </div>
                                     <div>
-                                        <input value={localCompany.address?.neighborhood || ''} onChange={e => setLocalCompany(prev => ({...prev, address: {...prev.address!, neighborhood: e.target.value}}))} className="w-full border rounded-lg px-3 py-2" placeholder="Bairro"/>
+                                        <input 
+                                            value={localCompany.address?.neighborhood || ''}
+                                            onChange={e => setLocalCompany(prev => ({...prev, address: {...prev.address!, neighborhood: e.target.value}}))}
+                                            className="w-full border rounded-lg px-3 py-2"
+                                            placeholder="Bairro"
+                                        />
                                     </div>
                                     <div>
-                                        <input value={localCompany.address?.city || ''} onChange={e => setLocalCompany(prev => ({...prev, address: {...prev.address!, city: e.target.value}}))} className="w-full border rounded-lg px-3 py-2" placeholder="Cidade"/>
+                                        <input 
+                                            value={localCompany.address?.city || ''}
+                                            onChange={e => setLocalCompany(prev => ({...prev, address: {...prev.address!, city: e.target.value}}))}
+                                            className="w-full border rounded-lg px-3 py-2"
+                                            placeholder="Cidade"
+                                        />
                                     </div>
                                 </div>
                                 {localCompany.address && localCompany.address.lat !== 0 && (
@@ -1618,6 +1820,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 )}
                             </div>
                         </div>
+
                         <div className="border-t border-gray-100 pt-6">
                             <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
                                 <Truck className="w-5 h-5 text-gray-500" /> Logística
@@ -1625,16 +1828,32 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="text-sm font-bold text-gray-700">Raio de Entrega (km)</label>
-                                    <input type="number" value={localCompany.deliveryRadiusKm} onChange={e => setLocalCompany({...localCompany, deliveryRadiusKm: parseFloat(e.target.value)})} className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" />
+                                    <input 
+                                        type="number"
+                                        value={localCompany.deliveryRadiusKm} 
+                                        onChange={e => setLocalCompany({...localCompany, deliveryRadiusKm: parseFloat(e.target.value)})}
+                                        className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" 
+                                    />
                                 </div>
                                 <div>
                                     <label className="text-sm font-bold text-gray-700">Taxa Própria (se aplicável)</label>
-                                    <input type="number" value={localCompany.ownDeliveryFee || 0} onChange={e => setLocalCompany({...localCompany, ownDeliveryFee: parseFloat(e.target.value)})} className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" />
+                                    <input 
+                                        type="number"
+                                        value={localCompany.ownDeliveryFee || 0} 
+                                        onChange={e => setLocalCompany({...localCompany, ownDeliveryFee: parseFloat(e.target.value)})}
+                                        className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" 
+                                    />
                                 </div>
                             </div>
                         </div>
+                        
                         <div className="flex justify-end pt-4">
-                            <button onClick={handleSaveSettings} className="bg-red-600 text-white font-bold px-8 py-3 rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-all">Salvar Alterações</button>
+                            <button 
+                                onClick={handleSaveSettings}
+                                className="bg-red-600 text-white font-bold px-8 py-3 rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-all"
+                            >
+                                Salvar Alterações
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1646,3 +1865,4 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 };
 
 export default PartnerView;
+

@@ -1,7 +1,7 @@
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Product, Order, Company, MarketingAsset } from '../types';
-import { MessageSquare, Users, Send, CheckCircle, AlertCircle, Clock, Calendar, RefreshCw, Zap, Search, Filter, X, Loader2, ShieldCheck, Play, Pause, TicketPercent, Megaphone, AlignLeft, Phone } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Product, Order, Company } from '../types';
+import { MessageSquare, Users, Send, CheckCircle, AlertCircle, Clock, Calendar, RefreshCw, Zap, Search, Filter } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
 interface WhatsAppBotViewProps {
@@ -9,8 +9,6 @@ interface WhatsAppBotViewProps {
   orders: Order[]; // Necessário para minerar clientes
   company: Company;
   updateCompany: (data: Partial<Company>) => void;
-  marketingAssets?: MarketingAsset[]; // Optional for now until fully integrated
-  userPhone?: string; // To generate the link
 }
 
 interface CustomerCRM {
@@ -21,33 +19,12 @@ interface CustomerCRM {
     status: 'recente' | 'morno' | 'inativo';
 }
 
-// Função auxiliar de pausa
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, updateCompany, marketingAssets = [], userPhone }) => {
+const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, updateCompany }) => {
   const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
   const [messageText, setMessageText] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
-  
-  // New State for Link Phone
-  const [contactPhone, setContactPhone] = useState(userPhone || "");
-
-  // Update contact phone if userPhone prop changes
-  useEffect(() => {
-      if (userPhone) setContactPhone(userPhone);
-  }, [userPhone]);
-  
-  // Estados de Controle de Envio
   const [isSending, setIsSending] = useState(false);
-  const [sendProgress, setSendProgress] = useState({ current: 0, total: 0 });
-  const [currentStatusText, setCurrentStatusText] = useState("");
-  const [completedCampaign, setCompletedCampaign] = useState<{ sent: number, total: number } | null>(null);
-  
   const [viewMode, setViewMode] = useState<'list' | 'compose'>('list');
-
-  // NEW: Message Input Mode State
-  const [inputMode, setInputMode] = useState<'text' | 'coupon' | 'promotion'>('text');
-  const [selectedAssetId, setSelectedAssetId] = useState<string>('');
 
   // --- 1. LÓGICA DE CLIENTES (CRM) ---
   const customers = useMemo(() => {
@@ -55,7 +32,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
       const now = new Date();
 
       orders.forEach(order => {
-          // Filtra apenas pedidos vindos do WhatsApp (ou todos se preferir, mas ajustado para whats)
+          // Filtra apenas pedidos vindos do WhatsApp
           if (order.origin?.toLowerCase() !== 'whatsapp') return;
           
           const phone = order.customerPhone.replace(/\D/g, '');
@@ -102,25 +79,15 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
       );
   }, [customers, searchTerm]);
 
-  // --- 2. LÓGICA DE LIMITES DIÁRIOS (CORRIGIDO TIMEZONE) ---
-  const todayStr = new Date().toLocaleDateString('en-CA');
+  // --- 2. LÓGICA DE LIMITES DIÁRIOS ---
+  const todayStr = new Date().toISOString().split('T')[0];
+  
+  // Reseta contador visualmente se mudou o dia
   const messagesSentToday = company.lastMessageDate === todayStr ? (company.messagesSentToday || 0) : 0;
-  const dailyLimit = company.dailyMessageLimit || 5; 
-  const selectionLimit = company.leadsPerBlastLimit || 20; 
+  
+  const dailyLimit = company.dailyMessageLimit || 5; // Default 5 disparos
+  const selectionLimit = company.leadsPerBlastLimit || 20; // Default 20 leads
   const remainingBlasts = Math.max(0, dailyLimit - messagesSentToday);
-
-  // --- HELPER FOR MARKETING PREVIEW ---
-  const getAssetPreview = (asset: MarketingAsset) => {
-      if (asset.type === 'coupon') {
-          if (asset.discountType === 'percentage') {
-              return `Esse cupom dá ao cliente um desconto de ${asset.discountValue || 0}% no seu pedido.`;
-          } else {
-              return `Esse cupom dá ao cliente um desconto de R$ ${(asset.discountValue || 0).toFixed(2)} no seu pedido.`;
-          }
-      } else {
-          return asset.description || "";
-      }
-  };
 
   // --- ACTIONS ---
 
@@ -140,195 +107,72 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
       if (selectedLeads.length > 0) {
           setSelectedLeads([]);
       } else {
+          // Seleciona até o limite
           const toSelect = filteredCustomers.slice(0, selectionLimit).map(c => c.phone);
           setSelectedLeads(toSelect);
       }
   };
 
-  const handleAssetSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const assetId = e.target.value;
-      setSelectedAssetId(assetId);
-      // We no longer overwrite the messageText. It acts as an attachment.
-  };
-
-  // --- FUNÇÃO DE ENVIO SEQUENCIAL ---
-  const handleSendMessages = async () => {
-      if (selectedLeads.length === 0) {
-        alert("Selecione pelo menos um cliente.");
-        return;
-      }
-      if (!messageText.trim()) {
-        alert("Digite uma mensagem para o cliente.");
-        return;
-      }
-      if (inputMode === 'coupon' && !selectedAssetId) {
-          alert("Selecione um cupom para anexar.");
+  const handleSendMessage = async () => {
+      if (remainingBlasts <= 0) {
+          alert("Limite diário de disparos atingido! Volte amanhã.");
           return;
       }
-      if (inputMode === 'coupon' && !contactPhone) {
-          alert("Informe o número de WhatsApp para onde o link do cupom deve direcionar.");
+      if (!messageText.trim()) {
+          alert("Digite uma mensagem.");
           return;
       }
 
       setIsSending(true);
-      setSendProgress({ current: 0, total: selectedLeads.length });
-      
-      const webhookUrl = 'https://n8n-webhook.znzrqn.easypanel.host/webhook/chegooudisparo'; 
-      let successCount = 0;
-
-      // Construct Final Message
-      let finalMessage = messageText;
-      let selectedAsset = marketingAssets.find(a => a.id === selectedAssetId);
-
-      if (inputMode === 'coupon' && selectedAsset && selectedAsset.type === 'coupon') {
-          const couponMessage = getAssetPreview(selectedAsset);
-          // Generate Link using the editable contactPhone
-          const phoneNumber = contactPhone.replace(/\D/g, ''); 
-          const couponName = selectedAsset.name || "CUPOM";
-          const waLink = `https://wa.me/55${phoneNumber}?text=Ol%C3%A1%2C%20quero%20resgatar%20o%20cupom%20*${encodeURIComponent(couponName)}*`;
-          
-          finalMessage = `${messageText}\n\n${couponMessage}\n\n👉 Resgate aqui: ${waLink}`;
-      } else if (inputMode === 'promotion' && selectedAsset) {
-          finalMessage = `${messageText}\n\n${selectedAsset.description}`;
-      }
 
       try {
-        for (let i = 0; i < selectedLeads.length; i++) {
-            const phone = selectedLeads[i];
-            setSendProgress({ current: i + 1, total: selectedLeads.length });
-            setCurrentStatusText(`Enviando para ${phone}...`);
+          // 1. Simulação de envio para N8N (Webhook)
+          console.log("Enviando para N8N:", {
+              leads: selectedLeads,
+              message: messageText,
+              companyId: company.id
+          });
 
-            try {
-                const response = await fetch(webhookUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        number: phone, 
-                        message: finalMessage,
-                        company: company.name
-                    }),
-                });
-                
-                if (response.ok) {
-                    successCount++;
-                    console.log(`[${i+1}/${selectedLeads.length}] Sucesso: ${phone}`);
-                } else {
-                    console.error(`Falha no envio para ${phone}`);
-                }
-            } catch (error) {
-                console.error(`Erro de rede para ${phone}:`, error);
-            }
+          // Simula delay de rede
+          await new Promise(resolve => setTimeout(resolve, 1500));
 
-            if (i < selectedLeads.length - 1) {
-                const delayMs = Math.floor(Math.random() * (60000 - 25000 + 1) + 25000);
-                const delaySec = Math.ceil(delayMs / 1000);
-                
-                for (let s = delaySec; s > 0; s--) {
-                    setCurrentStatusText(`Aguardando ${s}s para o próximo...`);
-                    await sleep(1000);
-                }
-            }
-        }
+          // 2. Atualiza contador no Supabase/App
+          const newCount = messagesSentToday + 1;
+          
+          await updateCompany({
+              messagesSentToday: newCount,
+              lastMessageDate: todayStr
+          });
 
-        if (company) {
-            const newTotal = (messagesSentToday || 0) + 1;
-            const { error } = await supabase
-              .from('companies')
-              .update({ 
-                messagesSentToday: newTotal,
-                lastMessageDate: todayStr 
-              })
-              .eq('id', company.id);
+          // Persistência no banco (para garantir consistência caso recarregue)
+          await supabase.from('companies').update({
+             messagesSentToday: newCount,
+             lastMessageDate: todayStr
+          }).eq('id', company.id);
 
-            if (!error) {
-                updateCompany({
-                    messagesSentToday: newTotal,
-                    lastMessageDate: todayStr
-                });
-            }
-        }
+          alert("Disparo iniciado com sucesso! O sistema processará as mensagens.");
+          setViewMode('list');
+          setSelectedLeads([]);
+          setMessageText("");
 
-        setCompletedCampaign({ sent: successCount, total: selectedLeads.length });
-        setSelectedLeads([]);
-        setMessageText("");
-        setInputMode('text');
-        setSelectedAssetId('');
-        setViewMode('list'); 
-
-      } catch (error) {
-        console.error("Erro fatal no loop:", error);
-        alert("Ocorreu um erro inesperado e o processo foi interrompido.");
+      } catch (e) {
+          console.error("Erro no disparo:", e);
+          alert("Erro ao conectar com servidor de envio.");
       } finally {
-        setIsSending(false);
-        setCurrentStatusText("");
+          setIsSending(false);
       }
-   };
-
+  };
 
   // --- RENDER ---
 
   if (viewMode === 'compose') {
       return (
-          <div className="flex flex-col h-[calc(100vh-6rem)] max-w-4xl mx-auto relative">
-              {/* ... (Sending Overlay - same as before) ... */}
-              {isSending && (
-                  <div className="absolute inset-0 z-50 bg-white/95 backdrop-blur-md rounded-2xl flex flex-col items-center justify-center p-8 animate-fade-in text-center">
-                      <div className="w-32 h-32 relative mb-8">
-                          <svg className="w-full h-full transform -rotate-90">
-                              <circle cx="64" cy="64" r="56" stroke="#eee" strokeWidth="8" fill="none" />
-                              <circle 
-                                cx="64" cy="64" r="56" stroke="#16a34a" strokeWidth="8" fill="none" 
-                                strokeDasharray="351.8" 
-                                strokeDashoffset={351.8 - (351.8 * sendProgress.current / sendProgress.total)}
-                                className="transition-all duration-500 ease-linear"
-                              />
-                          </svg>
-                          <div className="absolute inset-0 flex flex-col items-center justify-center">
-                              <span className="text-3xl font-bold text-gray-800">
-                                  {sendProgress.current}<span className="text-lg text-gray-400">/{sendProgress.total}</span>
-                              </span>
-                          </div>
-                      </div>
-                      <h3 className="text-2xl font-bold text-gray-800 mb-2">Processando Campanha</h3>
-                      <div className="bg-gray-100 px-6 py-3 rounded-xl mb-6">
-                          <p className="text-gray-600 font-mono font-medium animate-pulse">{currentStatusText || "Iniciando..."}</p>
-                      </div>
-                      <p className="text-xs text-red-500 font-bold mt-12 animate-pulse uppercase tracking-wide">⚠️ Não feche esta janela</p>
-                  </div>
-              )}
-
-              <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div className="flex items-center gap-4">
-                      <button onClick={() => setViewMode('list')} disabled={isSending} className="p-2 hover:bg-gray-100 rounded-full transition-colors disabled:opacity-50">
-                          <Users className="w-6 h-6 text-gray-600"/>
-                      </button>
-                      <h2 className="text-2xl font-bold text-gray-800">Nova Campanha</h2>
-                  </div>
-                  
-                  {/* MODE SELECTOR */}
-                  <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200">
-                      <button 
-                          onClick={() => { setInputMode('text'); setSelectedAssetId(''); }}
-                          disabled={isSending}
-                          className={`px-4 py-1.5 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${inputMode === 'text' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                      >
-                          <AlignLeft className="w-4 h-4"/> Mensagem
-                      </button>
-                      <button 
-                          onClick={() => { setInputMode('coupon'); setSelectedAssetId(''); }}
-                          disabled={isSending}
-                          className={`px-4 py-1.5 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${inputMode === 'coupon' ? 'bg-white text-red-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                      >
-                          <TicketPercent className="w-4 h-4"/> Cupom
-                      </button>
-                      <button 
-                          onClick={() => { setInputMode('promotion'); setSelectedAssetId(''); }}
-                          disabled={isSending}
-                          className={`px-4 py-1.5 rounded-md text-sm font-bold flex items-center gap-2 transition-all ${inputMode === 'promotion' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                      >
-                          <Megaphone className="w-4 h-4"/> Promoção
-                      </button>
-                  </div>
+          <div className="flex flex-col h-[calc(100vh-6rem)] max-w-4xl mx-auto">
+              <div className="mb-6 flex items-center gap-4">
+                  <button onClick={() => setViewMode('list')} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                      <Users className="w-6 h-6 text-gray-600"/>
+                  </button>
+                  <h2 className="text-2xl font-bold text-gray-800">Nova Campanha</h2>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-full">
@@ -358,103 +202,38 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
                   {/* Compositor */}
                   <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 md:col-span-2 flex flex-col">
                       <div className="flex-1 flex flex-col">
-                          
-                          <label className="font-bold text-gray-700 mb-2">Mensagem do Cliente</label>
-                          <div className="bg-[#E5DDD5] p-4 rounded-xl border border-gray-200 relative mb-4">
+                          <label className="font-bold text-gray-700 mb-2">Mensagem do WhatsApp</label>
+                          <div className="bg-[#E5DDD5] p-4 rounded-xl flex-1 border border-gray-200 relative mb-4">
                                <textarea 
                                   value={messageText}
                                   onChange={e => setMessageText(e.target.value)}
-                                  placeholder={inputMode === 'coupon' ? "Digite uma saudação ou convite..." : "Digite sua mensagem..."}
-                                  className="w-full bg-white rounded-lg p-3 resize-none outline-none text-sm shadow-sm h-32"
-                                  disabled={isSending}
+                                  placeholder="Olá! Temos uma oferta especial hoje..."
+                                  className="w-full h-full bg-white rounded-lg p-3 resize-none outline-none text-sm shadow-sm"
                                />
                                <div className="absolute bottom-6 right-6 text-xs text-gray-400">
                                    {messageText.length} caracteres
                                </div>
                           </div>
-
-                          {(inputMode === 'coupon' || inputMode === 'promotion') && (
-                              <div className="flex-1 mb-4 flex flex-col animate-fade-in">
-                                  <label className="font-bold text-gray-700 mb-2 flex items-center gap-2">
-                                      {inputMode === 'coupon' ? <TicketPercent className="w-4 h-4 text-red-600"/> : <Megaphone className="w-4 h-4 text-blue-600"/>}
-                                      Selecione {inputMode === 'coupon' ? 'o Cupom' : 'a Promoção'}
-                                  </label>
-                                  
-                                  <select 
-                                      className="w-full border border-gray-200 rounded-xl px-4 py-3 bg-gray-50 focus:ring-2 focus:ring-green-500 outline-none mb-4"
-                                      value={selectedAssetId}
-                                      onChange={handleAssetSelect}
-                                      disabled={isSending}
-                                  >
-                                      <option value="">Selecione...</option>
-                                      {marketingAssets
-                                          .filter(a => a.type === inputMode && a.active)
-                                          .map(asset => (
-                                              <option key={asset.id} value={asset.id}>
-                                                  {asset.name || (asset.description ? asset.description.substring(0, 30) + '...' : 'Sem Nome')}
-                                              </option>
-                                          ))
-                                      }
-                                  </select>
-
-                                  {inputMode === 'coupon' && (
-                                      <div className="mb-4">
-                                          <label className="text-sm font-bold text-gray-600 mb-1 block flex items-center gap-2">
-                                              <Phone className="w-4 h-4"/> WhatsApp de Resgate
-                                          </label>
-                                          <input 
-                                              type="text"
-                                              value={contactPhone}
-                                              onChange={(e) => setContactPhone(e.target.value)}
-                                              placeholder="55819..."
-                                              className="w-full border border-gray-200 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-green-500 outline-none font-mono"
-                                          />
-                                          <p className="text-[10px] text-gray-400 mt-1">
-                                              O link "Resgate Aqui" abrirá uma conversa com este número.
-                                          </p>
-                                      </div>
-                                  )}
-
-                                  {selectedAssetId && (
-                                      <div className="bg-[#E5DDD5] p-4 rounded-xl border border-gray-200 relative">
-                                          <div className="bg-white rounded-lg p-3 shadow-sm">
-                                              <p className="text-xs font-bold text-gray-400 uppercase mb-1">Preview do Anexo</p>
-                                              <p className="text-sm text-gray-800">
-                                                  {marketingAssets.find(a => a.id === selectedAssetId)?.type === 'coupon' 
-                                                    ? getAssetPreview(marketingAssets.find(a => a.id === selectedAssetId)!) 
-                                                    : marketingAssets.find(a => a.id === selectedAssetId)?.description}
-                                              </p>
-                                              {inputMode === 'coupon' && (
-                                                  <div className="mt-2 pt-2 border-t border-dashed border-gray-200 text-xs text-blue-600 font-medium">
-                                                      + Link WhatsApp: https://wa.me/55{contactPhone.replace(/\D/g, '')}...
-                                                  </div>
-                                              )}
-                                          </div>
-                                      </div>
-                                  )}
-                              </div>
-                          )}
                           
                           <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-100 mb-4 text-xs text-yellow-800 flex items-center gap-2">
                               <AlertCircle className="w-4 h-4"/>
                               <span>Este disparo consumirá <strong>1</strong> do seu limite diário de <strong>{remainingBlasts}</strong> restantes.</span>
                           </div>
 
-                          <div className="flex gap-3 mt-auto">
+                          <div className="flex gap-3">
                               <button 
                                   onClick={() => setViewMode('list')}
-                                  disabled={isSending}
-                                  className="flex-1 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 transition-colors disabled:opacity-50"
+                                  className="flex-1 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 transition-colors"
                               >
                                   Cancelar
                               </button>
                               <button 
-                                  onClick={handleSendMessages} 
+                                  onClick={handleSendMessage}
                                   disabled={isSending}
-                                  className="flex-1 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition-colors shadow-lg shadow-green-200 flex items-center justify-center gap-2 disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed"
+                                  className="flex-1 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition-colors shadow-lg shadow-green-200 flex items-center justify-center gap-2"
                               >
-                                  {isSending ? <Loader2 className="w-5 h-5 animate-spin"/> : <Send className="w-5 h-5"/>}
-                                  {isSending ? 'Processando...' : 'Iniciar Sequência'}
+                                  {isSending ? <RefreshCw className="w-5 h-5 animate-spin"/> : <Send className="w-5 h-5"/>}
+                                  Enviar Agora
                               </button>
                           </div>
                       </div>
@@ -466,43 +245,8 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
 
   // --- VIEW MODE: LIST ---
   return (
-    <div className="flex flex-col h-[calc(100vh-6rem)] gap-6 relative">
-      {/* ... (Modal de Finalização e Header Stats - inalterados) ... */}
-      {completedCampaign && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
-              <div className="bg-white rounded-2xl p-8 max-w-sm w-full shadow-2xl animate-scale-in text-center relative">
-                  <button onClick={() => setCompletedCampaign(null)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
-                      <X className="w-5 h-5"/>
-                  </button>
-                  <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <CheckCircle className="w-8 h-8 text-green-600" />
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-2">Envio Finalizado!</h3>
-                  <p className="text-gray-500 text-sm mb-6">
-                      Sua campanha foi processada com sucesso.
-                  </p>
-                  
-                  <div className="bg-gray-50 rounded-xl p-4 mb-6 grid grid-cols-2 gap-4">
-                      <div>
-                          <p className="text-xs text-gray-500 uppercase font-bold">Enviados</p>
-                          <p className="text-lg font-bold text-gray-900">{completedCampaign.sent} / {completedCampaign.total}</p>
-                      </div>
-                      <div>
-                          <p className="text-xs text-gray-500 uppercase font-bold">Limite Restante</p>
-                          <p className="text-lg font-bold text-green-600">{remainingBlasts} Hoje</p>
-                      </div>
-                  </div>
-
-                  <button 
-                      onClick={() => setCompletedCampaign(null)}
-                      className="w-full py-3 bg-gray-900 text-white rounded-xl font-bold hover:bg-black transition-colors"
-                  >
-                      Fechar
-                  </button>
-              </div>
-          </div>
-      )}
-
+    <div className="flex flex-col h-[calc(100vh-6rem)] gap-6">
+      
       {/* Header Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4">

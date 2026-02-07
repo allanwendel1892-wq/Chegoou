@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest, MarketingAsset } from './types';
+import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest } from './types';
 import AuthView from './components/AuthView';
 import AdminView from './components/AdminView';
 import PartnerView from './components/PartnerView';
@@ -38,34 +38,6 @@ const prepareProductPayload = (product: Product) => {
     };
 };
 
-// Helper to handle diverse DB column naming conventions
-const normalizeMessage = (msg: any): ChatMessage => {
-    // Normalize role to lowercase to ensure UI logic works (e.g. 'Client' -> 'client')
-    const rawRole = msg.senderRole || msg.sender_role || msg.Role || msg.role || 'system';
-    
-    return {
-        id: msg.id ? String(msg.id) : `msg-${Date.now()}`,
-        // Robust check for Order ID variations
-        orderId: String(msg.orderId || msg.order_id || msg.OrderId || '').trim(),
-        senderId: String(msg.senderId || msg.sender_id || msg.SenderId || ''),
-        senderRole: rawRole.toLowerCase(), // Force lowercase
-        text: msg.text || msg.Text || msg.content || '',
-        timestamp: new Date(msg.timestamp || msg.created_at || Date.now())
-    };
-};
-
-// HELPER: Normalize Marketing Assets (Snake Case DB -> Camel Case Frontend)
-const normalizeAsset = (data: any): MarketingAsset => ({
-    id: data.id,
-    companyId: data.company_id, // DB column is company_id
-    type: data.type,
-    name: data.name,
-    discountType: data.discount_type, // DB column is discount_type
-    discountValue: data.discount_value, // DB column is discount_value
-    description: data.description,
-    active: data.active
-});
-
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -77,11 +49,10 @@ const App: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
-  const [marketingAssets, setMarketingAssets] = useState<MarketingAsset[]>([]); // NEW STATE
   const [chats, setChats] = useState<Record<string, ChatMessage[]>>({});
 
   const [globalSettings, setGlobalSettings] = useState({
-      platformFee: 0.49, // AGORA É VALOR FIXO EM REAIS (R$ 0,49)
+      platformFee: 0.49, // VALOR FIXO EM REAIS (R$ 0,49)
       minWithdrawal: 50,
       maintenanceMode: false
   });
@@ -128,9 +99,7 @@ const App: React.FC = () => {
     const messagesSub = supabase
       .channel('public:messages')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-          const rawMsg = payload.new;
-          const newMsg = normalizeMessage(rawMsg);
-          
+          const newMsg = payload.new as ChatMessage;
           setChats(prev => ({
               ...prev,
               [newMsg.orderId]: [...(prev[newMsg.orderId] || []), newMsg]
@@ -154,36 +123,6 @@ const App: React.FC = () => {
         supabase.removeChannel(withdrawalsSub);
     };
   }, []);
-
-  // --- MARKETING ASSETS REALTIME ---
-  useEffect(() => {
-      if (!currentUser || currentUser.role !== 'partner') return;
-
-      const marketingSub = supabase
-          .channel('public:marketing_assets')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'marketing_assets' }, (payload) => {
-              // Note: We filter by companyId in logic because filter string on connection sometimes is tricky with Supabase
-              if (payload.eventType === 'INSERT') {
-                  const newAsset = normalizeAsset(payload.new);
-                  if (newAsset.companyId === currentUser.id) {
-                      setMarketingAssets(prev => [...prev, newAsset]);
-                  }
-              } else if (payload.eventType === 'UPDATE') {
-                  const updatedAsset = normalizeAsset(payload.new);
-                  if (updatedAsset.companyId === currentUser.id) {
-                      setMarketingAssets(prev => prev.map(a => a.id === updatedAsset.id ? updatedAsset : a));
-                  }
-              } else if (payload.eventType === 'DELETE') {
-                  setMarketingAssets(prev => prev.filter(a => a.id !== payload.old.id));
-              }
-          })
-          .subscribe();
-
-      return () => {
-          supabase.removeChannel(marketingSub);
-      };
-  }, [currentUser]);
-
 
   useEffect(() => {
       if (!currentUser) return;
@@ -225,14 +164,11 @@ const App: React.FC = () => {
       };
   }, [currentUser]);
 
-  // --- CORREÇÃO DO POLLING ---
-  // Antes ele só atualizava status. Agora ele busca novos pedidos (INSERT) também.
+  // --- POLLING ---
   useEffect(() => {
       if (!currentUser) return;
 
       const interval = setInterval(async () => {
-          // Se for parceiro, busca sempre para garantir que pedidos da IA apareçam
-          // Se for cliente, busca se tiver pedidos ativos
           const shouldFetch = currentUser.role === 'partner' || ordersRef.current.some(o => 
               o.status === 'waiting_payment' || o.status === 'pending' || o.status === 'preparing'
           );
@@ -244,49 +180,39 @@ const App: React.FC = () => {
           if (currentUser.role === 'client') {
               query = query.eq('customerId', currentUser.id).in('status', ['waiting_payment', 'pending', 'preparing', 'ready', 'delivering', 'cancelled']);
           } else if (currentUser.role === 'partner') {
-              // Partner vê tudo, incluindo 'pending' que vem da IA
               query = query.eq('companyId', currentUser.id).in('status', ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering', 'delivered', 'cancelled', 'waiting_payment']);
           } else {
               return; 
           }
 
-          // Busca mais recente primeiro
           query = query.order('timestamp', { ascending: false }).limit(50);
 
           const { data, error } = await query;
 
           if (!error && data) {
                setOrders((prevOrders) => {
-                   // Fix: Explicitly type map to avoid 'unknown' inference
                    const newOrdersMap = new Map<string, Order>(prevOrders.map(o => [o.id, o]));
                    let hasChanges = false;
 
-                   // Fix: Cast data to any[] to safely iterate
                    (data as any[]).forEach((freshOrder: any) => {
                        const existing = newOrdersMap.get(freshOrder.id);
-                       
-                       // Formata data e força tipo Order
                        const formattedFreshOrder: Order = {
                            ...freshOrder,
                            timestamp: new Date(freshOrder.timestamp)
                        };
 
                        if (!existing) {
-                           // NOVO PEDIDO ENCONTRADO (CRÍTICO PARA IA)
                            newOrdersMap.set(freshOrder.id, formattedFreshOrder);
                            hasChanges = true;
                        } else if (existing.status !== freshOrder.status || existing.paymentStatus !== freshOrder.paymentStatus) {
-                           // ATUALIZAÇÃO DE STATUS
                            newOrdersMap.set(freshOrder.id, formattedFreshOrder);
                            hasChanges = true;
                        }
                    });
 
                    if (hasChanges) {
-                       // Retorna array ordenado por data
                        return Array.from(newOrdersMap.values()).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
                    }
-                   
                    return prevOrders;
                });
           }
@@ -315,7 +241,6 @@ const App: React.FC = () => {
                   ...o,
                   timestamp: new Date(o.timestamp)
               }));
-              // Sort by date desc
               formattedOrders.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
               setOrders(formattedOrders);
           }
@@ -330,23 +255,15 @@ const App: React.FC = () => {
           } catch (e) {}
 
           try {
-            // Load Marketing Assets
-            const { data: mktData, error: mktError } = await supabase.from('marketing_assets').select('*');
-            if (!mktError && mktData) {
-                // Map snake_case to CamelCase
-                const formattedAssets = mktData.map(normalizeAsset);
-                setMarketingAssets(formattedAssets);
-            }
-          } catch (e) {}
-
-          try {
             const { data: messagesData, error: msgError } = await supabase.from('messages').select('*').order('timestamp', { ascending: true });
             if (!msgError && messagesData) {
                 const groupedChats: Record<string, ChatMessage[]> = {};
-                messagesData.forEach((rawMsg: any) => {
-                    const msg = normalizeMessage(rawMsg);
+                messagesData.forEach((msg: ChatMessage) => {
                     if (!groupedChats[msg.orderId]) groupedChats[msg.orderId] = [];
-                    groupedChats[msg.orderId].push(msg);
+                    groupedChats[msg.orderId].push({
+                        ...msg,
+                        timestamp: new Date(msg.timestamp)
+                    });
                 });
                 setChats(groupedChats);
             }
@@ -459,51 +376,6 @@ const App: React.FC = () => {
       await supabase.from('withdrawal_requests').update({ status }).eq('id', id);
   };
 
-  // --- MARKETING CRUD ---
-  const handleUpsertAsset = async (asset: MarketingAsset) => {
-      // Correct Mapping: camelCase (Frontend) -> snake_case (Database)
-      const payload = {
-          id: asset.id,
-          company_id: asset.companyId,
-          type: asset.type,
-          name: asset.name,
-          discount_type: asset.discountType,
-          discount_value: asset.discountValue,
-          description: asset.description,
-          active: asset.active
-      };
-
-      const { data, error } = await supabase.from('marketing_assets').upsert(payload).select();
-      
-      if (error) {
-          console.error("Erro ao salvar marketing asset:", error);
-          alert("Erro ao salvar: " + error.message);
-      }
-      
-      if (!error && data) {
-          // Optimistic update handled by Realtime subscription or local state
-          const returnedAsset = normalizeAsset(data[0]);
-          setMarketingAssets(prev => {
-              const exists = prev.find(a => a.id === asset.id);
-              if (exists) return prev.map(a => a.id === asset.id ? returnedAsset : a);
-              return [...prev, returnedAsset];
-          });
-      }
-  };
-
-  const handleDeleteAsset = async (assetId: string) => {
-      const { error } = await supabase.from('marketing_assets').delete().eq('id', assetId);
-      
-      if (error) {
-          console.error("Erro ao excluir asset:", error);
-          alert("Erro ao excluir item: " + error.message);
-          return;
-      }
-
-      setMarketingAssets(prev => prev.filter(a => a.id !== assetId));
-  };
-
-  // ... (handlePlaceOrder, updateOrderStatus, handleCourierAcceptOrder, handleCancelOrder, handleUpdateFullOrder, handleDeleteOrder, handleAddProduct, handleUpdateProduct, handleDeleteProduct, handleUpdateCompany, handleAddAddress, handleRemoveAddress, handleAddCard, handleRemoveCard - KEEP AS IS)
   const handlePlaceOrder = async (
       cartItems: any[], companyId: string, finalTotal: number, deliveryMethod: 'delivery' | 'pickup', serviceFee: number, deliveryFee: number, subtotal: number, paymentMethod: 'cash' | 'card' | 'pix', changeFor?: number
   ): Promise<boolean> => {
@@ -515,7 +387,7 @@ const App: React.FC = () => {
     const company = companies.find(c => c.id === companyId);
     if (!company) return false;
 
-    // --- NOVA LÓGICA DE REPASSE ---
+    // --- NOVA LÓGICA DE REPASSE (Atualizada) ---
     const isOnlinePayment = paymentMethod !== 'cash';
     const FIXED_SERVICE_FEE = 0.49; // Agora fixo em 49 centavos
     
@@ -523,18 +395,29 @@ const App: React.FC = () => {
 
     if (isOnlinePayment) {
         if (company.deliveryType === 'own') {
-            // Entrega Própria: Restaurante recebe (Comida + Entrega) - 0.49
-            // Se retirada, não tem entrega, então (Comida) - 0.49
-            const amountToPartner = deliveryMethod === 'delivery' ? (subtotal + deliveryFee) : subtotal;
-            repasseValue = Math.max(0, amountToPartner - FIXED_SERVICE_FEE);
+            // Entrega Própria (Restaurante):
+            // Restaurante recebe: Comida (Subtotal) + Entrega.
+            // Plataforma fica com: Taxa de Serviço.
+            repasseValue = subtotal + deliveryFee;
         } else {
-            // Entrega Chegoou (Plataforma): Restaurante recebe SÓ a Comida.
-            // Plataforma fica com a taxa de entrega + 0.49
+            // Entrega Chegoou (Plataforma):
+            // Restaurante recebe: Apenas Comida (Subtotal).
+            // Plataforma fica com: Taxa de Serviço + Taxa de Entrega.
             repasseValue = subtotal;
         }
     } else {
-        // Dinheiro: Restaurante recebe tudo na mão. Repasse é 0 (ou negativo se implementássemos dívida).
-        repasseValue = 0; 
+        // DINHEIRO
+        if (company.deliveryType === 'chegoou') {
+            // Entrega Chegoou mas pago em Dinheiro.
+            // O Restaurante (ou Motoboy) recebe tudo na mão.
+            // O Restaurante fica DEVENDO à plataforma: Taxa de Entrega + Taxa de Serviço.
+            // Saldo Negativo.
+            repasseValue = -1 * (deliveryFee + FIXED_SERVICE_FEE);
+        } else {
+            // Entrega Própria + Dinheiro.
+            // O Restaurante recebe tudo. A plataforma não cobra a taxa de serviço aqui conforme regra "desconsidera".
+            repasseValue = 0;
+        }
     }
 
     const newOrder: Order = {
@@ -554,7 +437,7 @@ const App: React.FC = () => {
         total: finalTotal,
         subtotal: subtotal,
         deliveryFee: deliveryFee,
-        serviceFee: FIXED_SERVICE_FEE, // Salva o valor fixo
+        serviceFee: FIXED_SERVICE_FEE, 
         deliveryMethod: deliveryMethod,
         paymentMethod: paymentMethod,
         changeFor: changeFor,
@@ -637,19 +520,15 @@ const App: React.FC = () => {
         }
     }
 
-    // --- LÓGICA DE REPASSE (24H LOCK) ---
+    // --- LÓGICA DE REPASSE (12H LOCK) ---
     // Quando o pedido é entregue, marcamos o repasse como 'bloqueado' e setamos a data.
-    // SOMENTE SE O PAGAMENTO NÃO FOR DINHEIRO (CASH)
     let updateData: any = { status };
     
-    // Obter dados atuais do pedido para checar o método de pagamento
-    const currentOrder = orders.find(o => o.id === orderId);
-
+    // Se for entregue e NÃO for cancelado
     if (status === 'delivered') {
-        if (currentOrder && currentOrder.paymentMethod !== 'cash') {
-            updateData.repasseStatus = 'blocked';
-            updateData.repasseDate = new Date().toISOString();
-        }
+        // Bloqueia o saldo (para liberar em 12h) se não for ignorado
+        updateData.repasseStatus = 'blocked';
+        updateData.repasseDate = new Date().toISOString();
     }
 
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updateData } : o));
@@ -660,7 +539,7 @@ const App: React.FC = () => {
       if (!currentUser) return;
       
       const updateData = {
-          status: 'delivering' as Order['status'], // Fix type inference
+          status: 'delivering',
           courierId: currentUser.id
       };
 
@@ -673,7 +552,6 @@ const App: React.FC = () => {
       if (!order) return;
       if (!currentUser) return;
 
-      // REGRAS RIGOROSAS
       if (currentUser.role === 'client') {
           if (order.status !== 'pending' && order.status !== 'waiting_payment') {
               alert("Não é possível cancelar. O restaurante já começou a preparar seu pedido. Entre em contato com a loja.");
@@ -696,7 +574,6 @@ const App: React.FC = () => {
     await supabase.from('orders').delete().eq('id', orderId);
   };
 
-  // CRUD Wrappers
   const handleAddProduct = async (newProduct: Product) => {
       const payload = prepareProductPayload(newProduct);
       const { data, error } = await supabase.from('products').insert([payload]).select();
@@ -792,7 +669,6 @@ const App: React.FC = () => {
         
         return <PartnerView 
             company={myCompany} 
-            userPhone={currentUser.phone}
             orders={orders.filter(o => o.companyId === myCompany.id)}
             products={products.filter(p => p.companyId === myCompany.id)}
             updateOrderStatus={updateOrderStatus}
@@ -805,11 +681,6 @@ const App: React.FC = () => {
             onSendMessage={handleSendMessage}
             onUpdateFullOrder={handleUpdateFullOrder}
             onDeleteOrder={handleDeleteOrder}
-            // Marketing Props
-            marketingAssets={marketingAssets.filter(a => a.companyId === myCompany.id)}
-            onAddAsset={handleUpsertAsset}
-            onUpdateAsset={handleUpsertAsset}
-            onDeleteAsset={handleDeleteAsset}
         />;
 
     case 'courier':
