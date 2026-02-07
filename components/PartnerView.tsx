@@ -1192,7 +1192,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             
             {view === ViewState.DASHBOARD && (
                 <div className="space-y-8">
-                    <DashboardView salesData={calculatedSalesHistory} />
+                    <DashboardView salesData={calculatedSalesHistory} orders={orders} />
                     
                     {/* MINI FINANCE WIDGET ON DASHBOARD */}
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
@@ -1865,4 +1865,3 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 };
 
 export default PartnerView;
-
