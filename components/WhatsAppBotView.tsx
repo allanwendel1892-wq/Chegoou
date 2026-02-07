@@ -1,7 +1,6 @@
-
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Product, Order, Company } from '../types';
-import { MessageSquare, Users, Send, CheckCircle, AlertCircle, Clock, Calendar, RefreshCw, Zap, Search, Filter } from 'lucide-react';
+import { MessageSquare, Users, Send, CheckCircle, AlertCircle, Clock, Calendar, RefreshCw, Zap, Search, Filter, Play, Pause, StopCircle } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
 interface WhatsAppBotViewProps {
@@ -19,12 +18,28 @@ interface CustomerCRM {
     status: 'recente' | 'morno' | 'inativo';
 }
 
+interface QueueItem {
+    phone: string;
+    name: string;
+    status: 'pending' | 'waiting' | 'sending' | 'sent' | 'error';
+    log?: string;
+}
+
+const N8N_WEBHOOK_URL = "https://n8n-webhook.znzrqn.easypanel.host/webhook/chegooudisparo";
+
 const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, updateCompany }) => {
   const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
   const [messageText, setMessageText] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
-  const [isSending, setIsSending] = useState(false);
-  const [viewMode, setViewMode] = useState<'list' | 'compose'>('list');
+  const [viewMode, setViewMode] = useState<'list' | 'compose' | 'queue'>('list');
+
+  // --- QUEUE STATE ---
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [queueStatus, setQueueStatus] = useState<'idle' | 'running' | 'paused' | 'completed'>('idle');
+  const [countdown, setCountdown] = useState(0);
+  const messageRef = useRef(messageText); // Ref to access message inside useEffect without dependency
+
+  useEffect(() => { messageRef.current = messageText; }, [messageText]);
 
   // --- 1. LÓGICA DE CLIENTES (CRM) ---
   const customers = useMemo(() => {
@@ -32,8 +47,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
       const now = new Date();
 
       orders.forEach(order => {
-          // Filtra apenas pedidos vindos do WhatsApp
-          if (order.origin?.toLowerCase() !== 'whatsapp') return;
+          // REMOVIDO FILTRO DE ORIGEM WHATSAPP PARA INCLUIR TODOS OS CLIENTES
           
           const phone = order.customerPhone.replace(/\D/g, '');
           if (!phone) return;
@@ -89,6 +103,98 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
   const selectionLimit = company.leadsPerBlastLimit || 20; // Default 20 leads
   const remainingBlasts = Math.max(0, dailyLimit - messagesSentToday);
 
+  // --- 3. QUEUE PROCESSOR LOGIC ---
+  useEffect(() => {
+      let timeoutId: any;
+      let intervalId: any;
+
+      const processQueue = async () => {
+          if (queueStatus !== 'running') return;
+
+          // Find next pending item
+          const pendingIndex = queue.findIndex(i => i.status === 'pending');
+          
+          if (pendingIndex === -1) {
+              setQueueStatus('completed');
+              alert("Disparos finalizados!");
+              return;
+          }
+
+          // Calculate Delay (Random 30s to 60s)
+          // First item sends immediately (delay 0), others wait
+          const isFirst = pendingIndex === 0;
+          const minDelay = 30000; // 30s
+          const maxDelay = 60000; // 60s
+          const delay = isFirst ? 1000 : Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
+
+          // Set waiting status and countdown
+          setQueue(prev => prev.map((item, idx) => idx === pendingIndex ? { ...item, status: 'waiting' } : item));
+          setCountdown(Math.ceil(delay / 1000));
+
+          // Countdown interval
+          intervalId = setInterval(() => {
+              setCountdown(prev => Math.max(0, prev - 1));
+          }, 1000);
+
+          // Execution Timeout
+          timeoutId = setTimeout(async () => {
+              clearInterval(intervalId);
+              
+              // Set sending status
+              setQueue(prev => prev.map((item, idx) => idx === pendingIndex ? { ...item, status: 'sending' } : item));
+
+              const currentItem = queue[pendingIndex];
+
+              try {
+                  // REAL N8N COMMUNICATION
+                  const response = await fetch(N8N_WEBHOOK_URL, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                          phone: currentItem.phone,
+                          name: currentItem.name,
+                          message: messageRef.current,
+                          companyId: company.id,
+                          companyName: company.name
+                      })
+                  });
+
+                  if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
+
+                  // Update DB Stats
+                  const newCount = (company.messagesSentToday || 0) + 1;
+                  updateCompany({ messagesSentToday: newCount, lastMessageDate: todayStr });
+                  await supabase.from('companies').update({ 
+                      messagesSentToday: newCount, 
+                      lastMessageDate: todayStr 
+                  }).eq('id', company.id);
+
+                  // Set sent status
+                  setQueue(prev => prev.map((item, idx) => idx === pendingIndex ? { ...item, status: 'sent' } : item));
+
+              } catch (e: any) {
+                  console.error("Queue Error:", e);
+                  setQueue(prev => prev.map((item, idx) => idx === pendingIndex ? { ...item, status: 'error', log: e.message } : item));
+              }
+
+              // Trigger next iteration automatically by updating state (which useEffect watches if we depended on queue, but here we need to force re-run or use recursion inside effect?)
+              // Ideally, useEffect should depend on queue, but that causes loops. 
+              // We'll use a hack: Re-trigger by toggling a hidden state or just calling a function if we were outside effect.
+              // Since we are inside effect, we can't easily recurse without cleaning up.
+              // BUT: Updating 'queue' triggers the useEffect [queue] if added.
+              
+          }, delay);
+      };
+
+      processQueue();
+
+      return () => {
+          clearTimeout(timeoutId);
+          clearInterval(intervalId);
+      };
+  }, [queueStatus, queue.length, queue.filter(i => i.status === 'sent' || i.status === 'error').length]); 
+  // Dependency on 'completed items count' ensures it runs again after an item finishes.
+
   // --- ACTIONS ---
 
   const handleSelect = (phone: string) => {
@@ -107,13 +213,12 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
       if (selectedLeads.length > 0) {
           setSelectedLeads([]);
       } else {
-          // Seleciona até o limite
           const toSelect = filteredCustomers.slice(0, selectionLimit).map(c => c.phone);
           setSelectedLeads(toSelect);
       }
   };
 
-  const handleSendMessage = async () => {
+  const startQueue = () => {
       if (remainingBlasts <= 0) {
           alert("Limite diário de disparos atingido! Volte amanhã.");
           return;
@@ -123,47 +228,110 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
           return;
       }
 
-      setIsSending(true);
+      // Initialize Queue
+      const newQueue: QueueItem[] = selectedLeads.map(phone => {
+          const c = customers.find(cust => cust.phone === phone);
+          return {
+              phone,
+              name: c?.name || 'Cliente',
+              status: 'pending'
+          };
+      });
 
-      try {
-          // 1. Simulação de envio para N8N (Webhook)
-          console.log("Enviando para N8N:", {
-              leads: selectedLeads,
-              message: messageText,
-              companyId: company.id
-          });
-
-          // Simula delay de rede
-          await new Promise(resolve => setTimeout(resolve, 1500));
-
-          // 2. Atualiza contador no Supabase/App
-          const newCount = messagesSentToday + 1;
-          
-          await updateCompany({
-              messagesSentToday: newCount,
-              lastMessageDate: todayStr
-          });
-
-          // Persistência no banco (para garantir consistência caso recarregue)
-          await supabase.from('companies').update({
-             messagesSentToday: newCount,
-             lastMessageDate: todayStr
-          }).eq('id', company.id);
-
-          alert("Disparo iniciado com sucesso! O sistema processará as mensagens.");
-          setViewMode('list');
-          setSelectedLeads([]);
-          setMessageText("");
-
-      } catch (e) {
-          console.error("Erro no disparo:", e);
-          alert("Erro ao conectar com servidor de envio.");
-      } finally {
-          setIsSending(false);
-      }
+      setQueue(newQueue);
+      setQueueStatus('running');
+      setViewMode('queue');
   };
 
   // --- RENDER ---
+
+  if (viewMode === 'queue') {
+      const progress = queue.length > 0 
+        ? Math.round((queue.filter(i => i.status === 'sent' || i.status === 'error').length / queue.length) * 100) 
+        : 0;
+
+      return (
+          <div className="flex flex-col h-[calc(100vh-6rem)] max-w-4xl mx-auto">
+              <div className="mb-6 flex justify-between items-center">
+                  <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                      <RefreshCw className={`w-6 h-6 ${queueStatus === 'running' ? 'animate-spin text-green-600' : 'text-gray-400'}`} />
+                      Disparando Mensagens
+                  </h2>
+                  <div className="flex gap-2">
+                      {queueStatus === 'running' ? (
+                          <button onClick={() => setQueueStatus('paused')} className="px-4 py-2 bg-yellow-100 text-yellow-700 rounded-lg font-bold flex items-center gap-2">
+                              <Pause className="w-4 h-4"/> Pausar
+                          </button>
+                      ) : (
+                          <button onClick={() => setQueueStatus('running')} className="px-4 py-2 bg-green-100 text-green-700 rounded-lg font-bold flex items-center gap-2">
+                              <Play className="w-4 h-4"/> Continuar
+                          </button>
+                      )}
+                      <button onClick={() => { setQueueStatus('idle'); setViewMode('list'); }} className="px-4 py-2 bg-red-100 text-red-700 rounded-lg font-bold flex items-center gap-2">
+                          <StopCircle className="w-4 h-4"/> Sair
+                      </button>
+                  </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mb-6">
+                  <div className="flex justify-between items-end mb-2">
+                      <div>
+                          <p className="text-sm text-gray-500 font-bold uppercase">Progresso da Fila</p>
+                          <h3 className="text-3xl font-bold text-gray-900">{progress}%</h3>
+                      </div>
+                      {queueStatus === 'running' && countdown > 0 && (
+                          <div className="text-right">
+                              <p className="text-xs text-gray-400 font-bold uppercase mb-1">Próximo envio em</p>
+                              <p className="text-2xl font-mono text-blue-600 font-bold">{countdown}s</p>
+                          </div>
+                      )}
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
+                      <div className="bg-green-600 h-2.5 rounded-full transition-all duration-500" style={{ width: `${progress}%` }}></div>
+                  </div>
+                  <div className="mt-4 p-3 bg-blue-50 text-blue-800 text-xs rounded-lg flex items-center gap-2">
+                      <Clock className="w-4 h-4" />
+                      <span>Intervalo de segurança aleatório (30s a 1min) ativo para evitar bloqueios do WhatsApp.</span>
+                  </div>
+              </div>
+
+              <div className="flex-1 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+                  <div className="p-4 border-b border-gray-100 bg-gray-50/50 font-bold text-gray-500 text-xs uppercase flex justify-between">
+                      <span>Fila de Envio ({queue.length})</span>
+                      <span>Status</span>
+                  </div>
+                  <div className="overflow-y-auto flex-1 p-2 space-y-2">
+                      {queue.map((item, idx) => (
+                          <div key={idx} className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded-xl shadow-sm">
+                              <div className="flex items-center gap-3">
+                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs
+                                      ${item.status === 'sent' ? 'bg-green-100 text-green-700' : ''}
+                                      ${item.status === 'error' ? 'bg-red-100 text-red-700' : ''}
+                                      ${item.status === 'sending' ? 'bg-blue-100 text-blue-700' : ''}
+                                      ${item.status === 'waiting' ? 'bg-yellow-100 text-yellow-700' : ''}
+                                      ${item.status === 'pending' ? 'bg-gray-100 text-gray-500' : ''}
+                                  `}>
+                                      {idx + 1}
+                                  </div>
+                                  <div>
+                                      <p className="font-bold text-gray-800 text-sm">{item.name}</p>
+                                      <p className="text-xs text-gray-500">{item.phone}</p>
+                                  </div>
+                              </div>
+                              <div>
+                                  {item.status === 'pending' && <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">Na fila</span>}
+                                  {item.status === 'waiting' && <span className="text-xs text-yellow-600 bg-yellow-50 px-2 py-1 rounded flex items-center gap-1"><Clock className="w-3 h-3"/> Aguardando...</span>}
+                                  {item.status === 'sending' && <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin"/> Enviando...</span>}
+                                  {item.status === 'sent' && <span className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded flex items-center gap-1"><CheckCircle className="w-3 h-3"/> Enviado</span>}
+                                  {item.status === 'error' && <span className="text-xs text-red-600 bg-red-50 px-2 py-1 rounded flex items-center gap-1"><AlertCircle className="w-3 h-3"/> Erro</span>}
+                              </div>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          </div>
+      );
+  }
 
   if (viewMode === 'compose') {
       return (
@@ -228,12 +396,11 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
                                   Cancelar
                               </button>
                               <button 
-                                  onClick={handleSendMessage}
-                                  disabled={isSending}
+                                  onClick={startQueue}
                                   className="flex-1 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition-colors shadow-lg shadow-green-200 flex items-center justify-center gap-2"
                               >
-                                  {isSending ? <RefreshCw className="w-5 h-5 animate-spin"/> : <Send className="w-5 h-5"/>}
-                                  Enviar Agora
+                                  <Send className="w-5 h-5"/>
+                                  Iniciar Disparos
                               </button>
                           </div>
                       </div>
@@ -330,7 +497,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
                           <tr>
                               <td colSpan={5} className="p-8 text-center text-gray-400">
                                   <Users className="w-12 h-12 mx-auto mb-2 opacity-20"/>
-                                  Nenhum cliente encontrado com origem WhatsApp.
+                                  Nenhum cliente encontrado.
                               </td>
                           </tr>
                       )}
