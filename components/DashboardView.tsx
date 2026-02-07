@@ -1,13 +1,15 @@
+
 import React from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { ArrowUpRight, DollarSign, ShoppingBag, Users, Activity } from 'lucide-react';
+import { ArrowUpRight, DollarSign, ShoppingBag, Users, Activity, Sparkles } from 'lucide-react';
 import { SalesHistoryItem } from '../types';
 
 interface DashboardViewProps {
   salesData: SalesHistoryItem[];
+  aiSalesCount: number;
 }
 
-const DashboardView: React.FC<DashboardViewProps> = ({ salesData }) => {
+const DashboardView: React.FC<DashboardViewProps> = ({ salesData, aiSalesCount }) => {
   const totalRevenue = salesData.reduce((acc, curr) => acc + curr.revenue, 0);
   const totalOrders = salesData.reduce((acc, curr) => acc + curr.ordersCount, 0);
 
@@ -64,7 +66,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData }) => {
           <div className="flex justify-between items-start">
             <div>
               <p className="text-sm font-medium text-gray-500">Ticket Médio</p>
-              <h3 className="text-2xl font-bold text-gray-900 mt-1">R$ {(totalRevenue / totalOrders).toFixed(2)}</h3>
+              <h3 className="text-2xl font-bold text-gray-900 mt-1">R$ {totalOrders > 0 ? (totalRevenue / totalOrders).toFixed(2) : '0.00'}</h3>
             </div>
             <div className="p-2 bg-purple-50 rounded-lg">
               <Activity className="w-5 h-5 text-purple-600" />
@@ -80,17 +82,17 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData }) => {
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
           <div className="flex justify-between items-start">
             <div>
-              <p className="text-sm font-medium text-gray-500">Novos Clientes</p>
-              <h3 className="text-2xl font-bold text-gray-900 mt-1">142</h3>
+              <p className="text-sm font-medium text-gray-500">Vendas via IA</p>
+              <h3 className="text-2xl font-bold text-gray-900 mt-1">{aiSalesCount}</h3>
             </div>
-            <div className="p-2 bg-orange-50 rounded-lg">
-              <Users className="w-5 h-5 text-orange-600" />
+            <div className="p-2 bg-indigo-50 rounded-lg">
+              <Sparkles className="w-5 h-5 text-indigo-600" />
             </div>
           </div>
           <div className="flex items-center mt-4 text-green-600 text-sm font-medium">
             <ArrowUpRight className="w-4 h-4 mr-1" />
-            <span>+18%</span>
-            <span className="text-gray-400 ml-1 font-normal">vs. semana anterior</span>
+            <span>Automático</span>
+            <span className="text-gray-400 ml-1 font-normal">via WhatsApp</span>
           </div>
         </div>
       </div>

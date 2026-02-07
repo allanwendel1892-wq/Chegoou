@@ -301,8 +301,11 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   
   useEffect(() => { setLocalCompany(company); }, [company]);
 
-  // ... (All other handlers remain identical) ...
-  // [Only changing the View Render parts below]
+  // --- CALCULO VENDAS IA ---
+  // Filtra pedidos onde o ID começa com 'ord-ia'
+  const aiSalesCount = useMemo(() => {
+      return orders.filter(o => o.id.startsWith('ord-ia')).length;
+  }, [orders]);
 
   // ... (handlePrintOrder, UnlockFunds, Finance Logic, Map Logic, etc...)
   const handlePrintOrder = (order: Order) => {
@@ -421,7 +424,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       printWindow.document.close();
   };
 
-  // --- FINANCEIRO: Lógica de Desbloqueio de Saldo (24h) ---
+  // --- FINANCEIRO: Lógica de Desbloqueio de Saldo (12h) ---
   useEffect(() => {
     const unlockFunds = async () => {
         const now = new Date();
@@ -431,11 +434,11 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             o.origin !== 'whatsapp' && // Ignora WhatsApp
             o.paymentMethod !== 'cash' && 
             o.status !== 'cancelled' && 
-            (now.getTime() - new Date(o.repasseDate).getTime()) > 24 * 60 * 60 * 1000 
+            (now.getTime() - new Date(o.repasseDate).getTime()) > 12 * 60 * 60 * 1000 // Alterado para 12h
         );
 
         if (ordersToUnlock.length > 0) {
-            console.log(`Desbloqueando ${ordersToUnlock.length} pedidos para saque...`);
+            console.log(`Desbloqueando ${ordersToUnlock.length} pedidos para saque (regra 12h)...`);
             for (const order of ordersToUnlock) {
                  await supabase.from('orders').update({ repasseStatus: 'available' }).eq('id', order.id);
             }
@@ -1088,7 +1091,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             
             {view === ViewState.DASHBOARD && (
                 <div className="space-y-8">
-                    <DashboardView salesData={calculatedSalesHistory} />
+                    <DashboardView salesData={calculatedSalesHistory} aiSalesCount={aiSalesCount} />
                     {/* MINI FINANCE WIDGET */}
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                         <div className="flex justify-between items-center mb-6">
@@ -1103,7 +1106,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 <h4 className="text-2xl font-bold text-green-600 mt-1">R$ {financialSummary.available.toFixed(2)}</h4>
                             </div>
                             <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
-                                <p className="text-xs text-gray-500 uppercase font-bold">Bloqueado (24h)</p>
+                                <p className="text-xs text-gray-500 uppercase font-bold">Bloqueado (12h)</p>
                                 <h4 className="text-2xl font-bold text-gray-400 mt-1 flex items-center gap-2">
                                     R$ {financialSummary.blocked.toFixed(2)} <Lock className="w-4 h-4"/>
                                 </h4>
@@ -1146,12 +1149,12 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                             <div className="flex justify-between items-start">
                                 <div>
-                                    <p className="text-sm font-bold text-gray-500 uppercase tracking-wide">Bloqueado (24h)</p>
+                                    <p className="text-sm font-bold text-gray-500 uppercase tracking-wide">Bloqueado (12h)</p>
                                     <h3 className="text-3xl font-bold text-gray-400 mt-2">R$ {financialSummary.blocked.toFixed(2)}</h3>
                                 </div>
                                 <div className="bg-gray-100 p-2 rounded-lg"><Lock className="w-6 h-6 text-gray-400"/></div>
                             </div>
-                            <p className="text-xs text-gray-400 mt-2">Valores liberados 24h após entrega.</p>
+                            <p className="text-xs text-gray-400 mt-2">Valores liberados 12h após entrega.</p>
                         </div>
                         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                              <div className="flex justify-between items-start">
