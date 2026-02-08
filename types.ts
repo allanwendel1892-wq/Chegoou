@@ -1,5 +1,6 @@
 
 
+
 export type UserRole = 'admin' | 'partner' | 'courier' | 'client';
 
 export interface Address {
@@ -185,10 +186,11 @@ export enum ViewState {
   DASHBOARD = 'dashboard',
   ORDERS = 'orders', // Kanban
   MENU = 'menu', // Cardapio (was inventory)
-  FORECAST = 'forecast',
   WHATSAPP = 'whatsapp',
   SETTINGS = 'settings',
-  FINANCE = 'finance' // NEW
+  FINANCE = 'finance', // NEW
+  // FIX: Add FORECAST to ViewState enum to support the new AI forecast view.
+  FORECAST = 'forecast',
 }
 
 export interface SalesHistoryItem {
@@ -196,17 +198,16 @@ export interface SalesHistoryItem {
   revenue: number;
   ordersCount: number;
 }
-
+// FIX: Add ForecastData and PredictedProduct interfaces for the AI forecast feature.
 export interface PredictedProduct {
   productName: string;
-  estimatedQuantity: number;
-  confidence: number; // Changed from reasoning to confidence mostly
   reasoning: string;
+  confidence: number;
+  estimatedQuantity: number;
 }
 
 export interface ForecastData {
-  predictedRevenue: number;
-  confidenceScore: number;
   predictedProducts: PredictedProduct[];
+  confidenceScore: number;
   insight: string;
 }

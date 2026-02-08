@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Product, SalesHistoryItem, ForecastData } from '../types';
 import { generateSalesForecast } from '../services/geminiService';
-import { Sparkles, TrendingUp, AlertTriangle, Loader2, BarChart2, Target } from 'lucide-react';
+import { Sparkles, TrendingUp, AlertTriangle, Loader2, BarChart2, Target, RefreshCw } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 interface ForecastViewProps {
@@ -13,22 +13,30 @@ const ForecastView: React.FC<ForecastViewProps> = ({ products, salesHistory }) =
   const [loading, setLoading] = useState<boolean>(true);
   const [forecast, setForecast] = useState<ForecastData | null>(null);
 
-  useEffect(() => {
-    const fetchForecast = async () => {
-      setLoading(true);
-      // Removed artificial timeout, call real service
-      const data = await generateSalesForecast(salesHistory, products);
-      setForecast(data);
+  // Function to fetch forecast data from the AI service
+  const fetchForecast = async () => {
+    if (products.length === 0) {
+      setForecast(null);
       setLoading(false);
-    };
-
-    if (products.length > 0) {
-        fetchForecast();
-    } else {
-        setLoading(false); // No products, no forecast
+      return;
     }
-    
-  }, [products, salesHistory]); // Trigger when props update
+    const data = await generateSalesForecast(salesHistory, products);
+    setForecast(data);
+    setLoading(false);
+  };
+
+  // Run only once on the initial component mount to get the first forecast
+  useEffect(() => {
+    fetchForecast();
+  }, []); // Empty dependency array ensures this is called only once.
+
+  // Manual refresh handler triggered by the user
+  const handleRefresh = () => {
+    if (!loading) {
+      setLoading(true);
+      fetchForecast();
+    }
+  };
 
   if (loading) {
     return (
@@ -39,27 +47,50 @@ const ForecastView: React.FC<ForecastViewProps> = ({ products, salesHistory }) =
     );
   }
 
-  if (!forecast) return (
-      <div className="text-center py-10 text-gray-500">
-          Adicione produtos ao cardápio para gerar previsões.
-      </div>
-  );
+  if (!forecast) {
+    // This state is reached if there are no products or if the initial API call fails.
+    return (
+        <div className="text-center py-10">
+            <AlertTriangle className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+            <h3 className="font-bold text-gray-700">Não foi possível gerar a previsão</h3>
+            <p className="text-gray-500 text-sm mb-6">Verifique se você possui produtos cadastrados ou tente novamente.</p>
+            <button 
+                onClick={handleRefresh}
+                disabled={loading}
+                className="bg-white px-4 py-2 rounded-lg border border-gray-200 text-gray-600 font-bold text-sm flex items-center gap-2 shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+                <RefreshCw className="w-4 h-4" />
+                Tentar Novamente
+            </button>
+        </div>
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2">
-          <BarChart2 className="w-6 h-6 text-purple-600" />
-          <h2 className="text-2xl font-bold text-gray-800">IA Preditiva de Vendas (Gemini)</h2>
+      <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <BarChart2 className="w-6 h-6 text-purple-600" />
+            <h2 className="text-2xl font-bold text-gray-800">IA Preditiva de Vendas (Gemini)</h2>
+          </div>
+          <p className="text-gray-500 mt-1">
+            Probabilidade de venda para <span className="font-bold text-gray-900">Amanhã</span>
+          </p>
         </div>
-        <p className="text-gray-500">
-          Probabilidade de venda para <span className="font-bold text-gray-900">Amanhã</span>
-        </p>
+        <button 
+            onClick={handleRefresh}
+            disabled={loading}
+            className="bg-white px-4 py-2 rounded-lg border border-gray-200 text-gray-600 font-bold text-sm flex items-center gap-2 shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-wait shrink-0"
+        >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Atualizar Previsão
+        </button>
       </div>
 
       {/* Probability Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {forecast.predictedProducts.map((item, idx) => (
+        {forecast.predictedProducts.length > 0 ? forecast.predictedProducts.map((item, idx) => (
              <div key={idx} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between relative overflow-hidden group">
                  <div className="absolute top-0 right-0 p-10 bg-purple-50 rounded-bl-full -mr-10 -mt-10 z-0"></div>
                  <div className="relative z-10">
@@ -77,7 +108,11 @@ const ForecastView: React.FC<ForecastViewProps> = ({ products, salesHistory }) =
                      <p className="text-xs text-center text-gray-400 mt-2">Est. {item.estimatedQuantity} un.</p>
                  </div>
              </div>
-        ))}
+        )) : (
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 md:col-span-2 text-center text-gray-500">
+                <p>A IA não identificou produtos com alta probabilidade de venda para amanhã com base nos dados atuais.</p>
+            </div>
+        )}
       </div>
 
       {/* Confidence Chart */}

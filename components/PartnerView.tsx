@@ -1,12 +1,12 @@
 
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem, WithdrawalRequest } from '../types';
+import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem, WithdrawalRequest, ForecastData } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
-import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle, ArrowRight, Lock, Unlock, Banknote, AlertCircle, Info, MessageSquare, CreditCard, Printer } from 'lucide-react';
+import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle, ArrowRight, Lock, Unlock, Banknote, AlertCircle, Info, MessageSquare, CreditCard, Printer, TrendingUp } from 'lucide-react';
 import DashboardView from './DashboardView';
-import ForecastView from './ForecastView';
 import WhatsAppBotView from './WhatsAppBotView';
+import ForecastView from './ForecastView';
 import Sidebar from './Sidebar';
 import { supabase } from '../services/supabaseClient';
 
@@ -383,7 +383,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                   </div>
                   <div class="flex">
                       <span>Entrega:</span>
-                      <span>R$ {order.deliveryFee.toFixed(2)}</span>
+                      <span>R$ ${order.deliveryFee.toFixed(2)}</span>
                   </div>
                   <div class="flex" style="font-size: 16px; font-weight: bold; margin-top: 5px;">
                       <span>TOTAL:</span>
@@ -424,10 +424,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             o.status === 'delivered' && 
             o.paymentMethod !== 'cash' && 
             o.origin !== 'whatsapp' && 
-            // Condition 1: Stuck in pending
-            (o.repasseStatus === 'pending' || !o.repasseStatus ||
-            // Condition 2: Marked as blocked/available but value is 0 (and Total is likely valid > 0.50)
-             (o.repasseValue === 0 && o.total > 0.50))
+            // Condition 1: Stuck in pending. This is the main target.
+            (o.repasseStatus === 'pending' || !o.repasseStatus)
         );
 
         for (const order of ordersToFix) {
@@ -439,7 +437,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
              const newStatus = hoursDiff > 12 ? 'available' : 'blocked';
              
              // Recalcula o valor se estiver zerado, usando a regra de negócio correta
-             let newValue = order.repasseValue || 0;
+             let newValue = order.repasseValue === undefined || order.repasseValue === null ? 0 : order.repasseValue;
              
              if (newValue === 0 && order.total > 0) {
                  if (company.deliveryType === 'own') {
@@ -466,6 +464,39 @@ const PartnerView: React.FC<PartnerViewProps> = ({
     healFinancials(); // Run on mount
     return () => clearInterval(interval);
   }, [orders, company.deliveryType]);
+
+  // --- NOVO: Lógica de Desbloqueio de Saldo (12h) ---
+  useEffect(() => {
+    const checkBlockedFunds = async () => {
+        const now = new Date();
+        const twelveHoursAgo = new Date(now.getTime() - 12 * 60 * 60 * 1000);
+
+        const ordersToUnlock = orders.filter(o => 
+            o.repasseStatus === 'blocked' &&
+            o.repasseDate &&
+            new Date(o.repasseDate) < twelveHoursAgo
+        );
+
+        if (ordersToUnlock.length > 0) {
+            console.log(`[Finance Engine] Desbloqueando ${ordersToUnlock.length} pedido(s) para saque...`);
+            const updates = ordersToUnlock.map(order => 
+                supabase
+                    .from('orders')
+                    .update({ repasseStatus: 'available' })
+                    .eq('id', order.id)
+            );
+            
+            // This runs in the background. The UI will update via Supabase subscriptions.
+            Promise.all(updates).catch(err => console.error("Erro ao desbloquear fundos:", err));
+        }
+    };
+
+    // Run verification at regular intervals to ensure funds are released
+    const intervalId = setInterval(checkBlockedFunds, 5 * 60 * 1000); // Runs every 5 minutes
+    checkBlockedFunds(); // Run once when the component mounts
+
+    return () => clearInterval(intervalId); // Clean up the interval when the component unmounts
+  }, [orders]); // The dependency on `orders` ensures this runs if orders are updated externally
 
   // --- FINANCEIRO: Carregar Histórico de Saques ---
   useEffect(() => {
@@ -1428,6 +1459,18 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 status="delivered" 
                                 items={orders.filter(o => o.status === 'delivered')} 
                                 color="border-gray-200"
+                                onClickOrder={setEditingOrder}
+                                onDrop={handleDragDropOrder}
+                                chats={chats}
+                                onOpenChat={setActiveChatOrder}
+                                onPrintOrder={handlePrintOrder}
+                            />
+                            {/* NOVO: Coluna de Cancelados para evitar "pedidos sumidos" */}
+                            <KanbanColumn 
+                                title="Cancelados" 
+                                status="cancelled" 
+                                items={orders.filter(o => o.status === 'cancelled')} 
+                                color="border-red-200"
                                 isLast
                                 onClickOrder={setEditingOrder}
                                 onDrop={handleDragDropOrder}
@@ -1627,10 +1670,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                 </div>
             )}
             
-            {view === ViewState.FORECAST && (
-                <ForecastView products={products} salesHistory={calculatedSalesHistory} />
-            )}
-
             {view === ViewState.WHATSAPP && (
                 <WhatsAppBotView 
                     products={products} 
@@ -1638,6 +1677,10 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                     company={localCompany} // ADDED: Passing company for limits
                     updateCompany={updateCompany} // ADDED: Update function for limits
                 />
+            )}
+            
+            {view === ViewState.FORECAST && (
+              <ForecastView products={products} salesHistory={calculatedSalesHistory} />
             )}
 
             {view === ViewState.SETTINGS && (
