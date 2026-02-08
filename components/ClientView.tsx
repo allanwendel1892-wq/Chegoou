@@ -733,72 +733,94 @@ const ClientView: React.FC<ClientViewProps> = ({
        
        {isCartOpen && (
            <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4">
-               <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] shadow-2xl animate-slide-up flex flex-col max-h-[90vh]">
-                    <div className="flex justify-between items-center mb-6"><h2 className="font-bold text-xl text-gray-800">Sacola</h2><button onClick={() => {setIsCartOpen(false); setAppliedCoupon(null); setCouponError(''); setCouponCodeInput('');}}><X/></button></div>
-                    <div className="flex bg-gray-100 p-1 rounded-xl mb-4"><button onClick={() => setDeliveryMethod('delivery')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${deliveryMethod === 'delivery' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Entrega</button><button onClick={() => setDeliveryMethod('pickup')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${deliveryMethod === 'pickup' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Retirada</button></div>
-                    
-                    {deliveryMethod === 'pickup' && activeCompanyData?.address && (
-                        <div className="bg-orange-50 p-3 rounded-xl border border-orange-100 mb-4 text-sm animate-fade-in">
-                            <p className="font-bold text-orange-800 flex items-center gap-1 mb-1">
-                                <Store className="w-4 h-4"/> Retirar em:
-                            </p>
-                            <p className="text-gray-700">
-                                {activeCompanyData.address.street}, {activeCompanyData.address.number}
-                                <br/>
-                                <span className="text-xs">{activeCompanyData.address.neighborhood} - {activeCompanyData.address.city}</span>
-                            </p>
-                        </div>
-                    )}
+               <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl animate-slide-up flex flex-col max-h-[90vh]">
+                    {/* --- Header (Fixed) --- */}
+                    <div className="p-6 pb-4 flex justify-between items-center shrink-0">
+                        <h2 className="font-bold text-xl text-gray-800">Sacola</h2>
+                        <button onClick={() => {setIsCartOpen(false); setAppliedCoupon(null); setCouponError(''); setCouponCodeInput('');}}><X/></button>
+                    </div>
 
-                    <div className="flex-1 overflow-y-auto mb-4">{cart.map((i, idx) => (<div key={idx} className="flex justify-between border-b py-2"><div>{i.quantity}x {i.product.name}</div><div className="flex gap-2 font-bold">R$ {i.finalPrice.toFixed(2)} <Trash2 onClick={() => removeFromCart(idx)} className="w-4 h-4 text-red-500"/></div></div>))}</div>
-                    <div className="space-y-2 border-t pt-4 text-sm text-gray-600">
-                        <div className="flex justify-between">
-                            <span>Subtotal</span>
-                            <span>R$ {productTotal.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span>Entrega</span>
-                            <span className={activeDeliveryFee === 0 ? 'text-green-600 font-bold' : ''}>
-                                {activeDeliveryFee === 0 ? 'Grátis' : `R$ ${activeDeliveryFee.toFixed(2)}`}
-                            </span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="flex items-center gap-1 text-xs">Taxa de Serviço</span>
-                            <span>R$ {serviceFeeValue.toFixed(2)}</span>
-                        </div>
-                        {appliedCoupon && (
-                            <div className="flex justify-between text-green-600 font-bold">
-                                <span>Desconto</span>
-                                <span>- R$ {discountAmount.toFixed(2)}</span>
+                    {/* --- Scrollable Content --- */}
+                    <div className="overflow-y-auto px-6 flex-1">
+                        <div className="flex bg-gray-100 p-1 rounded-xl mb-4"><button onClick={() => setDeliveryMethod('delivery')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${deliveryMethod === 'delivery' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Entrega</button><button onClick={() => setDeliveryMethod('pickup')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${deliveryMethod === 'pickup' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Retirada</button></div>
+                        
+                        {deliveryMethod === 'pickup' && activeCompanyData?.address && (
+                            <div className="bg-orange-50 p-3 rounded-xl border border-orange-100 mb-4 text-sm animate-fade-in">
+                                <p className="font-bold text-orange-800 flex items-center gap-1 mb-1">
+                                    <Store className="w-4 h-4"/> Retirar em:
+                                </p>
+                                <p className="text-gray-700">
+                                    {activeCompanyData.address.street}, {activeCompanyData.address.number}
+                                    <br/>
+                                    <span className="text-xs">{activeCompanyData.address.neighborhood} - {activeCompanyData.address.city}</span>
+                                </p>
                             </div>
                         )}
-                    </div>
-                    
-                    <div className="border-t pt-4 mt-4">
-                        {appliedCoupon ? (
-                            <div className="bg-green-50 p-3 rounded-xl border border-green-200">
-                                <div className="flex justify-between items-center">
-                                    <div className="flex items-center gap-2">
-                                        <Ticket className="w-5 h-5 text-green-600" />
-                                        <p className="font-bold text-green-800">Cupom Aplicado: {appliedCoupon.code}</p>
+
+                        <div className="mb-4">{cart.map((i, idx) => (<div key={idx} className="flex justify-between border-b py-2"><div>{i.quantity}x {i.product.name}</div><div className="flex gap-2 font-bold">R$ {i.finalPrice.toFixed(2)} <Trash2 onClick={() => removeFromCart(idx)} className="w-4 h-4 text-red-500"/></div></div>))}</div>
+                        <div className="space-y-2 border-t pt-4 text-sm text-gray-600">
+                            <div className="flex justify-between">
+                                <span>Subtotal</span>
+                                <span>R$ {productTotal.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span>Entrega</span>
+                                <span className={activeDeliveryFee === 0 ? 'text-green-600 font-bold' : ''}>
+                                    {activeDeliveryFee === 0 ? 'Grátis' : `R$ ${activeDeliveryFee.toFixed(2)}`}
+                                </span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="flex items-center gap-1 text-xs">Taxa de Serviço</span>
+                                <span>R$ {serviceFeeValue.toFixed(2)}</span>
+                            </div>
+                            {appliedCoupon && (
+                                <div className="flex justify-between text-green-600 font-bold">
+                                    <span>Desconto</span>
+                                    <span>- R$ {discountAmount.toFixed(2)}</span>
+                                </div>
+                            )}
+                        </div>
+                        
+                        <div className="border-t pt-4 mt-4">
+                            {appliedCoupon ? (
+                                <div className="bg-green-50 p-3 rounded-xl border border-green-200">
+                                    <div className="flex justify-between items-center">
+                                        <div className="flex items-center gap-2">
+                                            <Ticket className="w-5 h-5 text-green-600" />
+                                            <p className="font-bold text-green-800">Cupom Aplicado: {appliedCoupon.code}</p>
+                                        </div>
+                                        <button onClick={handleRemoveCoupon} className="p-1 hover:bg-green-100 rounded-full"><X className="w-4 h-4 text-green-700" /></button>
                                     </div>
-                                    <button onClick={handleRemoveCoupon} className="p-1 hover:bg-green-100 rounded-full"><X className="w-4 h-4 text-green-700" /></button>
                                 </div>
-                            </div>
-                        ) : (
-                            <>
-                                <div className="flex gap-2">
-                                    <input type="text" placeholder="Adicionar cupom" value={couponCodeInput} onChange={(e) => setCouponCodeInput(e.target.value)} className="flex-1 bg-gray-100 border border-gray-200 rounded-lg px-4 py-2 text-sm font-mono uppercase outline-none focus:ring-2 focus:ring-brandLight"/>
-                                    <button onClick={handleApplyCoupon} className="bg-gray-800 text-white font-bold px-4 rounded-lg hover:bg-black transition-colors text-sm">Aplicar</button>
-                                </div>
-                                {couponError && <p className="text-xs text-red-500 mt-2">{couponError}</p>}
-                            </>
-                        )}
-                    </div>
+                            ) : (
+                                <>
+                                    <div className="flex gap-2">
+                                        <input type="text" placeholder="Adicionar cupom" value={couponCodeInput} onChange={(e) => setCouponCodeInput(e.target.value)} className="flex-1 bg-gray-100 border border-gray-200 rounded-lg px-4 py-2 text-sm font-mono uppercase outline-none focus:ring-2 focus:ring-brandLight"/>
+                                        <button onClick={handleApplyCoupon} className="bg-gray-800 text-white font-bold px-4 rounded-lg hover:bg-black transition-colors text-sm">Aplicar</button>
+                                    </div>
+                                    {couponError && <p className="text-xs text-red-500 mt-2">{couponError}</p>}
+                                </>
+                            )}
+                        </div>
 
-                    <div className="mt-4 border-t pt-4"><p className="text-xs font-bold text-gray-500 mb-2 uppercase">Pagamento</p><div className="flex gap-2 mb-4"><button onClick={() => setPaymentMethod('cash')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'cash' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-100'}`}><DollarSign/><span className="text-xs font-bold">Dinheiro</span></button><button onClick={() => setPaymentMethod('card')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'card' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-100'}`}><CreditCard/><span className="text-xs font-bold">Cartão</span></button><button onClick={() => setPaymentMethod('pix')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'pix' ? 'border-teal-500 bg-teal-50 text-teal-700' : 'border-gray-100'}`}><QrCode/><span className="text-xs font-bold">Pix</span></button></div>{paymentMethod === 'cash' && (<div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200 mb-4"><label className="text-xs font-bold text-yellow-800 block mb-1">Troco para quanto?</label><input type="number" placeholder="Ex: 50.00" value={changeAmount} onChange={e => setChangeAmount(e.target.value)} className="w-full py-2 outline-none text-gray-800 font-bold bg-transparent border-b border-yellow-300"/></div>)}</div>
-                    <div className="mt-2 flex justify-between font-bold text-xl text-gray-900 border-t pt-2"><span>Total</span><span>R$ {finalTotal.toFixed(2)}</span></div>
-                    <button onClick={handleFinalizeOrder} disabled={isProcessingPayment} className={`w-full text-white font-bold py-3.5 rounded-xl mt-4 transition-colors flex items-center justify-center gap-2 ${isProcessingPayment ? 'bg-gray-400' : 'bg-brand hover:bg-brandHover'}`}>{isProcessingPayment && <Loader2 className="w-5 h-5 animate-spin" />}{isProcessingPayment ? 'Processando...' : (paymentMethod === 'cash' ? 'Finalizar Pedido' : 'Pagar Agora')}</button>
+                        <div className="mt-4 border-t pt-4"><p className="text-xs font-bold text-gray-500 mb-2 uppercase">Pagamento</p><div className="flex gap-2 mb-4"><button onClick={() => setPaymentMethod('cash')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'cash' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-100'}`}><DollarSign/><span className="text-xs font-bold">Dinheiro</span></button><button onClick={() => setPaymentMethod('card')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'card' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-100'}`}><CreditCard/><span className="text-xs font-bold">Cartão</span></button><button onClick={() => setPaymentMethod('pix')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'pix' ? 'border-teal-500 bg-teal-50 text-teal-700' : 'border-gray-100'}`}><QrCode/><span className="text-xs font-bold">Pix</span></button></div>{paymentMethod === 'cash' && (<div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200 mb-4"><label className="text-xs font-bold text-yellow-800 block mb-1">Troco para quanto?</label><input type="number" placeholder="Ex: 50.00" value={changeAmount} onChange={e => setChangeAmount(e.target.value)} className="w-full py-2 outline-none text-gray-800 font-bold bg-transparent border-b border-yellow-300"/></div>)}</div>
+                    </div>
+                    
+                    {/* --- Footer (Fixed) --- */}
+                    <div className="p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] border-t border-gray-100 shrink-0 bg-white">
+                        <div className="flex justify-between font-bold text-xl text-gray-900">
+                            <span>Total</span>
+                            <span>R$ {finalTotal.toFixed(2)}</span>
+                        </div>
+                        <button 
+                            onClick={handleFinalizeOrder} 
+                            disabled={isProcessingPayment} 
+                            className={`w-full text-white font-bold py-3.5 rounded-xl mt-4 transition-colors flex items-center justify-center gap-2 ${isProcessingPayment ? 'bg-gray-400' : 'bg-brand hover:bg-brandHover'}`}
+                        >
+                            {isProcessingPayment && <Loader2 className="w-5 h-5 animate-spin" />}
+                            {isProcessingPayment ? 'Processando...' : (paymentMethod === 'cash' ? 'Finalizar Pedido' : 'Pagar Agora')}
+                        </button>
+                    </div>
                </div>
            </div>
        )}
