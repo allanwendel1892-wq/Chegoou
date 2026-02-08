@@ -1,9 +1,13 @@
 
 
 
+
+
+
+
+
 import React from 'react';
-// FIX: Import the TrendingUp icon for the new Forecast menu item.
-import { LayoutDashboard, UtensilsCrossed, MessageSquare, ShoppingBag, LogOut, Settings, Wallet, TrendingUp } from 'lucide-react';
+import { LayoutDashboard, UtensilsCrossed, MessageSquare, ShoppingBag, LogOut, Settings, Wallet, Ticket } from 'lucide-react';
 import { ViewState } from '../types';
 
 interface SidebarProps {
@@ -21,8 +25,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, isMobileOpen, s
     { id: ViewState.ORDERS, label: 'Pedidos (Kanban)', icon: ShoppingBag },
     { id: ViewState.MENU, label: 'Cardápio', icon: UtensilsCrossed },
     { id: ViewState.FINANCE, label: 'Financeiro', icon: Wallet },
-    // FIX: Add the new menu item for the AI Sales Forecast view.
-    { id: ViewState.FORECAST, label: 'Previsão (IA)', icon: TrendingUp },
+    { id: ViewState.COUPONS, label: 'Cupons', icon: Ticket },
     { id: ViewState.WHATSAPP, label: 'Bot WhatsApp', icon: MessageSquare },
     { id: ViewState.SETTINGS, label: 'Configurações', icon: Settings },
   ];

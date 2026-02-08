@@ -1,6 +1,4 @@
 
-
-
 export type UserRole = 'admin' | 'partner' | 'courier' | 'client';
 
 export interface Address {
@@ -159,6 +157,10 @@ export interface Order {
   repasseValue?: number; // Valor líquido para o restaurante
   repasseDate?: string; // Data que o valor foi creditado (geralmente data da entrega)
   waitingFunds?: boolean; // deprecated, use repasseStatus logic
+
+  // --- NOVOS CAMPOS PARA CUPONS ---
+  couponCode?: string;
+  discountAmount?: number;
 }
 
 export interface FinancialRecord {
@@ -182,6 +184,17 @@ export interface WithdrawalRequest {
   bankInfo: string; // Chave PIX e Tipo
 }
 
+export interface Coupon {
+    id: string;
+    companyId: string;
+    code: string; // ex: DEZEMBRO10
+    discountType: 'percentage' | 'fixed';
+    discountValue: number;
+    minOrderValue?: number;
+    isActive: boolean;
+    createdAt: string;
+}
+
 export enum ViewState {
   DASHBOARD = 'dashboard',
   ORDERS = 'orders', // Kanban
@@ -189,8 +202,7 @@ export enum ViewState {
   WHATSAPP = 'whatsapp',
   SETTINGS = 'settings',
   FINANCE = 'finance', // NEW
-  // FIX: Add FORECAST to ViewState enum to support the new AI forecast view.
-  FORECAST = 'forecast',
+  COUPONS = 'coupons', // NEW
 }
 
 export interface SalesHistoryItem {
@@ -198,16 +210,14 @@ export interface SalesHistoryItem {
   revenue: number;
   ordersCount: number;
 }
-// FIX: Add ForecastData and PredictedProduct interfaces for the AI forecast feature.
-export interface PredictedProduct {
-  productName: string;
-  reasoning: string;
-  confidence: number;
-  estimatedQuantity: number;
-}
-
+// FIX: Add ForecastData type definition to resolve import error.
 export interface ForecastData {
-  predictedProducts: PredictedProduct[];
-  confidenceScore: number;
-  insight: string;
+    predictedProducts: {
+        productName: string;
+        reasoning: string;
+        confidence: number;
+        estimatedQuantity: number;
+    }[];
+    confidenceScore: number;
+    insight: string;
 }

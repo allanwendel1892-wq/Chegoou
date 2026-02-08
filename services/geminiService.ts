@@ -1,6 +1,6 @@
 
-// FIX: Import SalesHistoryItem and ForecastData types
 import { GoogleGenAI, Type } from "@google/genai";
+// FIX: Import ForecastData type to be used in the new forecast function.
 import { Product, SalesHistoryItem, ForecastData } from "../types";
 
 // Initialize with fallback to prevent app crash if env var is missing or undefined
@@ -70,6 +70,82 @@ export const enhanceProductImage = async (originalBase64: string, productName: s
   }
 };
 
+// FIX: Implement the missing generateSalesForecast function.
+/**
+ * Analyzes sales history and product list to forecast future sales using Gemini.
+ */
+export const generateSalesForecast = async (salesHistory: SalesHistoryItem[], products: Product[]): Promise<ForecastData | null> => {
+  // Use a more powerful model for complex reasoning tasks like forecasting.
+  const model = "gemini-3-pro-preview";
+
+  try {
+    const salesHistoryContext = salesHistory.map(item => `Data: ${item.date}, Faturamento: R$ ${item.revenue.toFixed(2)}, Pedidos: ${item.ordersCount}`).join('\n');
+    const menuContext = products.map(p => `${p.name} (Categoria: ${p.category}, Preço: R$ ${p.price.toFixed(2)})`).join('\n');
+
+    const prompt = `
+      Você é uma IA especialista em previsão de vendas para um restaurante fast-food (delivery).
+      Analise o histórico de vendas e o cardápio atual para prever os 2 produtos com maior probabilidade de venda para o dia de amanhã.
+
+      Histórico de Vendas (últimos dias):
+      ${salesHistoryContext}
+
+      Cardápio Atual:
+      ${menuContext}
+
+      Tarefa:
+      1. Identifique padrões e tendências nos dados de vendas (ex: dias da semana, produtos mais vendidos).
+      2. Selecione os 2 produtos com maior potencial de venda para amanhã.
+      3. Para cada produto, forneça uma breve justificativa (reasoning) em uma frase, uma porcentagem de confiança (confidence) de 0 a 100, e uma quantidade estimada de venda (estimatedQuantity).
+      4. Forneça um score de confiança geral para a previsão (confidenceScore) de 0 a 100, baseado na qualidade e quantidade de dados históricos.
+      5. Escreva um insight curto e acionável sobre a previsão (ex: "Foco nos combos de hambúrguer, pois a tendência de lanches está em alta para o fim de semana.").
+      
+      Retorne APENAS o objeto JSON, sem nenhum texto, markdown ou formatação extra.
+    `;
+
+    const responseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        predictedProducts: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              productName: { type: Type.STRING, description: "Nome exato do produto como no cardápio." },
+              reasoning: { type: Type.STRING, description: "Justificativa curta para a previsão." },
+              confidence: { type: Type.NUMBER, description: "Confiança na previsão do produto (0-100)." },
+              estimatedQuantity: { type: Type.NUMBER, description: "Estimativa de unidades a serem vendidas." },
+            },
+            required: ['productName', 'reasoning', 'confidence', 'estimatedQuantity'],
+          },
+        },
+        confidenceScore: { type: Type.NUMBER, description: "Confiança geral na previsão (0-100)." },
+        insight: { type: Type.STRING, description: "Insight acionável baseado na análise." },
+      },
+      required: ['predictedProducts', 'confidenceScore', 'insight'],
+    };
+
+    const response = await ai.models.generateContent({
+      model: model,
+      contents: [{ parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: responseSchema,
+        temperature: 0.2, // Lower temperature for more predictable, analytical responses
+      },
+    });
+
+    if (response.text) {
+      return JSON.parse(response.text.trim());
+    }
+    return null;
+
+  } catch (error) {
+    console.error("AI Sales Forecast Error:", error);
+    return null;
+  }
+};
+
+
 export const parseWhatsAppMessage = async (message: string, menu: Product[]) => {
   const model = "gemini-3-flash-preview";
   
@@ -93,112 +169,43 @@ export const parseWhatsAppMessage = async (message: string, menu: Product[]) => 
             "reply": "string"
         }
       `;
+      // FIX: Add response schema for more reliable JSON output.
+      const responseSchema = {
+        type: Type.OBJECT,
+        properties: {
+            items: {
+                type: Type.ARRAY,
+                items: {
+                    type: Type.OBJECT,
+                    properties: {
+                        productName: { type: Type.STRING },
+                        quantity: { type: Type.NUMBER }
+                    },
+                    required: ['productName', 'quantity']
+                }
+            },
+            reply: { type: Type.STRING }
+        },
+        required: ['items', 'reply']
+      };
 
       const response = await ai.models.generateContent({
           model: model,
           contents: [{ parts: [{ text: prompt }] }],
-          config: { responseMimeType: "application/json" }
+          // FIX: Use responseSchema to ensure valid JSON is returned.
+          config: { 
+            responseMimeType: "application/json",
+            responseSchema: responseSchema
+          }
       });
 
       if (response.text) {
-          return JSON.parse(response.text);
+          // FIX: Trim response to avoid parsing errors.
+          return JSON.parse(response.text.trim());
       }
   } catch (e) {
       console.error("WhatsApp Bot Error", e);
   }
 
   return { items: [], reply: "Desculpe, não entendi. Pode repetir?" };
-};
-
-// FIX: Add generateSalesForecast function to provide AI-powered sales predictions.
-/**
- * Generates a sales forecast for the next day based on historical data and product list.
- * @param salesHistory - Array of past sales data.
- * @param products - Array of available products.
- * @returns A promise that resolves to ForecastData or null.
- */
-export const generateSalesForecast = async (
-  salesHistory: SalesHistoryItem[],
-  products: Product[]
-): Promise<ForecastData | null> => {
-  const model = "gemini-3-pro-preview"; // Use a powerful model for analysis
-
-  try {
-    const historyContext = salesHistory.length > 0 ? salesHistory
-      .map((item) => `Data: ${item.date}, Receita: R$ ${item.revenue.toFixed(2)}, Pedidos: ${item.ordersCount}`)
-      .join("\n") : "Nenhum dado de venda recente.";
-
-    const productContext = products.length > 0 ? products
-        .map((p) => `${p.name} (Categoria: ${p.category})`)
-        .join("\n") : "Nenhum produto cadastrado.";
-
-    const prompt = `
-      Você é um analista de dados especialista em delivery de comida e seu trabalho é prever vendas para o dia seguinte.
-      
-      Dados Históricos de Vendas (últimos dias):
-      ${historyContext}
-
-      Produtos Disponíveis no Cardápio:
-      ${productContext}
-
-      Tarefa:
-      1. Analise os dados históricos de vendas para identificar padrões, como produtos mais vendidos e tendências.
-      2. Com base na sua análise, preveja os 2 produtos com maior probabilidade de serem vendidos AMANHÃ.
-      3. Para cada produto, forneça uma razão curta (máximo 15 palavras) e convincente para a previsão.
-      4. Estime uma quantidade de vendas para cada produto previsto.
-      5. Forneça um insight geral sobre a previsão e uma pontuação de confiança (0-100) para a previsão geral.
-
-      Retorne APENAS um JSON estritamente no formato abaixo. Não inclua markdown (\`\`\`json ... \`\`\`).
-    `;
-
-    const responseSchema = {
-        type: Type.OBJECT,
-        properties: {
-            predictedProducts: {
-                type: Type.ARRAY,
-                items: {
-                    type: Type.OBJECT,
-                    properties: {
-                        productName: { type: Type.STRING, description: "Nome exato do produto." },
-                        reasoning: { type: Type.STRING, description: "Justificativa curta para a previsão." },
-                        confidence: { type: Type.NUMBER, description: "Confiança na previsão deste item (0-100)." },
-                        estimatedQuantity: { type: Type.NUMBER, description: "Quantidade estimada de venda." }
-                    },
-                    required: ["productName", "reasoning", "confidence", "estimatedQuantity"]
-                },
-                description: "Uma lista com os 2 produtos mais prováveis de vender."
-            },
-            confidenceScore: { type: Type.NUMBER, description: "Pontuação de confiança geral na previsão (0-100)." },
-            insight: { type: Type.STRING, description: "Um breve insight sobre a análise." }
-        },
-        required: ["predictedProducts", "confidenceScore", "insight"]
-    };
-
-    const response = await ai.models.generateContent({
-      model: model,
-      contents: [{ parts: [{ text: prompt }] }],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: responseSchema,
-      },
-    });
-
-    if (response.text) {
-      try {
-        const parsedJson = JSON.parse(response.text.trim());
-        // Basic validation
-        if (parsedJson.predictedProducts && typeof parsedJson.confidenceScore === 'number' && parsedJson.insight) {
-            return parsedJson as ForecastData;
-        }
-      } catch (e) {
-        console.error("AI Forecast JSON Parse Error:", e, "Raw Text:", response.text);
-        return null;
-      }
-    }
-    return null;
-
-  } catch (error) {
-    console.error("AI Sales Forecast API Error:", error);
-    return null;
-  }
 };

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
+// FIX: Import ForecastData type. This is now defined in types.ts.
 import { Product, SalesHistoryItem, ForecastData } from '../types';
+// FIX: Import generateSalesForecast function. This is now defined in services/geminiService.ts.
 import { generateSalesForecast } from '../services/geminiService';
 import { Sparkles, TrendingUp, AlertTriangle, Loader2, BarChart2, Target, RefreshCw } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
@@ -15,7 +17,8 @@ const ForecastView: React.FC<ForecastViewProps> = ({ products, salesHistory }) =
 
   // Function to fetch forecast data from the AI service
   const fetchForecast = async () => {
-    if (products.length === 0) {
+    setLoading(true);
+    if (products.length === 0 || salesHistory.length === 0) {
       setForecast(null);
       setLoading(false);
       return;
@@ -28,6 +31,7 @@ const ForecastView: React.FC<ForecastViewProps> = ({ products, salesHistory }) =
   // Run only once on the initial component mount to get the first forecast
   useEffect(() => {
     fetchForecast();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Empty dependency array ensures this is called only once.
 
   // Manual refresh handler triggered by the user
@@ -53,7 +57,7 @@ const ForecastView: React.FC<ForecastViewProps> = ({ products, salesHistory }) =
         <div className="text-center py-10">
             <AlertTriangle className="w-12 h-12 text-gray-300 mx-auto mb-4" />
             <h3 className="font-bold text-gray-700">Não foi possível gerar a previsão</h3>
-            <p className="text-gray-500 text-sm mb-6">Verifique se você possui produtos cadastrados ou tente novamente.</p>
+            <p className="text-gray-500 text-sm mb-6">Verifique se você possui produtos cadastrados e histórico de vendas ou tente novamente.</p>
             <button 
                 onClick={handleRefresh}
                 disabled={loading}

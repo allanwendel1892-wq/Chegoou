@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Product, Order, Company } from '../types';
-import { MessageSquare, Users, Send, CheckCircle, AlertCircle, Clock, Calendar, RefreshCw, Zap, Search, Filter, Play, Pause, StopCircle } from 'lucide-react';
+import { MessageSquare, Users, Send, CheckCircle, AlertCircle, Clock, Calendar, RefreshCw, Zap, Search, Filter, Play, Pause, StopCircle, ArrowLeft } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
 interface WhatsAppBotViewProps {
@@ -26,6 +26,7 @@ interface QueueItem {
 }
 
 const N8N_WEBHOOK_URL = "https://n8n-webhook.znzrqn.easypanel.host/webhook/chegooudisparo";
+const VERCEL_APP_URL = "https://chegoou.vercel.app";
 
 const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, updateCompany }) => {
   const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
@@ -147,13 +148,17 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
 
               try {
                   // REAL N8N COMMUNICATION
+                  // Construct the final message with the deep link
+                  const restaurantLink = `${VERCEL_APP_URL}?restaurantId=${company.id}`;
+                  const finalMessage = `${messageRef.current}\n\nPeça agora mesmo pelo nosso app:\n${restaurantLink}`;
+
                   const response = await fetch(N8N_WEBHOOK_URL, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
                           phone: currentItem.phone,
                           name: currentItem.name,
-                          message: messageRef.current,
+                          message: finalMessage, // Use the final message with the link
                           companyId: company.id,
                           companyName: company.name
                       })
@@ -162,13 +167,10 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
                   if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
 
                   // Update DB Stats
+                  // This is now handled by the webhook, so we just update the local state for immediate feedback
                   const newCount = (company.messagesSentToday || 0) + 1;
                   updateCompany({ messagesSentToday: newCount, lastMessageDate: todayStr });
-                  await supabase.from('companies').update({ 
-                      messagesSentToday: newCount, 
-                      lastMessageDate: todayStr 
-                  }).eq('id', company.id);
-
+                  
                   // Set sent status
                   setQueue(prev => prev.map((item, idx) => idx === pendingIndex ? { ...item, status: 'sent' } : item));
 
@@ -176,24 +178,21 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
                   console.error("Queue Error:", e);
                   setQueue(prev => prev.map((item, idx) => idx === pendingIndex ? { ...item, status: 'error', log: e.message } : item));
               }
-
-              // Trigger next iteration automatically by updating state (which useEffect watches if we depended on queue, but here we need to force re-run or use recursion inside effect?)
-              // Ideally, useEffect should depend on queue, but that causes loops. 
-              // We'll use a hack: Re-trigger by toggling a hidden state or just calling a function if we were outside effect.
-              // Since we are inside effect, we can't easily recurse without cleaning up.
-              // BUT: Updating 'queue' triggers the useEffect [queue] if added.
               
           }, delay);
       };
 
-      processQueue();
+      if (queueStatus === 'running') {
+        processQueue();
+      }
 
       return () => {
           clearTimeout(timeoutId);
           clearInterval(intervalId);
       };
-  }, [queueStatus, queue.length, queue.filter(i => i.status === 'sent' || i.status === 'error').length]); 
-  // Dependency on 'completed items count' ensures it runs again after an item finishes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queueStatus, queue]); 
+  
 
   // --- ACTIONS ---
 
@@ -218,7 +217,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
       }
   };
 
-  const startQueue = () => {
+  const startQueue = async () => {
       if (remainingBlasts <= 0) {
           alert("Limite diário de disparos atingido! Volte amanhã.");
           return;
@@ -227,6 +226,14 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
           alert("Digite uma mensagem.");
           return;
       }
+
+      // Update company stats immediately
+      const newCount = messagesSentToday + 1;
+      updateCompany({ messagesSentToday: newCount, lastMessageDate: todayStr });
+      await supabase.from('companies').update({ 
+          messagesSentToday: newCount, 
+          lastMessageDate: todayStr 
+      }).eq('id', company.id);
 
       // Initialize Queue
       const newQueue: QueueItem[] = selectedLeads.map(phone => {
@@ -335,15 +342,18 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
 
   if (viewMode === 'compose') {
       return (
-          <div className="flex flex-col h-[calc(100vh-6rem)] max-w-4xl mx-auto">
+          <div className="flex flex-col h-full max-w-4xl mx-auto">
               <div className="mb-6 flex items-center gap-4">
                   <button onClick={() => setViewMode('list')} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-                      <Users className="w-6 h-6 text-gray-600"/>
+                      <ArrowLeft className="w-6 h-6 text-gray-600"/>
                   </button>
-                  <h2 className="text-2xl font-bold text-gray-800">Nova Campanha</h2>
+                  <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                    <Users className="w-6 h-6 text-gray-500"/>
+                    Disparo em Massa
+                  </h2>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-full">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 flex-1">
                   {/* Preview da Lista */}
                   <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 col-span-1 h-fit">
                       <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2">
@@ -385,7 +395,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
                           
                           <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-100 mb-4 text-xs text-yellow-800 flex items-center gap-2">
                               <AlertCircle className="w-4 h-4"/>
-                              <span>Este disparo consumirá <strong>1</strong> do seu limite diário de <strong>{remainingBlasts}</strong> restantes.</span>
+                              <span>Este disparo consumirá <strong>1</strong> do seu limite diário de <strong>{remainingBlasts}</strong> restantes. Um link para seu restaurante será adicionado ao final da mensagem.</span>
                           </div>
 
                           <div className="flex gap-3">
@@ -412,7 +422,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
 
   // --- VIEW MODE: LIST ---
   return (
-    <div className="flex flex-col h-[calc(100vh-6rem)] gap-6">
+    <div className="flex flex-col h-full gap-6">
       
       {/* Header Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

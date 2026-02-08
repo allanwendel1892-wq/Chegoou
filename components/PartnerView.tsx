@@ -1,13 +1,19 @@
 
 
+
+
+
+
+
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem, WithdrawalRequest, ForecastData } from '../types';
+import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem, WithdrawalRequest, Coupon } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
 import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle, ArrowRight, Lock, Unlock, Banknote, AlertCircle, Info, MessageSquare, CreditCard, Printer, TrendingUp } from 'lucide-react';
 import DashboardView from './DashboardView';
 import WhatsAppBotView from './WhatsAppBotView';
-import ForecastView from './ForecastView';
 import Sidebar from './Sidebar';
+import CouponsView from './CouponsView';
 import { supabase } from '../services/supabaseClient';
 
 interface PartnerViewProps {
@@ -296,6 +302,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const [mapError, setMapError] = useState(false);
   const [withdrawHistory, setWithdrawHistory] = useState<WithdrawalRequest[]>([]);
   const [isLoadingFinance, setIsLoadingFinance] = useState(false);
+  const [coupons, setCoupons] = useState<Coupon[]>([]);
   
   useEffect(() => { setLocalCompany(company); }, [company]);
 
@@ -387,7 +394,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                   </div>
                   <div class="flex" style="font-size: 16px; font-weight: bold; margin-top: 5px;">
                       <span>TOTAL:</span>
-                      <span>R$ {order.total.toFixed(2)}</span>
+                      <span>R$ ${order.total.toFixed(2)}</span>
                   </div>
 
                   <div class="line"></div>
@@ -510,6 +517,44 @@ const PartnerView: React.FC<PartnerViewProps> = ({
         fetchWithdrawals();
     }
   }, [view, company.id]);
+  
+  // --- CUPONS: Carregar dados de cupons ---
+  useEffect(() => {
+    const fetchCoupons = async () => {
+      const { data, error } = await supabase
+        .from('coupons')
+        .select('*')
+        .eq('companyId', company.id)
+        .order('createdAt', { ascending: false });
+      if (data) setCoupons(data);
+    };
+    if (view === ViewState.COUPONS) {
+      fetchCoupons();
+    }
+  }, [view, company.id]);
+
+  const handleSaveCoupon = async (coupon: Coupon) => {
+    const { data, error } = await supabase.from('coupons').upsert(coupon).select();
+    if (error) {
+      alert('Erro ao salvar cupom: ' + error.message);
+    } else if (data) {
+      setCoupons(prev => {
+        const exists = prev.find(c => c.id === data[0].id);
+        if (exists) return prev.map(c => c.id === data[0].id ? data[0] : c);
+        return [data[0], ...prev];
+      });
+    }
+  };
+
+  const handleDeleteCoupon = async (couponId: string) => {
+    const { error } = await supabase.from('coupons').delete().eq('id', couponId);
+    if (error) {
+      alert('Erro ao excluir cupom: ' + error.message);
+    } else {
+      setCoupons(prev => prev.filter(c => c.id !== couponId));
+    }
+  };
+
 
   const financialSummary = useMemo(() => {
       // Pedidos WhatsApp ou Cash são ignorados do saldo da plataforma pois o restaurante recebe direto
@@ -1381,6 +1426,15 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                     </div>
                 </div>
             )}
+            
+            {view === ViewState.COUPONS && (
+                <CouponsView 
+                    coupons={coupons}
+                    onSave={handleSaveCoupon}
+                    onDelete={handleDeleteCoupon}
+                    companyId={company.id}
+                />
+            )}
 
             {view === ViewState.ORDERS && (
                 <div className="h-[calc(100vh-8rem)] flex flex-col">
@@ -1679,10 +1733,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                 />
             )}
             
-            {view === ViewState.FORECAST && (
-              <ForecastView products={products} salesHistory={calculatedSalesHistory} />
-            )}
-
             {view === ViewState.SETTINGS && (
                 <div className="max-w-2xl mx-auto bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
                     {/* ... (Existing Settings Code) ... */}
