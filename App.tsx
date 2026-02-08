@@ -1,7 +1,7 @@
 
 
 import React, { useState, useEffect, useRef } from 'react';
-import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest } from './types';
+import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest, Coupon } from './types';
 import AuthView from './components/AuthView';
 import AdminView from './components/AdminView';
 import PartnerView from './components/PartnerView';
@@ -48,6 +48,7 @@ const App: React.FC = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [coupons, setCoupons] = useState<Coupon[]>([]);
   
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
   const [chats, setChats] = useState<Record<string, ChatMessage[]>>({});
@@ -251,6 +252,11 @@ const App: React.FC = () => {
           if (usersData) setUsers(usersData);
 
           try {
+            const { data: couponsData, error: couponsError } = await supabase.from('coupons').select('*');
+            if (!couponsError && couponsData) setCoupons(couponsData);
+          } catch(e) {}
+
+          try {
             const { data: withdrawalData, error: wdError } = await supabase.from('withdrawal_requests').select('*');
             if (!wdError && withdrawalData) setWithdrawals(withdrawalData);
           } catch (e) {}
@@ -378,7 +384,7 @@ const App: React.FC = () => {
   };
 
   const handlePlaceOrder = async (
-      cartItems: any[], companyId: string, finalTotal: number, deliveryMethod: 'delivery' | 'pickup', serviceFee: number, deliveryFee: number, subtotal: number, paymentMethod: 'cash' | 'card' | 'pix', changeFor?: number
+      cartItems: any[], companyId: string, finalTotal: number, deliveryMethod: 'delivery' | 'pickup', serviceFee: number, deliveryFee: number, subtotal: number, paymentMethod: 'cash' | 'card' | 'pix', changeFor?: number, couponCode?: string, discountAmount?: number
   ): Promise<boolean> => {
     if (!currentUser || !currentUser.address) {
         alert("Selecione um endereço.");
@@ -393,18 +399,19 @@ const App: React.FC = () => {
     const FIXED_SERVICE_FEE = 0.49; // Agora fixo em 49 centavos
     
     let repasseValue = 0;
+    const subtotalAfterDiscount = subtotal - (discountAmount || 0);
 
     if (isOnlinePayment) {
         if (company.deliveryType === 'own') {
             // Entrega Própria (Restaurante):
-            // Restaurante recebe: Comida (Subtotal) + Entrega.
+            // Restaurante recebe: Comida (com desconto) + Entrega.
             // Plataforma fica com: Taxa de Serviço.
-            repasseValue = subtotal + deliveryFee;
+            repasseValue = subtotalAfterDiscount + deliveryFee;
         } else {
             // Entrega Chegoou (Plataforma):
-            // Restaurante recebe: Apenas Comida (Subtotal).
+            // Restaurante recebe: Apenas Comida (com desconto).
             // Plataforma fica com: Taxa de Serviço + Taxa de Entrega.
-            repasseValue = subtotal;
+            repasseValue = subtotalAfterDiscount;
         }
     } else {
         // DINHEIRO
@@ -416,7 +423,7 @@ const App: React.FC = () => {
             repasseValue = -1 * (deliveryFee + FIXED_SERVICE_FEE);
         } else {
             // Entrega Própria + Dinheiro.
-            // O Restaurante recebe tudo. A plataforma não cobra a taxa de serviço aqui conforme regra "desconsidera".
+            // O Restaurante recebe tudo. A plataforma não cobra a taxa de serviço aqui.
             repasseValue = 0;
         }
     }
@@ -450,7 +457,9 @@ const App: React.FC = () => {
         deliveryType: company.deliveryType,
         paymentStatus: 'pending',
         repasseValue: repasseValue,
-        repasseStatus: 'pending', 
+        repasseStatus: 'pending',
+        couponCode: couponCode,
+        discountAmount: discountAmount
     };
 
     const { error } = await supabase.from('orders').insert([newOrder]);
@@ -704,6 +713,7 @@ const App: React.FC = () => {
             onPlaceOrder={handlePlaceOrder}
             onLogout={handleLogout}
             orders={orders} 
+            coupons={coupons}
             onUpdateUser={handleUpdateUser}
             chats={chats}
             onSendMessage={handleSendMessage}

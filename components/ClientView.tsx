@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Company, Product, Order, ChatMessage, Address, CreditCard as CreditCardType, ProductOption, User } from '../types';
-import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, Timer, Settings, LogOut, Crosshair, AlertCircle, ClipboardCheck, ScanLine, XCircle } from 'lucide-react';
+import { Company, Product, Order, ChatMessage, Address, CreditCard as CreditCardType, ProductOption, User, Coupon } from '../types';
+import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, Timer, Settings, LogOut, Crosshair, AlertCircle, ClipboardCheck, ScanLine, XCircle, Ticket } from 'lucide-react';
 
 declare global {
   interface Window {
@@ -14,7 +14,8 @@ interface ClientViewProps {
   companies: Company[];
   products: Product[];
   orders: Order[];
-  onPlaceOrder: (items: any[], companyId: string, total: number, deliveryMethod: 'delivery' | 'pickup', serviceFee: number, deliveryFee: number, subtotal: number, paymentMethod: 'cash' | 'card' | 'pix', changeFor?: number) => Promise<boolean>;
+  coupons: Coupon[];
+  onPlaceOrder: (items: any[], companyId: string, total: number, deliveryMethod: 'delivery' | 'pickup', serviceFee: number, deliveryFee: number, subtotal: number, paymentMethod: 'cash' | 'card' | 'pix', changeFor?: number, couponCode?: string, discountAmount?: number) => Promise<boolean>;
   onLogout: () => void;
   onUpdateUser: (user: User) => void;
   chats: Record<string, ChatMessage[]>;
@@ -67,7 +68,7 @@ const CATEGORIES = [
 ];
 
 const ClientView: React.FC<ClientViewProps> = ({ 
-    user, companies, products, orders, onPlaceOrder, onLogout, onUpdateUser,
+    user, companies, products, orders, coupons, onPlaceOrder, onLogout, onUpdateUser,
     chats, onSendMessage, onAddAddress, onRemoveAddress, onAddCard, onRemoveCard,
     onCancelOrder
 }) => {
@@ -106,6 +107,11 @@ const ClientView: React.FC<ClientViewProps> = ({
   const [mapAddress, setMapAddress] = useState('');
   const [isMapDragging, setIsMapDragging] = useState(false);
   const [mapError, setMapError] = useState(false);
+
+  // --- NEW COUPON STATES ---
+  const [couponCodeInput, setCouponCodeInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
+  const [couponError, setCouponError] = useState<string>('');
 
   useEffect(() => {
     let map: any;
@@ -223,7 +229,47 @@ const ClientView: React.FC<ClientViewProps> = ({
   const productTotal = cart.reduce((acc, item) => acc + (item.finalPrice * item.quantity), 0); 
   const activeDeliveryFee = deliveryMethod === 'pickup' ? 0 : (activeCompanyData ? activeCompanyData.deliveryFeeCalc : 0);
   const serviceFeeValue = 0.49; // TAXA FIXA
-  const finalTotal = productTotal + activeDeliveryFee + serviceFeeValue;
+  
+  const discountAmount = useMemo(() => {
+    if (!appliedCoupon) return 0;
+    let discount = 0;
+    if (appliedCoupon.discountType === 'fixed') {
+        discount = appliedCoupon.discountValue;
+    } else { // percentage
+        discount = productTotal * (appliedCoupon.discountValue / 100);
+    }
+    return Math.min(discount, productTotal); // Ensure discount isn't more than total
+  }, [appliedCoupon, productTotal]);
+
+  const finalTotal = productTotal + activeDeliveryFee + serviceFeeValue - discountAmount;
+
+  const handleApplyCoupon = () => {
+    setCouponError('');
+    if (!couponCodeInput.trim()) return;
+
+    const companyCoupons = coupons.filter(c => c.companyId === selectedCompany?.id);
+    const foundCoupon = companyCoupons.find(c => c.code.toUpperCase() === couponCodeInput.trim().toUpperCase());
+
+    if (!foundCoupon) {
+        setCouponError('Cupom inválido ou não encontrado.');
+        return;
+    }
+    if (!foundCoupon.isActive) {
+        setCouponError('Este cupom não está mais ativo.');
+        return;
+    }
+    if (foundCoupon.minOrderValue && productTotal < foundCoupon.minOrderValue) {
+        setCouponError(`O valor mínimo do pedido para este cupom é de R$ ${foundCoupon.minOrderValue.toFixed(2)}.`);
+        return;
+    }
+    setAppliedCoupon(foundCoupon);
+    setCouponCodeInput('');
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponError('');
+  };
 
   const handleFinalizeOrder = async () => {
       let changeForValue = 0;
@@ -232,13 +278,16 @@ const ClientView: React.FC<ClientViewProps> = ({
           if (changeForValue < finalTotal) { alert("Troco deve ser maior que o total."); return; }
       }
       setIsProcessingPayment(true);
-      const success = await onPlaceOrder(cart, cart[0].product.companyId, finalTotal, deliveryMethod, serviceFeeValue, activeDeliveryFee, productTotal, paymentMethod, changeForValue); 
+      const success = await onPlaceOrder(cart, cart[0].product.companyId, finalTotal, deliveryMethod, serviceFeeValue, activeDeliveryFee, productTotal, paymentMethod, changeForValue, appliedCoupon?.code, discountAmount); 
       setIsProcessingPayment(false);
       if (success) {
           setIsCartOpen(false); 
           setCart([]); 
           setSelectedCompany(null); 
           setChangeAmount('');
+          setAppliedCoupon(null);
+          setCouponError('');
+          setCouponCodeInput('');
           setActiveTab('orders');
       }
   };
@@ -268,6 +317,7 @@ const ClientView: React.FC<ClientViewProps> = ({
     if (cart.length > 0 && cart[0].product.companyId !== product.companyId) {
         if (!window.confirm("Limpar carrinho atual?")) return;
         setCart([]);
+        setAppliedCoupon(null); // Clear coupon when cart changes
     }
     setCart([...cart, {product, quantity: 1, selectedOptions, finalPrice}]);
     setIsCartOpen(true); 
@@ -684,7 +734,7 @@ const ClientView: React.FC<ClientViewProps> = ({
        {isCartOpen && (
            <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4">
                <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] shadow-2xl animate-slide-up flex flex-col max-h-[90vh]">
-                    <div className="flex justify-between items-center mb-6"><h2 className="font-bold text-xl text-gray-800">Sacola</h2><button onClick={() => setIsCartOpen(false)}><X/></button></div>
+                    <div className="flex justify-between items-center mb-6"><h2 className="font-bold text-xl text-gray-800">Sacola</h2><button onClick={() => {setIsCartOpen(false); setAppliedCoupon(null); setCouponError(''); setCouponCodeInput('');}}><X/></button></div>
                     <div className="flex bg-gray-100 p-1 rounded-xl mb-4"><button onClick={() => setDeliveryMethod('delivery')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${deliveryMethod === 'delivery' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Entrega</button><button onClick={() => setDeliveryMethod('pickup')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${deliveryMethod === 'pickup' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Retirada</button></div>
                     
                     {deliveryMethod === 'pickup' && activeCompanyData?.address && (
@@ -712,14 +762,40 @@ const ClientView: React.FC<ClientViewProps> = ({
                                 {activeDeliveryFee === 0 ? 'Grátis' : `R$ ${activeDeliveryFee.toFixed(2)}`}
                             </span>
                         </div>
-                        
                         <div className="flex justify-between">
-                            <span className="flex items-center gap-1 text-xs">
-                                Taxa de Serviço
-                            </span>
+                            <span className="flex items-center gap-1 text-xs">Taxa de Serviço</span>
                             <span>R$ {serviceFeeValue.toFixed(2)}</span>
                         </div>
+                        {appliedCoupon && (
+                            <div className="flex justify-between text-green-600 font-bold">
+                                <span>Desconto</span>
+                                <span>- R$ {discountAmount.toFixed(2)}</span>
+                            </div>
+                        )}
                     </div>
+                    
+                    <div className="border-t pt-4 mt-4">
+                        {appliedCoupon ? (
+                            <div className="bg-green-50 p-3 rounded-xl border border-green-200">
+                                <div className="flex justify-between items-center">
+                                    <div className="flex items-center gap-2">
+                                        <Ticket className="w-5 h-5 text-green-600" />
+                                        <p className="font-bold text-green-800">Cupom Aplicado: {appliedCoupon.code}</p>
+                                    </div>
+                                    <button onClick={handleRemoveCoupon} className="p-1 hover:bg-green-100 rounded-full"><X className="w-4 h-4 text-green-700" /></button>
+                                </div>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="flex gap-2">
+                                    <input type="text" placeholder="Adicionar cupom" value={couponCodeInput} onChange={(e) => setCouponCodeInput(e.target.value)} className="flex-1 bg-gray-100 border border-gray-200 rounded-lg px-4 py-2 text-sm font-mono uppercase outline-none focus:ring-2 focus:ring-brandLight"/>
+                                    <button onClick={handleApplyCoupon} className="bg-gray-800 text-white font-bold px-4 rounded-lg hover:bg-black transition-colors text-sm">Aplicar</button>
+                                </div>
+                                {couponError && <p className="text-xs text-red-500 mt-2">{couponError}</p>}
+                            </>
+                        )}
+                    </div>
+
                     <div className="mt-4 border-t pt-4"><p className="text-xs font-bold text-gray-500 mb-2 uppercase">Pagamento</p><div className="flex gap-2 mb-4"><button onClick={() => setPaymentMethod('cash')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'cash' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-100'}`}><DollarSign/><span className="text-xs font-bold">Dinheiro</span></button><button onClick={() => setPaymentMethod('card')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'card' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-100'}`}><CreditCard/><span className="text-xs font-bold">Cartão</span></button><button onClick={() => setPaymentMethod('pix')} className={`flex-1 flex flex-col items-center justify-center p-3 rounded-xl border-2 ${paymentMethod === 'pix' ? 'border-teal-500 bg-teal-50 text-teal-700' : 'border-gray-100'}`}><QrCode/><span className="text-xs font-bold">Pix</span></button></div>{paymentMethod === 'cash' && (<div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200 mb-4"><label className="text-xs font-bold text-yellow-800 block mb-1">Troco para quanto?</label><input type="number" placeholder="Ex: 50.00" value={changeAmount} onChange={e => setChangeAmount(e.target.value)} className="w-full py-2 outline-none text-gray-800 font-bold bg-transparent border-b border-yellow-300"/></div>)}</div>
                     <div className="mt-2 flex justify-between font-bold text-xl text-gray-900 border-t pt-2"><span>Total</span><span>R$ {finalTotal.toFixed(2)}</span></div>
                     <button onClick={handleFinalizeOrder} disabled={isProcessingPayment} className={`w-full text-white font-bold py-3.5 rounded-xl mt-4 transition-colors flex items-center justify-center gap-2 ${isProcessingPayment ? 'bg-gray-400' : 'bg-brand hover:bg-brandHover'}`}>{isProcessingPayment && <Loader2 className="w-5 h-5 animate-spin" />}{isProcessingPayment ? 'Processando...' : (paymentMethod === 'cash' ? 'Finalizar Pedido' : 'Pagar Agora')}</button>
