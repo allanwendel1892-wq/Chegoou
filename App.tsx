@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest } from './types';
 import AuthView from './components/AuthView';
@@ -522,7 +523,8 @@ const App: React.FC = () => {
 
     // --- LÓGICA DE REPASSE (12H LOCK) ---
     // Quando o pedido é entregue, marcamos o repasse como 'bloqueado' e setamos a data.
-    let updateData: any = { status };
+    // FIX: Use a specific type instead of 'any' to ensure type safety.
+    let updateData: Partial<Order> = { status };
     
     // Se for entregue e NÃO for cancelado
     if (status === 'delivered') {
@@ -538,7 +540,8 @@ const App: React.FC = () => {
   const handleCourierAcceptOrder = async (orderId: string) => {
       if (!currentUser) return;
       
-      const updateData = {
+      // FIX: Explicitly type `updateData` to prevent TypeScript from widening the 'status' property to a generic 'string', resolving the type error.
+      const updateData: { status: Order['status']; courierId: string } = {
           status: 'delivering',
           courierId: currentUser.id
       };

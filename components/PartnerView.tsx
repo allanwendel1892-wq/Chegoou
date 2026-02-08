@@ -1730,6 +1730,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                     orders={orders} // ADDED: Passing orders for CRM
                     company={localCompany} // ADDED: Passing company for limits
                     updateCompany={updateCompany} // ADDED: Update function for limits
+                    coupons={coupons}
                 />
             )}
             
