@@ -52,6 +52,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
   const [queueStatus, setQueueStatus] = useState<'idle' | 'running' | 'paused' | 'completed'>('idle');
   const [countdown, setCountdown] = useState(0);
   const finalMessageForBatch = useRef('');
+  const isCancelledRef = useRef(false);
   
 
   // --- 1. LÓGICA DE CLIENTES (CRM) ---
@@ -112,7 +113,13 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
 
   // --- 3. QUEUE PROCESSOR LOGIC ---
   const processMessageQueue = async (currentQueue: QueueItem[]) => {
+    isCancelledRef.current = false; // Reset on start
     for (let i = 0; i < currentQueue.length; i++) {
+        if (isCancelledRef.current) {
+            console.log("Fila de disparos cancelada.");
+            return; 
+        }
+
         const item = currentQueue[i];
 
         if (item.status === 'sent' || item.status === 'error') continue;
@@ -124,12 +131,21 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
         if (i > 0) { 
             let secondsLeft = Math.ceil(randomDelay / 1000);
             while (secondsLeft > 0) {
+                if (isCancelledRef.current) {
+                    console.log("Fila de disparos cancelada durante o delay.");
+                    return;
+                }
                 setCountdown(secondsLeft);
                 await wait(1000); 
                 secondsLeft--;
             }
         }
         setCountdown(0);
+
+        if (isCancelledRef.current) { // Check again after delay
+             console.log("Fila de disparos cancelada após o delay.");
+             return;
+        }
 
         try {
             console.log(`[${i+1}/${currentQueue.length}] Disparando para: ${item.name} (${item.phone})`);
@@ -164,6 +180,8 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
         
         await wait(1000);
     }
+    
+    if (isCancelledRef.current) return;
 
     setQueueStatus('completed');
     alert("Todos os disparos foram processados!");
@@ -198,7 +216,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
     if (!messageText.trim()) { alert("Digite uma mensagem."); return; }
     if (selectedLeads.length === 0) { alert("Selecione pelo menos um destinatário."); return; }
 
-    const restaurantLink = `${VERCEL_APP_URL}?restaurantId=${company.id}`;
+    const restaurantLink = `${VERCEL_APP_URL}`;
     let finalMessage;
 
     if (composerType === 'campaign') {
@@ -207,8 +225,8 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
             alert("Por favor, selecione um cupom para a campanha.");
             return;
         }
-        const couponText = `Aproveite nosso cupom especial ✨ ${selectedCoupon.code.toUpperCase()} ✨ para ganhar ${selectedCoupon.discountType === 'fixed' ? `R$${selectedCoupon.discountValue.toFixed(2)}` : `${selectedCoupon.discountValue}%`} de desconto!`;
-        finalMessage = `${messageText.trim()}\n\n${couponText}\n\nCadastre-se e peça agora para usar seu cupom:\n${restaurantLink}`;
+        const couponText = `Aproveite nosso cupom especial ✨ ${selectedCoupon.code.toUpperCase()} ✨ para ganhar ${selectedCoupon.discountType === 'fixed' ? `R$${selectedCoupon.discountValue.toFixed(2)}` : `${selectedCoupon.discountValue}%`} de desconto!😍💸`;
+        finalMessage = `${messageText.trim()}\n\n${couponText}\n\n📲 Peça agora pelo app Chegoou:\n👉 ${restaurantLink}`;
     } else {
         finalMessage = `${messageText.trim()}`;
     }
@@ -235,6 +253,20 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
       setViewMode('queue');
       
       processMessageQueue(newQueue);
+  };
+
+  const handleGoBackFromQueue = () => {
+    if (queueStatus === 'running') {
+        if (window.confirm("A fila de disparos está em andamento. Deseja realmente cancelar e voltar?")) {
+            isCancelledRef.current = true;
+            setQueueStatus('idle'); // Visually stop it
+            setViewMode('list');
+        }
+    } else {
+        setViewMode('list');
+        setQueue([]);
+        setQueueStatus('idle');
+    }
   };
 
   // --- RENDER ---
@@ -278,19 +310,23 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
     const progress = queue.length > 0 ? Math.round((queue.filter(i => i.status === 'sent' || i.status === 'error').length / queue.length) * 100) : 0;
     return (
         <div className="flex flex-col h-[calc(100vh-6rem)] max-w-4xl mx-auto">
-            <div className="mb-6">
-                <h2 className="text-2xl font-bold text-gray-800">Fila de Disparos</h2>
-                <p className="text-gray-500">Aguarde, os envios estão sendo processados em segundo plano.</p>
+            <div className="mb-6 flex items-center gap-4">
+                <button 
+                    onClick={handleGoBackFromQueue} 
+                    className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                    title="Voltar e Cancelar"
+                >
+                    <ArrowLeft className="w-6 h-6 text-gray-600"/>
+                </button>
+                <div>
+                    <h2 className="text-2xl font-bold text-gray-800">Fila de Disparos</h2>
+                    <p className="text-gray-500">Os envios estão sendo processados em segundo plano.</p>
+                </div>
             </div>
             
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex-1 flex flex-col">
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="font-bold text-gray-700">Progresso ({queue.filter(i => i.status === 'sent' || i.status === 'error').length}/{queue.length})</h3>
-                    <div className="flex gap-2">
-                        {queueStatus === 'running' && <button disabled className="text-xs font-bold text-gray-400 flex items-center gap-1 cursor-not-allowed"><Pause className="w-3 h-3"/> Pausar</button>}
-                        {queueStatus === 'paused' && <button disabled className="text-xs font-bold text-gray-400 flex items-center gap-1 cursor-not-allowed"><Play className="w-3 h-3"/> Continuar</button>}
-                        <button disabled className="text-xs font-bold text-gray-400 flex items-center gap-1 cursor-not-allowed"><StopCircle className="w-3 h-3"/> Cancelar</button>
-                    </div>
                 </div>
                 <div className="w-full bg-gray-100 rounded-full h-4 mb-4"><div className="bg-green-500 h-4 rounded-full transition-all" style={{width: `${progress}%`}}></div></div>
 
