@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { User, UserRole } from '../types';
-import { MapPin, Navigation, ArrowRight, Loader2, ShoppingBag, AlertCircle, Search, Check, MousePointer2, Map as MapIcon, Crosshair } from 'lucide-react';
+import { MapPin, Navigation, ArrowRight, Loader2, ShoppingBag, AlertCircle, Search, Check, MousePointer2, Map as MapIcon, Crosshair, ArrowLeft, X } from 'lucide-react';
 
 declare global {
   interface Window {
@@ -348,8 +348,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
                   {/* Header */}
                   <div className="absolute top-0 left-0 right-0 p-4 z-10 flex justify-between items-start pointer-events-none">
                       <div className="bg-white/95 backdrop-blur px-4 py-2 rounded-xl shadow-md border border-gray-100 pointer-events-auto">
-                          <h3 className="font-bold text-gray-800 flex items-center gap-2">
-                             <Navigation className="w-4 h-4 text-brand" /> 
+                          <h3 className="font-bold text-gray-800">
                              {mapError ? 'Localização Manual' : 'Confirmar Localização'}
                           </h3>
                           <p className="text-xs text-gray-500">
@@ -360,7 +359,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
                         onClick={() => setShowMapModal(false)}
                         className="bg-white p-2 rounded-full shadow-md hover:bg-gray-100 pointer-events-auto transition-colors"
                       >
-                          <AlertCircle className="w-6 h-6 text-gray-500" />
+                          <X className="w-6 h-6 text-gray-500" />
                       </button>
                   </div>
 
@@ -458,13 +457,25 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
       {/* Right Side - Form */}
       <div className="w-full lg:w-1/2 flex flex-col justify-center p-8 sm:p-12 lg:p-24 bg-gray-50">
         <div className="max-w-md w-full mx-auto space-y-8">
-            <div className="text-center lg:text-left">
-                <h2 className="text-3xl font-bold text-gray-900 tracking-tight">
-                    {isRegistering ? 'Crie sua conta' : 'Bem-vindo de volta'}
-                </h2>
-                <p className="mt-2 text-sm text-gray-500">
-                    {isRegistering ? 'Preencha seus dados para começar' : 'Entre com suas credenciais para acessar'}
-                </p>
+            <div className="flex items-center gap-2">
+                {isRegistering && (
+                    <button 
+                        type="button"
+                        onClick={() => setIsRegistering(false)} 
+                        className="p-2 text-gray-400 hover:bg-gray-100 rounded-full transition-colors lg:-ml-12 shrink-0"
+                        title="Voltar"
+                    >
+                        <ArrowLeft className="w-6 h-6" />
+                    </button>
+                )}
+                <div className="text-center lg:text-left flex-1">
+                    <h2 className="text-3xl font-bold text-gray-900 tracking-tight">
+                        {isRegistering ? 'Crie sua conta' : 'Bem-vindo de volta'}
+                    </h2>
+                    <p className="mt-2 text-sm text-gray-500">
+                        {isRegistering ? 'Preencha seus dados para começar' : 'Entre com suas credenciais para acessar'}
+                    </p>
+                </div>
             </div>
 
             <form onSubmit={handleAuth} className="space-y-6">
