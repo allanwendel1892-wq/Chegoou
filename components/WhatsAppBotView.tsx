@@ -225,7 +225,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
             alert("Por favor, selecione um cupom para a campanha.");
             return;
         }
-        const couponText = `Aproveite nosso cupom especial ✨ ${selectedCoupon.code.toUpperCase()} ✨ para ganhar ${selectedCoupon.discountType === 'fixed' ? `R$${selectedCoupon.discountValue.toFixed(2)}` : `${selectedCoupon.discountValue}%`} de desconto!😍💸`;
+        const couponText = `Aproveite nosso cupom especial ✨ *${selectedCoupon.code.toUpperCase()}* ✨ para ganhar ${selectedCoupon.discountType === 'fixed' ? `R$${selectedCoupon.discountValue.toFixed(2)}` : `${selectedCoupon.discountValue}%`} de desconto!😍💸`;
         finalMessage = `${messageText.trim()}\n\n${couponText}\n\n📲 Peça agora pelo app Chegoou:\n👉 ${restaurantLink}`;
     } else {
         finalMessage = `${messageText.trim()}`;
