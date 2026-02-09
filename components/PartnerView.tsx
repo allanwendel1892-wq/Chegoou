@@ -1,11 +1,3 @@
-
-
-
-
-
-
-
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem, WithdrawalRequest, Coupon } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
@@ -276,7 +268,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   
   const [editingProductId, setEditingProductId] = useState<string | null>(null); 
   const [productToDelete, setProductToDelete] = useState<string | null>(null);
-  const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false); // NEW STATE FOR MODAL
+  const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
+  const [isConfirmingStatus, setIsConfirmingStatus] = useState(false);
   
   const [newProduct, setNewProduct] = useState<Partial<Product>>({
       isAvailable: true,
@@ -305,6 +298,16 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   
   useEffect(() => { setLocalCompany(company); }, [company]);
+
+  const handleToggleStatus = () => {
+    setIsConfirmingStatus(true);
+  };
+
+  const handleConfirmStatusChange = () => {
+    const newStatus = company.status === 'open' ? 'closed' : 'open';
+    updateCompany({ status: newStatus });
+    setIsConfirmingStatus(false);
+  };
 
   // --- LOGIC: PRINT THERMAL RECEIPT ---
   const handlePrintOrder = (order: Order) => {
@@ -972,7 +975,39 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   return (
     <div className="flex h-screen bg-gray-50 relative">
         
-        {/* WITHDRAWAL MODAL - UPDATED */}
+        {isConfirmingStatus && (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+                <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-scale-in">
+                    <div className="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center mb-4 mx-auto">
+                        <AlertTriangle className="w-6 h-6 text-yellow-600" />
+                    </div>
+                    <h3 className="text-xl font-bold text-gray-900 text-center mb-2">Confirmar Alteração</h3>
+                    <p className="text-gray-600 text-center mb-6 text-sm">
+                        Tem certeza que deseja <strong>{company.status === 'open' ? 'FECHAR' : 'ABRIR'}</strong> a sua loja agora?
+                    </p>
+                    <div className="flex gap-3">
+                        <button 
+                            onClick={() => setIsConfirmingStatus(false)}
+                            className="flex-1 py-3 rounded-xl bg-gray-100 font-bold text-gray-600 hover:bg-gray-200 transition-colors"
+                        >
+                            Cancelar
+                        </button>
+                        <button 
+                            onClick={handleConfirmStatusChange}
+                            className={`flex-1 py-3 rounded-xl font-bold text-white transition-colors
+                                ${company.status === 'open' 
+                                    ? 'bg-red-600 hover:bg-red-700 shadow-lg shadow-red-200' 
+                                    : 'bg-green-600 hover:bg-green-700 shadow-lg shadow-green-200'
+                                }
+                            `}
+                        >
+                            Sim, {company.status === 'open' ? 'Fechar' : 'Abrir'} Loja
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+
         {isWithdrawModalOpen && (
             <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
                 <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-scale-in">
@@ -1018,9 +1053,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                 </div>
             </div>
         )}
-
-        {/* ... Rest of existing JSX ... */}
-        {/* ... (Omitted primarily for brevity, but the file content remains the same until the next change) ... */}
         
         {productToDelete && (
             <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
@@ -1253,6 +1285,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
         isMobileOpen={isMobileOpen} 
         setIsMobileOpen={setIsMobileOpen} 
         onLogout={onLogout}
+        companyStatus={company.status}
+        onToggleStatus={handleToggleStatus}
       />
 
       <div className="flex-1 overflow-auto flex flex-col">

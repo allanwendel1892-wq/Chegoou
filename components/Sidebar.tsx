@@ -1,14 +1,6 @@
-
-
-
-
-
-
-
-
 import React from 'react';
 import { LayoutDashboard, UtensilsCrossed, MessageSquare, ShoppingBag, LogOut, Settings, Wallet, Ticket } from 'lucide-react';
-import { ViewState } from '../types';
+import { ViewState, Company } from '../types';
 
 interface SidebarProps {
   currentView: ViewState;
@@ -16,9 +8,11 @@ interface SidebarProps {
   isMobileOpen: boolean;
   setIsMobileOpen: (open: boolean) => void;
   onLogout: () => void;
+  companyStatus: Company['status'];
+  onToggleStatus: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, isMobileOpen, setIsMobileOpen, onLogout }) => {
+const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, isMobileOpen, setIsMobileOpen, onLogout, companyStatus, onToggleStatus }) => {
   
   const menuItems = [
     { id: ViewState.DASHBOARD, label: 'Dashboard', icon: LayoutDashboard },
@@ -89,13 +83,22 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, isMobileOpen, s
 
         {/* Footer */}
         <div className="p-6 border-t border-gray-50">
-            <div className="bg-gray-50 rounded-2xl p-4 mb-4">
+            <button 
+                onClick={onToggleStatus}
+                className="bg-gray-50 rounded-2xl p-4 mb-4 w-full text-left hover:bg-gray-100 transition-colors cursor-pointer"
+            >
                 <p className="text-xs font-bold text-gray-500 mb-1">Status da Loja</p>
                 <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                    <span className="text-sm font-medium text-gray-900">Aberto</span>
+                    <span className={`relative flex h-2.5 w-2.5`}>
+                        {companyStatus === 'open' && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>}
+                        <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${companyStatus === 'open' ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                    </span>
+                    <span className="text-sm font-medium text-gray-900">
+                        {companyStatus === 'open' ? 'Aberto' : 'Fechado'}
+                    </span>
                 </div>
-            </div>
+                 <p className="text-[10px] text-gray-400 mt-1">Clique para alterar</p>
+            </button>
             <button 
                 onClick={onLogout}
                 className="flex items-center gap-3 px-4 py-3 w-full text-sm font-medium text-gray-500 hover:text-red-600 rounded-xl hover:bg-red-50 transition-colors cursor-pointer"

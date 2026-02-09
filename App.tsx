@@ -1,5 +1,6 @@
 
 
+
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest, Coupon } from './types';
 import AuthView from './components/AuthView';
@@ -605,7 +606,11 @@ const App: React.FC = () => {
   
   const handleUpdateCompany = async (companyId: string, data: Partial<Company>) => {
       const { error } = await supabase.from('companies').update(data).eq('id', companyId);
-      if(!error) setCompanies(companies.map(c => c.id === companyId ? {...c, ...data} : c));
+      if(!error) {
+        setCompanies(prevCompanies => 
+            prevCompanies.map(c => c.id === companyId ? {...c, ...data} : c)
+        );
+      }
   };
 
   const handleAddAddress = (address: Address) => {
@@ -718,8 +723,10 @@ const App: React.FC = () => {
             chats={chats}
             onSendMessage={handleSendMessage}
             onAddAddress={handleAddAddress}
+            // FIX: Corrected function name from 'onRemoveAddress' to 'handleRemoveAddress' to match the available handler.
             onRemoveAddress={handleRemoveAddress}
             onAddCard={handleAddCard}
+            // FIX: Corrected function name from 'onRemoveCard' to 'handleRemoveCard' to match the available handler.
             onRemoveCard={handleRemoveCard}
             onCancelOrder={handleCancelOrder} 
         />;
