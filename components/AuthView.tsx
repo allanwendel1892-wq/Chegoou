@@ -580,20 +580,18 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
                                     value={formData.street} onChange={e => setFormData({...formData, street: e.target.value})} required
                                 />
                                 <input 
-                                    type="text" placeholder="Nº" className="w-20 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brandLight outline-none"
+                                    type="text" placeholder="Nº" className="w-16 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brandLight outline-none"
                                     value={formData.number} onChange={e => setFormData({...formData, number: e.target.value})} required
                                 />
                             </div>
-                             <div className="flex gap-2">
-                                <input 
-                                    type="text" placeholder="Bairro" className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brandLight outline-none"
-                                    value={formData.neighborhood} onChange={e => setFormData({...formData, neighborhood: e.target.value})} required
-                                />
-                                <input 
-                                    type="text" placeholder="Cidade" className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brandLight outline-none"
-                                    value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} required
-                                />
-                            </div>
+                            <input 
+                                type="text" placeholder="Bairro" className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brandLight outline-none"
+                                value={formData.neighborhood} onChange={e => setFormData({...formData, neighborhood: e.target.value})} required
+                            />
+                            <input 
+                                type="text" placeholder="Cidade" className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brandLight outline-none"
+                                value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} required
+                            />
                         </div>
                     </div>
                 )}
