@@ -1,13 +1,11 @@
-
-
-
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest, Coupon } from './types';
 import AuthView from './components/AuthView';
 import AdminView from './components/AdminView';
 import PartnerView from './components/PartnerView';
 import CourierView from './components/CourierView';
-import ClientView from './components/ClientView';
+// FIX: Changed to a named import to resolve "no default export" error.
+import { ClientView } from './components/ClientView';
 import { supabase } from './services/supabaseClient';
 import { PaymentService } from './services/paymentService';
 import { Loader2, AlertCircle, Database, Lock } from 'lucide-react';
@@ -648,89 +646,4 @@ const App: React.FC = () => {
 
   if (connectionError) {
       return (
-          <div className="h-screen w-full flex flex-col items-center justify-center bg-gray-50 p-6 text-center">
-              <AlertCircle className="w-10 h-10 text-red-600 mb-4 mx-auto" />
-              <h2 className="text-xl font-bold text-gray-900">{connectionError.title}</h2>
-              <p className="text-gray-500 mt-2 max-w-md">{connectionError.message}</p>
-              <button onClick={() => window.location.reload()} className="mt-8 bg-gray-900 text-white px-6 py-3 rounded-xl font-bold hover:bg-black transition-colors">
-                  Tentar Conexão Novamente
-              </button>
-          </div>
-      );
-  }
-
-  if (!currentUser) {
-    return <AuthView onLogin={handleLogin} existingUsers={users} />;
-  }
-
-  switch (currentUser.role) {
-    case 'admin':
-        return <AdminView 
-            users={users} setUsers={setUsers} 
-            companies={companies} setCompanies={setCompanies} 
-            orders={orders} 
-            withdrawals={withdrawals}
-            onUpdateWithdrawal={handleUpdateWithdrawal}
-            onLogout={handleLogout}
-            globalSettings={globalSettings} 
-            onUpdateSettings={handleUpdateGlobalSettings}
-            onUpdateUser={handleUpdateUser}
-            onDeleteUser={handleDeleteUser}
-            onUpsertCompany={handleUpsertCompany}
-            onDeleteCompany={handleDeleteCompany}
-        />;
-    
-    case 'partner':
-        const myCompany = companies.find(c => c.id === currentUser.id);
-        if (!myCompany) return <div className="h-screen flex items-center justify-center">Loja não encontrada. <button onClick={handleLogout}>Sair</button></div>;
-        
-        return <PartnerView 
-            company={myCompany} 
-            orders={orders.filter(o => o.companyId === myCompany.id)}
-            products={products.filter(p => p.companyId === myCompany.id)}
-            updateOrderStatus={updateOrderStatus}
-            updateCompany={(data) => handleUpdateCompany(myCompany.id, data)}
-            onAddProduct={handleAddProduct}
-            onUpdateProduct={handleUpdateProduct} 
-            onDeleteProduct={handleDeleteProduct} 
-            onLogout={handleLogout}
-            chats={chats}
-            onSendMessage={handleSendMessage}
-            onUpdateFullOrder={handleUpdateFullOrder}
-            onDeleteOrder={handleDeleteOrder}
-        />;
-
-    case 'courier':
-        return <CourierView 
-            courier={currentUser} 
-            availableOrders={orders} 
-            acceptOrder={handleCourierAcceptOrder}
-            confirmDelivery={(id, code) => updateOrderStatus(id, 'delivered')}
-            onLogout={handleLogout}
-        />;
-
-    case 'client':
-    default:
-        return <ClientView 
-            user={currentUser} 
-            companies={companies} 
-            products={products}
-            onPlaceOrder={handlePlaceOrder}
-            onLogout={handleLogout}
-            orders={orders} 
-            coupons={coupons}
-            onUpdateUser={handleUpdateUser}
-            chats={chats}
-            onSendMessage={handleSendMessage}
-            onAddAddress={handleAddAddress}
-            // FIX: Corrected function name from 'onRemoveAddress' to 'handleRemoveAddress' to match the available handler.
-            onRemoveAddress={handleRemoveAddress}
-            onAddCard={handleAddCard}
-            // FIX: Corrected function name from 'onRemoveCard' to 'handleRemoveCard' to match the available handler.
-            onRemoveCard={handleRemoveCard}
-            onCancelOrder={handleCancelOrder} 
-        />;
-  }
-};
-
-export default App;
+          <div className
