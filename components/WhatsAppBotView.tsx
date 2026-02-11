@@ -37,6 +37,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
   const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
   const [messageText, setMessageText] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<'all' | 'recente' | 'morno' | 'inativo'>('all');
   const [viewMode, setViewMode] = useState<'list' | 'compose' | 'queue'>('list');
   
   // NEW: Confirmation Modal State
@@ -98,11 +99,15 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
   }, [orders]);
 
   const filteredCustomers = useMemo(() => {
-      return customers.filter(c => 
-          c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-          c.phone.includes(searchTerm)
-      );
-  }, [customers, searchTerm]);
+      return customers.filter(c => {
+          const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                                c.phone.includes(searchTerm);
+          
+          const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
+
+          return matchesSearch && matchesStatus;
+      });
+  }, [customers, searchTerm, statusFilter]);
 
   // --- 2. LÓGICA DE LIMITES DIÁRIOS ---
   const todayStr = new Date().toISOString().split('T')[0];
@@ -483,8 +488,9 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
         ))}
       </div>
 
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col sm:flex-row gap-4 items-center">
-        <div className="relative flex-1 w-full">
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 space-y-4">
+        {/* Row 1: Search */}
+        <div className="relative w-full">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input 
                 type="text" 
@@ -494,14 +500,41 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
                 className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
             />
         </div>
-        <div className="flex gap-2 w-full sm:w-auto">
-            <button onClick={handleSelectAll} className="flex-1 sm:flex-none border border-gray-200 text-gray-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-gray-50">
-                {selectedLeads.length > 0 ? 'Limpar Seleção' : 'Selecionar Todos'}
-            </button>
-            <button onClick={() => setViewMode('compose')} disabled={selectedLeads.length === 0} className="flex-1 sm:flex-none bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-2 shadow-sm">
-                <Send className="w-4 h-4"/>
-                Novo Disparo ({selectedLeads.length})
-            </button>
+        {/* Row 2: Filters & Actions */}
+        <div className="flex flex-col sm:flex-row gap-4 items-center">
+            {/* Filter by Status */}
+            <div className="flex items-center gap-2">
+                <Filter className="w-4 h-4 text-gray-400" />
+                <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200">
+                    {[
+                        {id: 'all', label: 'Todos'},
+                        {id: 'recente', label: 'Recentes'},
+                        {id: 'morno', label: 'Mornos'},
+                        {id: 'inativo', label: 'Inativos'}
+                    ].map(filter => (
+                        <button 
+                            key={filter.id}
+                            onClick={() => setStatusFilter(filter.id as any)}
+                            className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${statusFilter === filter.id ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:bg-gray-200/50'}`}
+                        >
+                            {filter.label}
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            <div className="flex-1"></div> {/* Spacer */}
+
+            {/* Action Buttons */}
+            <div className="flex gap-2 w-full sm:w-auto">
+                <button onClick={handleSelectAll} className="flex-1 sm:flex-none border border-gray-200 text-gray-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-gray-50">
+                    {selectedLeads.length > 0 ? 'Limpar Seleção' : 'Selecionar Todos'}
+                </button>
+                <button onClick={() => setViewMode('compose')} disabled={selectedLeads.length === 0} className="flex-1 sm:flex-none bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-2 shadow-sm">
+                    <Send className="w-4 h-4"/>
+                    Novo Disparo ({selectedLeads.length})
+                </button>
+            </div>
         </div>
       </div>
       
