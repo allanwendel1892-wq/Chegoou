@@ -595,7 +595,8 @@ const AdminView: React.FC<AdminViewProps> = ({
                             </div>
                             <div>
                                 <h3 className="font-bold text-gray-900 text-lg">{company.name}</h3>
-                                <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">{company.category}</p>
+                                <span className="text-[10px] text-gray-400 font-mono block -mt-1">{company.id}</span>
+                                <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mt-1">{company.category}</p>
                             </div>
                         </div>
                         <div className="flex gap-1">
