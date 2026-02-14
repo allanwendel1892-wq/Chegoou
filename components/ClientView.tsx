@@ -1,4 +1,5 @@
 
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Company, Product, Order, ChatMessage, Address, CreditCard as CreditCardType, ProductOption, User, Coupon } from '../types';
 import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, Timer, Settings, LogOut, Crosshair, AlertCircle, ClipboardCheck, ScanLine, XCircle, Ticket } from 'lucide-react';
@@ -839,7 +840,7 @@ const ClientView: React.FC<ClientViewProps> = ({
                            <div key={g.id} className="mb-4">
                                <h3 className="font-bold text-gray-800 mb-2">{g.name}</h3>
                                <p className="text-xs text-gray-400 mb-2">
-                                   {g.min === 1 && g.max === 1 ? 'Escolha 1 opção' : `Escolha até ${g.max} opções`}
+                                   {g.min === g.max ? `Escolha ${g.min} opção${g.min > 1 ? 's' : ''}` : `Escolha de ${g.min} a ${g.max} opções`}
                                </p>
                                {g.options.map(o => (
                                    <div 
@@ -873,6 +874,16 @@ const ClientView: React.FC<ClientViewProps> = ({
                    <div className="p-4 border-t border-gray-100 bg-gray-50 shrink-0">
                        <button 
                            onClick={() => { 
+                               if (customizingProduct && customizingProduct.groups) {
+                                   for (const group of customizingProduct.groups) {
+                                       const selectedCount = (selections[group.id] || []).length;
+                                       if (selectedCount < group.min) {
+                                           alert(`É necessário escolher pelo menos ${group.min} opção(ões) no grupo "${group.name}".`);
+                                           return; 
+                                       }
+                                   }
+                               }
+
                                const flatOptions: any[] = []; 
                                customizingProduct.groups.forEach(g => (selections[g.id] || []).forEach(o => flatOptions.push({groupName: g.name, optionName: o.name, price: o.price}))); 
                                addToCart(customizingProduct, currentPrice, flatOptions); 
