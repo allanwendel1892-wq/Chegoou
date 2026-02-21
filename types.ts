@@ -221,3 +221,14 @@ export interface ForecastData {
     confidenceScore: number;
     insight: string;
 }
+export enum ViewState {
+  DASHBOARD = 'dashboard',
+  ORDERS = 'orders', // Kanban
+  MENU = 'menu', // Cardapio (was inventory)
+  WHATSAPP = 'whatsapp',
+  SETTINGS = 'settings',
+  FINANCE = 'finance',
+  COUPONS = 'coupons',
+  POS = 'pos', // NOVO: Módulo de Lançamento de Pedido (Balcão/PDV)
+  HISTORY = 'history', // NOVO: Histórico de Pedidos
+}
