@@ -7,6 +7,7 @@ import WhatsAppBotView from './WhatsAppBotView';
 import Sidebar from './Sidebar';
 import CouponsView from './CouponsView';
 import { supabase } from '../services/supabaseClient';
+import POSView from './POSView';
 
 interface PartnerViewProps {
   company: Company;
@@ -535,7 +536,32 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       fetchCoupons();
     }
   }, [view, company.id]);
-
+  
+{view === ViewState.POS && (
+                <POSView 
+                    products={products} 
+                    company={localCompany} 
+                    onPlaceOrder={async (newOrder) => {
+                        try {
+                            // 1. Salva o pedido diretamente no seu banco de dados (Supabase)
+                            const { error } = await supabase.from('orders').insert([newOrder]);
+                            
+                            if (error) {
+                                console.error("Erro do Supabase:", error);
+                                alert("Erro ao salvar o pedido. Verifique sua conexão.");
+                                return;
+                            }
+                            
+                            // 2. Se deu certo, muda a tela automaticamente para o Kanban
+                            setView(ViewState.ORDERS);
+                            
+                        } catch (err) {
+                            console.error("Erro ao lançar pedido:", err);
+                        }
+                    }} 
+                />
+            )}
+  
   const handleSaveCoupon = async (coupon: Coupon) => {
     const { data, error } = await supabase.from('coupons').upsert(coupon).select();
     if (error) {
