@@ -1,6 +1,7 @@
 import React from 'react';
 import { LayoutDashboard, UtensilsCrossed, MessageSquare, ShoppingBag, LogOut, Settings, Wallet, Ticket } from 'lucide-react';
 import { ViewState, Company } from '../types';
+import { LayoutDashboard, UtensilsCrossed, MessageSquare, ShoppingBag, LogOut, Settings, Wallet, Ticket, MonitorStop, History } from 'lucide-react';
 
 interface SidebarProps {
   currentView: ViewState;
@@ -16,7 +17,9 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, isMobileOpen, s
   
   const menuItems = [
     { id: ViewState.DASHBOARD, label: 'Dashboard', icon: LayoutDashboard },
+    { id: ViewState.POS, label: 'Frente de Caixa (PDV)', icon: MonitorStop }, // NOVO MÓDULO
     { id: ViewState.ORDERS, label: 'Pedidos (Kanban)', icon: ShoppingBag },
+    { id: ViewState.HISTORY, label: 'Histórico de Pedidos', icon: History }, // NOVO MÓDULO
     { id: ViewState.MENU, label: 'Cardápio', icon: UtensilsCrossed },
     { id: ViewState.FINANCE, label: 'Financeiro', icon: Wallet },
     { id: ViewState.COUPONS, label: 'Cupons', icon: Ticket },
