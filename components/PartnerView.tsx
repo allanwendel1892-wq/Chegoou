@@ -32,6 +32,15 @@ const COMPANY_CATEGORIES = [
     "Sorvetes", "Carnes", "Mercado", "Asiática"
 ];
 
+const PROTECTED_VIEWS = [
+    ViewState.DASHBOARD, 
+    ViewState.FINANCE, 
+    ViewState.SETTINGS, 
+    ViewState.MENU, 
+    ViewState.COUPONS, 
+    ViewState.WHATSAPP
+];
+
 interface KanbanColumnProps {
   title: string;
   status: Order['status'];
@@ -129,7 +138,6 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                           )}
                       </div>
                       
-                      {/* Customer & Address */}
                       <div className="mb-3">
                           <div className="flex items-center gap-2 mb-1">
                               <div className="w-6 h-6 bg-gray-100 rounded-full flex items-center justify-center font-bold text-gray-600 text-[10px]">
@@ -144,7 +152,6 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                           )}
                       </div>
 
-                      {/* Items OR Description */}
                       <div className="space-y-2 bg-gray-50 p-2.5 rounded-lg mb-3 border border-gray-100">
                           {Array.isArray(order.items) && order.items.length > 0 ? (
                               <>
@@ -173,7 +180,6 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                           )}
                       </div>
 
-                      {/* Payment */}
                       <div className="mb-2">
                           {pMethod.includes('cash') || pMethod.includes('dinheiro') ? (
                               <div className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-green-200">
@@ -255,7 +261,6 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
   );
 };
 
-// --- HELPER PARA CÁLCULO FINANCEIRO ARREDONDADO ---
 const calculateBankFee = (amount: number, percentage: number) => {
     const rawFee = amount * (percentage / 100);
     return Math.ceil(rawFee * 100) / 100;
@@ -265,9 +270,15 @@ const PartnerView: React.FC<PartnerViewProps> = ({
     company, orders, products, updateOrderStatus, updateCompany, onAddProduct, onUpdateProduct, onDeleteProduct, onLogout,
     chats, onSendMessage, onUpdateFullOrder, onDeleteOrder
 }) => {
-  const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
+  // LÓGICA DE BLOQUEIO (MODO CAIXA / MODO GERENTE)
+  const [view, setView] = useState<ViewState>(company.adminPin ? ViewState.POS : ViewState.DASHBOARD);
+  const [isUnlocked, setIsUnlocked] = useState(!company.adminPin);
+  const [pinModalOpen, setPinModalOpen] = useState(false);
+  const [pendingView, setPendingView] = useState<ViewState | null>(null);
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState('');
+
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-  
   const [editingProductId, setEditingProductId] = useState<string | null>(null); 
   const [productToDelete, setProductToDelete] = useState<string | null>(null);
   const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
@@ -300,6 +311,37 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   
   useEffect(() => { setLocalCompany(company); }, [company]);
+
+  // INTERCEPTOR DE NAVEGAÇÃO
+  const handleNavigation = (newView: ViewState) => {
+    if (localCompany.adminPin && !isUnlocked && PROTECTED_VIEWS.includes(newView)) {
+        setPendingView(newView);
+        setPinModalOpen(true);
+    } else {
+        setView(newView);
+    }
+  };
+
+  const handleVerifyPin = () => {
+      if (pinInput === localCompany.adminPin) {
+          setIsUnlocked(true);
+          setPinModalOpen(false);
+          setPinInput('');
+          setPinError('');
+          if (pendingView) {
+              setView(pendingView);
+              setPendingView(null);
+          }
+      } else {
+          setPinError('PIN incorreto. Tente novamente.');
+          setPinInput('');
+      }
+  };
+
+  const handleLockSession = () => {
+      setIsUnlocked(false);
+      setView(ViewState.POS); // Quando bloqueia, joga pro Frente de Caixa
+  };
 
   const handleToggleStatus = () => {
     setIsConfirmingStatus(true);
@@ -584,7 +626,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const handleRequestWithdraw = () => {
       if (!localCompany.pixKey) {
           alert("Configure sua chave Pix nas configurações antes de solicitar saque.");
-          setView(ViewState.SETTINGS);
+          handleNavigation(ViewState.SETTINGS);
           return;
       }
 
@@ -935,7 +977,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
   const handleSaveSettings = () => {
     updateCompany(localCompany);
-    alert('Configurações da loja salvas com sucesso!');
+    alert('Configurações salvas com sucesso!');
   };
 
   const editingOrderPaymentMethod = editingOrder?.paymentMethod?.toLowerCase() || '';
@@ -947,6 +989,39 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   return (
     <div className="flex h-screen bg-gray-50 relative">
         
+        {/* MODAL DO PIN GERENCIAL */}
+        {pinModalOpen && (
+            <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+                <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-scale-in text-center">
+                    <div className="w-12 h-12 bg-red-50 rounded-full flex items-center justify-center mb-4 mx-auto border border-red-100">
+                        <Lock className="w-6 h-6 text-red-600" />
+                    </div>
+                    <h3 className="text-xl font-bold text-gray-900 mb-2">Acesso Restrito</h3>
+                    <p className="text-gray-500 text-sm mb-6">Digite o PIN gerencial para desbloquear os módulos administrativos.</p>
+                    
+                    <input 
+                        type="password"
+                        autoFocus
+                        value={pinInput}
+                        onChange={e => setPinInput(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleVerifyPin()}
+                        className="w-full text-center text-2xl tracking-[0.5em] font-bold border border-gray-200 rounded-xl px-4 py-3 outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100 mb-2 transition-all"
+                        maxLength={6}
+                        placeholder="••••"
+                    />
+                    
+                    <div className="h-6 mb-4">
+                        {pinError && <p className="text-red-500 text-xs font-bold animate-pulse">{pinError}</p>}
+                    </div>
+                    
+                    <div className="flex gap-3">
+                        <button onClick={() => { setPinModalOpen(false); setPinInput(''); setPinError(''); }} className="flex-1 py-3 rounded-xl bg-gray-100 font-bold text-gray-600 hover:bg-gray-200 transition-colors">Cancelar</button>
+                        <button onClick={handleVerifyPin} className="flex-1 py-3 rounded-xl bg-gray-900 font-bold text-white hover:bg-black transition-colors shadow-lg">Desbloquear</button>
+                    </div>
+                </div>
+            </div>
+        )}
+
         {isConfirmingStatus && (
             <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
                 <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-scale-in">
@@ -1253,7 +1328,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
       <Sidebar 
         currentView={view} 
-        setView={setView} 
+        setView={handleNavigation} // PASSA O INTERCEPTOR
         isMobileOpen={isMobileOpen} 
         setIsMobileOpen={setIsMobileOpen} 
         onLogout={onLogout}
@@ -1262,12 +1337,33 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       />
 
       <div className="flex-1 overflow-auto flex flex-col">
-        <div className="md:hidden bg-white p-4 flex justify-between items-center border-b border-gray-100 sticky top-0 z-20">
+        <div className="bg-white p-4 flex justify-between items-center border-b border-gray-100 sticky top-0 z-20 shadow-sm">
              <div className="flex items-center gap-2">
+                 <button onClick={() => setIsMobileOpen(true)} className="md:hidden p-2 bg-gray-100 rounded-lg mr-2"><Layers className="w-6 h-6 text-gray-600" /></button>
                  <Store className="w-6 h-6 text-red-600" />
-                 <h1 className="font-bold text-gray-900">Chegoou</h1>
+                 <h1 className="font-bold text-gray-900 hidden md:block">Chegoou Gestão</h1>
              </div>
-             <button onClick={() => setIsMobileOpen(true)} className="p-2 bg-gray-100 rounded-lg"><Layers className="w-6 h-6 text-gray-600" /></button>
+             
+             {/* BOTÃO DE BLOQUEIO (MODO GERENTE -> MODO CAIXA) */}
+             <div className="flex items-center gap-4">
+                 {localCompany.adminPin && isUnlocked && (
+                     <button 
+                        onClick={handleLockSession} 
+                        className="flex items-center gap-2 text-sm text-red-600 font-bold bg-red-50 px-3 py-1.5 rounded-lg border border-red-100 hover:bg-red-100 transition-colors animate-fade-in"
+                        title="Bloquear módulos administrativos"
+                     >
+                         <Unlock className="w-4 h-4"/> Modo Gerente Ativo (Bloquear)
+                     </button>
+                 )}
+                 {localCompany.adminPin && !isUnlocked && (
+                     <span className="flex items-center gap-1.5 text-xs text-gray-500 font-bold bg-gray-100 px-3 py-1.5 rounded-lg border border-gray-200">
+                         <Lock className="w-3.5 h-3.5"/> Modo Caixa
+                     </span>
+                 )}
+                 <div className="w-8 h-8 bg-gray-900 text-white rounded-full flex items-center justify-center font-bold text-sm shadow-sm">
+                     {localCompany.name.charAt(0)}
+                 </div>
+             </div>
         </div>
 
         <div className="p-4 md:p-8 max-w-[1600px] mx-auto w-full">
@@ -1281,7 +1377,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                             <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2">
                                 <Wallet className="w-5 h-5 text-gray-500"/> Financeiro Rápido
                             </h3>
-                            <button onClick={() => setView(ViewState.FINANCE)} className="text-sm font-bold text-blue-600 hover:underline">Ver Detalhes</button>
+                            <button onClick={() => handleNavigation(ViewState.FINANCE)} className="text-sm font-bold text-blue-600 hover:underline">Ver Detalhes</button>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
@@ -1437,7 +1533,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                 />
             )}
 
-            {/* ADICIONADO: AS TELAS NOVAS CORRETAMENTE NO LUGAR DE RENDERIZAÇÃO */}
             {view === ViewState.POS && (
                 <POSView 
                     products={products} 
@@ -1760,6 +1855,27 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                     <h2 className="text-2xl font-bold text-gray-900 mb-6">Configurações da Loja</h2>
                     
                     <div className="space-y-6">
+
+                        {/* NOVO: CONTROLE DE ACESSO */}
+                        <div className="bg-red-50 border border-red-100 rounded-xl p-6 mb-6">
+                            <h3 className="font-bold text-red-900 mb-2 flex items-center gap-2">
+                                <Lock className="w-5 h-5" /> Controle de Acesso (Modo Caixa)
+                            </h3>
+                            <p className="text-sm text-red-800 mb-4 leading-relaxed">
+                                Crie uma senha numérica. Se preenchida, o sistema iniciará travado no Frente de Caixa (PDV) e Kanban. Para acessar o Financeiro, Dashboard ou Cardápio, será exigida a senha.
+                            </p>
+                            <div>
+                                <input 
+                                    type="password"
+                                    placeholder="Ex: 1234 (Deixe em branco para desativar)"
+                                    value={localCompany.adminPin || ''}
+                                    onChange={e => setLocalCompany({...localCompany, adminPin: e.target.value})}
+                                    className="w-full max-w-xs border border-red-200 rounded-xl px-4 py-2.5 font-bold tracking-[0.2em] focus:ring-2 focus:ring-red-400 outline-none"
+                                    maxLength={6}
+                                />
+                            </div>
+                        </div>
+
                         <div className="grid grid-cols-2 gap-4">
                              <div className="col-span-2">
                                 <label className="text-sm font-bold text-gray-700 mb-2 block">Identidade Visual</label>
