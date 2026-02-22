@@ -8,6 +8,7 @@ import Sidebar from './Sidebar';
 import CouponsView from './CouponsView';
 import { supabase } from '../services/supabaseClient';
 import POSView from './POSView';
+import HistoryView from './HistoryView';
 
 interface PartnerViewProps {
   company: Company;
