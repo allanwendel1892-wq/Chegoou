@@ -1,4 +1,3 @@
-
 export type UserRole = 'admin' | 'partner' | 'courier' | 'client';
 
 export interface Address {
@@ -75,7 +74,6 @@ export interface Company {
   lastMessageDate?: string; // Data do último disparo para resetar o contador
 }
 
-// --- PRODUCT STRUCTURE UPDATE FOR PIZZA LOGIC ---
 export interface ProductOption {
   id: string;
   name: string;
@@ -129,7 +127,6 @@ export interface Order {
   deliveryFee: number; // Part of Calculation A
   serviceFee: number; // Calculation B
   status: 'waiting_payment' | 'pending' | 'preparing' | 'ready' | 'waiting_courier' | 'delivering' | 'delivered' | 'cancelled';
-  // Allow string to handle loose inputs from AI/N8N (e.g. "Pix", "PIX", "Whatsapp")
   paymentMethod: 'cash' | 'card' | 'pix' | 'whatsapp' | string; 
   changeFor?: number; // Needed for cash payments
   timestamp: Date;
@@ -137,28 +134,21 @@ export interface Order {
   deliveryAddress: Address;
   pickupAddress: Address; // Address of the company
   deliveryType: 'own' | 'chegoou'; // inherited from company at time of order
-  // Allow string for deliveryMethod too (e.g. "Entrega")
   deliveryMethod: 'delivery' | 'pickup' | string; 
 
-  // --- NOVOS CAMPOS PARA SUPORTE A IA/WHATSAPP ---
   origin?: 'app' | 'whatsapp' | string; // Origem do pedido
   raw_description?: string; // Texto livre do pedido (ex: "1 pizza de calabresa")
 
-  // --- NOVOS CAMPOS DE CONTROLE FINANCEIRO (N8N) ---
-  
-  // 1. Dados do Pagamento (Mercado Pago)
   paymentId?: string; // payment_id do MP
   paymentStatus?: 'pending' | 'approved' | 'rejected' | 'refunded'; // Status real do gateway
   paymentPixCode?: string; // O Código Copia e Cola gerado pelo n8n
   paymentPixImage?: string; // BASE64 da imagem do QR Code
 
-  // 2. Controle do Repasse
   repasseStatus?: 'pending' | 'blocked' | 'available' | 'withdrawn' | 'ignored'; // 'ignored' para whats
   repasseValue?: number; // Valor líquido para o restaurante
   repasseDate?: string; // Data que o valor foi creditado (geralmente data da entrega)
   waitingFunds?: boolean; // deprecated, use repasseStatus logic
 
-  // --- NOVOS CAMPOS PARA CUPONS ---
   couponCode?: string;
   discountAmount?: number;
 }
@@ -195,22 +185,12 @@ export interface Coupon {
     createdAt: string;
 }
 
-export enum ViewState {
-  DASHBOARD = 'dashboard',
-  ORDERS = 'orders', // Kanban
-  MENU = 'menu', // Cardapio (was inventory)
-  WHATSAPP = 'whatsapp',
-  SETTINGS = 'settings',
-  FINANCE = 'finance', // NEW
-  COUPONS = 'coupons', // NEW
-}
-
 export interface SalesHistoryItem {
   date: string;
   revenue: number;
   ordersCount: number;
 }
-// FIX: Add ForecastData type definition to resolve import error.
+
 export interface ForecastData {
     predictedProducts: {
         productName: string;
@@ -221,6 +201,7 @@ export interface ForecastData {
     confidenceScore: number;
     insight: string;
 }
+
 export enum ViewState {
   DASHBOARD = 'dashboard',
   ORDERS = 'orders', // Kanban
