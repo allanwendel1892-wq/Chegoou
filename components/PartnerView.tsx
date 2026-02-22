@@ -428,15 +428,12 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       printWindow.document.close();
   };
 
-  // --- FINANCEIRO: SELF-HEALING & Lógica de Desbloqueio (12h) ---
   useEffect(() => {
     const healFinancials = async () => {
-        // Varre pedidos entregues que estão com status financeiro pendente ou com valor zerado indevidamente
         const ordersToFix = orders.filter(o => 
             o.status === 'delivered' && 
             o.paymentMethod !== 'cash' && 
             o.origin !== 'whatsapp' && 
-            // Condition 1: Stuck in pending. This is the main target.
             (o.repasseStatus === 'pending' || !o.repasseStatus)
         );
 
@@ -445,18 +442,14 @@ const PartnerView: React.FC<PartnerViewProps> = ({
              const orderTime = new Date(order.timestamp);
              const hoursDiff = (now.getTime() - orderTime.getTime()) / (1000 * 60 * 60);
              
-             // Define o status correto baseado no tempo
              const newStatus = hoursDiff > 12 ? 'available' : 'blocked';
              
-             // Recalcula o valor se estiver zerado, usando a regra de negócio correta
              let newValue = order.repasseValue === undefined || order.repasseValue === null ? 0 : order.repasseValue;
              
              if (newValue === 0 && order.total > 0) {
                  if (company.deliveryType === 'own') {
-                     // Own Delivery: Food + Delivery Fee (Restaurante gets delivery fee)
                      newValue = order.subtotal + order.deliveryFee; 
                  } else {
-                     // Chegoou Delivery: Just Food (Platform keeps delivery fee)
                      newValue = order.subtotal;
                  }
              }
@@ -471,13 +464,11 @@ const PartnerView: React.FC<PartnerViewProps> = ({
         }
     };
     
-    // Check periodically
-    const interval = setInterval(healFinancials, 5000); // Check every 5s for quick fix
-    healFinancials(); // Run on mount
+    const interval = setInterval(healFinancials, 5000);
+    healFinancials(); 
     return () => clearInterval(interval);
   }, [orders, company.deliveryType]);
 
-  // --- NOVO: Lógica de Desbloqueio de Saldo (12h) ---
   useEffect(() => {
     const checkBlockedFunds = async () => {
         const now = new Date();
@@ -498,19 +489,16 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                     .eq('id', order.id)
             );
             
-            // This runs in the background. The UI will update via Supabase subscriptions.
             Promise.all(updates).catch(err => console.error("Erro ao desbloquear fundos:", err));
         }
     };
 
-    // Run verification at regular intervals to ensure funds are released
-    const intervalId = setInterval(checkBlockedFunds, 5 * 60 * 1000); // Runs every 5 minutes
-    checkBlockedFunds(); // Run once when the component mounts
+    const intervalId = setInterval(checkBlockedFunds, 5 * 60 * 1000);
+    checkBlockedFunds(); 
 
-    return () => clearInterval(intervalId); // Clean up the interval when the component unmounts
-  }, [orders]); // The dependency on `orders` ensures this runs if orders are updated externally
+    return () => clearInterval(intervalId);
+  }, [orders]);
 
-  // --- FINANCEIRO: Carregar Histórico de Saques ---
   useEffect(() => {
     if (view === ViewState.FINANCE) {
         setIsLoadingFinance(true);
@@ -523,7 +511,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
     }
   }, [view, company.id]);
   
-  // --- CUPONS: Carregar dados de cupons ---
   useEffect(() => {
     const fetchCoupons = async () => {
       const { data, error } = await supabase
@@ -537,31 +524,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       fetchCoupons();
     }
   }, [view, company.id]);
-  
-{view === ViewState.POS && (
-                <POSView 
-                    products={products} 
-                    company={localCompany} 
-                    onPlaceOrder={async (newOrder) => {
-                        try {
-                            // 1. Salva o pedido diretamente no seu banco de dados (Supabase)
-                            const { error } = await supabase.from('orders').insert([newOrder]);
-                            
-                            if (error) {
-                                console.error("Erro do Supabase:", error);
-                                alert("Erro ao salvar o pedido. Verifique sua conexão.");
-                                return;
-                            }
-                            
-                            // 2. Se deu certo, muda a tela automaticamente para o Kanban
-                            setView(ViewState.ORDERS);
-                            
-                        } catch (err) {
-                            console.error("Erro ao lançar pedido:", err);
-                        }
-                    }} 
-                />
-            )}
   
   const handleSaveCoupon = async (coupon: Coupon) => {
     const { data, error } = await supabase.from('coupons').upsert(coupon).select();
@@ -585,16 +547,10 @@ const PartnerView: React.FC<PartnerViewProps> = ({
     }
   };
 
-
   const financialSummary = useMemo(() => {
-      // Pedidos WhatsApp ou Cash são ignorados do saldo da plataforma pois o restaurante recebe direto
-      // A MENOS que seja Cash + Chegoou Delivery (dívida), mas por enquanto vamos focar no Online.
-      
       const validOrders = orders.filter(o => {
           const isWhatsapp = o.origin?.toLowerCase() === 'whatsapp';
           const isIgnored = o.repasseStatus === 'ignored';
-          // Se for dinheiro e delivery chegoou, tem repasse negativo, então conta.
-          // Se for dinheiro e delivery own, repasse é 0, conta (mas não afeta soma).
           return !isWhatsapp && !isIgnored;
       });
 
@@ -641,31 +597,24 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   };
 
   const executeWithdrawal = async () => {
-       setIsWithdrawModalOpen(false); // Close Modal
+       setIsWithdrawModalOpen(false); 
        setIsLoadingFinance(true);
        try {
            console.log("Registrando solicitação de saque manual...");
            
-           // Calculate values for display/record (PERCENTAGE LOGIC)
            const bankFeeRate = localCompany.serviceFeePercentage || 0;
-           
-           // CRITICAL FIX: Round Fee UP (Ceil) to ensure platform gets paid even on small amounts
            const bankFeeValue = calculateBankFee(financialSummary.available, bankFeeRate);
-           
            const netAmount = Math.max(0, financialSummary.available - bankFeeValue);
 
-           // USE UUID GENRATOR FOR VALID SUPABASE UUID TYPE
            const withdrawalId = self.crypto.randomUUID();
-           
            const detailString = `${localCompany.pixKeyType || 'PIX'}: ${localCompany.pixKey} | Taxa (${bankFeeRate}%): R$ ${bankFeeValue.toFixed(2)} | Líquido: R$ ${netAmount.toFixed(2)}`;
 
-           // Insert directly into Supabase instead of Edge Function
            const { error } = await supabase.from('withdrawal_requests').insert([{
                id: withdrawalId,
                userId: company.id,
                userName: company.name,
                userType: 'partner',
-               amount: financialSummary.available, // Bruto
+               amount: financialSummary.available, 
                status: 'pending',
                date: new Date().toISOString(),
                bankInfo: detailString
@@ -675,7 +624,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
            alert("Solicitação concluída! Você receberá entre 09h e 15h do próximo horário bancário.");
            
-           // Refresh history
            const { data: updatedHistory } = await supabase
                 .from('withdrawal_requests')
                 .select('*')
@@ -691,8 +639,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
            setIsLoadingFinance(false);
        }
   };
-
-  // --- END FINANCEIRO ---
 
   const calculatedSalesHistory = useMemo(() => {
       const grouped: Record<string, { revenue: number, count: number }> = {};
@@ -995,7 +941,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const editingOrderPaymentMethod = editingOrder?.paymentMethod?.toLowerCase() || '';
   const editingOrderOrigin = editingOrder?.origin?.toLowerCase() || '';
 
-  // Calculate fees for Modal Display
   const currentBankFee = calculateBankFee(financialSummary.available, localCompany.serviceFeePercentage || 0);
   const currentNet = Math.max(0, financialSummary.available - currentBankFee);
 
@@ -1331,7 +1276,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                 <div className="space-y-8">
                     <DashboardView salesData={calculatedSalesHistory} orders={orders} />
                     
-                    {/* MINI FINANCE WIDGET ON DASHBOARD */}
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2">
@@ -1355,7 +1299,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                 </div>
             )}
             
-            {/* --- NOVO MÓDULO FINANCEIRO --- */}
             {view === ViewState.FINANCE && (
                 <div className="space-y-6">
                     <div className="flex justify-between items-center">
@@ -1377,7 +1320,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         </p>
                     </div>
 
-                    {/* Resumo de Saldos */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden">
                             <div className="relative z-10">
@@ -1411,7 +1353,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         </div>
                     </div>
 
-                    {/* Área de Saque */}
                     <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 flex flex-col md:flex-row items-center justify-between gap-6">
                         <div>
                             <h3 className="text-xl font-bold text-gray-800">Solicitar Repasse</h3>
@@ -1435,7 +1376,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         </button>
                     </div>
 
-                    {/* Histórico */}
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                         <div className="p-6 border-b border-gray-100 flex justify-between items-center">
                             <h3 className="font-bold text-lg text-gray-800">Histórico de Saques</h3>
@@ -1495,6 +1435,31 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                     onDelete={handleDeleteCoupon}
                     companyId={company.id}
                 />
+            )}
+
+            {/* ADICIONADO: AS TELAS NOVAS CORRETAMENTE NO LUGAR DE RENDERIZAÇÃO */}
+            {view === ViewState.POS && (
+                <POSView 
+                    products={products} 
+                    company={localCompany} 
+                    onPlaceOrder={async (newOrder) => {
+                        try {
+                            const { error } = await supabase.from('orders').insert([newOrder]);
+                            if (error) {
+                                console.error("Erro do Supabase:", error);
+                                alert("Erro ao salvar o pedido.");
+                                return;
+                            }
+                            setView(ViewState.ORDERS);
+                        } catch (err) {
+                            console.error("Erro ao lançar pedido:", err);
+                        }
+                    }} 
+                />
+            )}
+
+            {view === ViewState.HISTORY && (
+                <HistoryView orders={orders} />
             )}
 
             {view === ViewState.ORDERS && (
@@ -1580,7 +1545,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 onOpenChat={setActiveChatOrder}
                                 onPrintOrder={handlePrintOrder}
                             />
-                            {/* NOVO: Coluna de Cancelados para evitar "pedidos sumidos" */}
                             <KanbanColumn 
                                 title="Cancelados" 
                                 status="cancelled" 
@@ -1598,10 +1562,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                 </div>
             )}
 
-            {/* ... other views ... */}
             {view === ViewState.MENU && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    {/* ... (Existing Menu View Code) ... */}
                     <div className="lg:col-span-1 bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-fit sticky top-8">
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
@@ -1628,7 +1590,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={e => handleFileUpload(e, setProductImagePreview)} accept="image/*" />
                             </div>
                             
-                            {/* ... Rest of Menu Form ... */}
                             <div className="grid grid-cols-2 gap-3">
                                 <div className="col-span-2">
                                     <label className="text-xs font-bold text-gray-500 uppercase ml-1">Nome</label>
@@ -1739,7 +1700,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         </div>
                     </div>
                     
-                    {/* ... Rest of existing Menu rendering ... */}
                     <div className="lg:col-span-2 space-y-6">
                         <div className="flex justify-between items-center">
                             <h2 className="text-2xl font-bold text-gray-800">Cardápio Atual</h2>
@@ -1788,21 +1748,19 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             {view === ViewState.WHATSAPP && (
                 <WhatsAppBotView 
                     products={products} 
-                    orders={orders} // ADDED: Passing orders for CRM
-                    company={localCompany} // ADDED: Passing company for limits
-                    updateCompany={updateCompany} // ADDED: Update function for limits
+                    orders={orders} 
+                    company={localCompany} 
+                    updateCompany={updateCompany} 
                     coupons={coupons}
                 />
             )}
             
             {view === ViewState.SETTINGS && (
                 <div className="max-w-2xl mx-auto bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
-                    {/* ... (Existing Settings Code) ... */}
                     <h2 className="text-2xl font-bold text-gray-900 mb-6">Configurações da Loja</h2>
                     
                     <div className="space-y-6">
                         <div className="grid grid-cols-2 gap-4">
-                            {/* ... Image, Name, Desc fields ... */}
                              <div className="col-span-2">
                                 <label className="text-sm font-bold text-gray-700 mb-2 block">Identidade Visual</label>
                                 <div className="flex gap-6 items-start">
@@ -1843,7 +1801,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 />
                             </div>
                             
-                             {/* ... Other inputs ... */}
                              <div className="col-span-2">
                                 <label className="text-sm font-bold text-gray-700">Categoria</label>
                                 <select 
