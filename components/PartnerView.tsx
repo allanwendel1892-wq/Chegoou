@@ -38,7 +38,8 @@ const PROTECTED_VIEWS = [
     ViewState.SETTINGS, 
     ViewState.MENU, 
     ViewState.COUPONS, 
-    ViewState.WHATSAPP
+    ViewState.WHATSAPP,
+    ViewState.HISTORY
 ];
 
 interface KanbanColumnProps {
