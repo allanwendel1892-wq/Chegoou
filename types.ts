@@ -68,10 +68,13 @@ export interface Company {
   pixKeyType?: 'cpf' | 'cnpj' | 'email' | 'phone' | 'random';
 
   // --- NOVOS CAMPOS DE MARKETING / WHATSAPP ---
-  dailyMessageLimit?: number; // Quantos disparos por dia (ex: 5)
-  leadsPerBlastLimit?: number; // Quantos leads por disparo (ex: 20)
-  messagesSentToday?: number; // Contador de disparos hoje
-  lastMessageDate?: string; // Data do último disparo para resetar o contador
+  dailyMessageLimit?: number; 
+  leadsPerBlastLimit?: number; 
+  messagesSentToday?: number; 
+  lastMessageDate?: string; 
+
+  // --- NOVO: SENHA GERENCIAL ---
+  adminPin?: string; // Senha numérica para bloquear módulos
 }
 
 export interface ProductOption {
@@ -136,7 +139,7 @@ export interface Order {
   deliveryType: 'own' | 'chegoou'; // inherited from company at time of order
   deliveryMethod: 'delivery' | 'pickup' | string; 
 
-  origin?: 'app' | 'whatsapp' | string; // Origem do pedido
+  origin?: 'app' | 'whatsapp' | 'pdv' | string; // Origem do pedido
   raw_description?: string; // Texto livre do pedido (ex: "1 pizza de calabresa")
 
   paymentId?: string; // payment_id do MP
