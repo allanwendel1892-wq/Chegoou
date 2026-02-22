@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Product, Order, OrderItem, Company } from '../types';
-import { Search, Plus, Minus, Trash2, ShoppingCart, User, CreditCard, CheckCircle, MonitorStop, X } from 'lucide-react';
+import { Search, Plus, Minus, Trash2, ShoppingCart, User, CreditCard, CheckCircle, MonitorStop, X, Banknote } from 'lucide-react';
 
 interface POSViewProps {
   products: Product[];
@@ -8,7 +8,7 @@ interface POSViewProps {
   onPlaceOrder: (order: Order) => void;
 }
 
-const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) => {
+const POSView: React.FC<POSViewProps> = ({ products = [], company, onPlaceOrder }) => {
   const [cart, setCart] = useState<OrderItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('Todas');
@@ -19,23 +19,22 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
   const [changeFor, setChangeFor] = useState<number | ''>('');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // Derivando as categorias existentes nos produtos
+  // Derivando as categorias com segurança (fallback para produtos sem categoria)
   const categories = useMemo(() => {
-    const cats = new Set(products.map(p => p.category));
+    const cats = new Set(products.map(p => p.category || 'Geral'));
     return ['Todas', ...Array.from(cats)];
   }, [products]);
 
+  // Filtragem segura (fallback para produtos sem nome)
   const filteredProducts = products.filter(p => {
-    const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = selectedCategory === 'Todas' || p.category === selectedCategory;
-    return matchesSearch && matchesCategory && p.isAvailable;
+    const matchesSearch = (p.name || '').toLowerCase().includes((searchTerm || '').toLowerCase());
+    const matchesCategory = selectedCategory === 'Todas' || (p.category || 'Geral') === selectedCategory;
+    return matchesSearch && matchesCategory && p.isAvailable !== false;
   });
 
-  const cartTotal = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+  const cartTotal = cart.reduce((acc, item) => acc + ((item.price || 0) * (item.quantity || 1)), 0);
 
   const handleAddToCart = (product: Product) => {
-    // Nota: Numa versão v2 podemos abrir um modal aqui para escolher os complementos (groups).
-    // Para manter a estabilidade inicial, estamos adicionando o produto base diretamente.
     const existingItemIndex = cart.findIndex(item => item.productId === product.id);
     
     if (existingItemIndex >= 0) {
@@ -45,9 +44,9 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
     } else {
       setCart([...cart, {
         productId: product.id,
-        productName: product.name,
+        productName: product.name || 'Produto sem nome',
         quantity: 1,
-        price: product.price,
+        price: product.price || 0,
         selectedOptions: []
       }]);
     }
@@ -71,35 +70,33 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
     setIsProcessing(true);
 
     const newOrder: Order = {
-      id: self.crypto.randomUUID(), // Gera um ID único nativo
-      companyId: company.id,
-      companyName: company.name,
+      id: self.crypto.randomUUID ? self.crypto.randomUUID() : Date.now().toString(), // Compatibilidade garantida
+      companyId: company?.id || 'pdv',
+      companyName: company?.name || 'Chegoou PDV',
       customerId: '',
       customerName: customerName.trim() || 'Cliente Balcão',
-      customerPhone: '00000000000', // Telefone genérico para PDV
+      customerPhone: '00000000000',
       items: cart,
       total: cartTotal,
       subtotal: cartTotal,
-      deliveryFee: 0, // Sem taxa de entrega no balcão
+      deliveryFee: 0,
       serviceFee: 0,
-      status: 'pending', // Cai direto no Kanban como Pendente
+      status: 'pending',
       paymentMethod: paymentMethod,
       changeFor: paymentMethod === 'cash' ? Number(changeFor) : undefined,
       timestamp: new Date(),
       deliveryCode: Math.floor(1000 + Math.random() * 9000).toString(),
       deliveryAddress: { street: 'Retirada no Local', number: '', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0 },
-      pickupAddress: company.address || { street: '', number: '', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0 },
+      pickupAddress: company?.address || { street: '', number: '', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0 },
       deliveryType: 'own',
-      deliveryMethod: 'pickup', // Define como retirada
-      origin: 'pdv', // Flag de segurança para separar do App/WhatsApp
-      repasseStatus: 'ignored', // Não entra no bloqueio de saldo do gateway online
+      deliveryMethod: 'pickup',
+      origin: 'pdv',
+      repasseStatus: 'ignored',
       repasseValue: 0
     };
 
-    // Simula um delay rápido de processamento para feedback visual
     setTimeout(() => {
       onPlaceOrder(newOrder);
-      // Limpa o PDV para o próximo cliente
       setCart([]);
       setCustomerName('');
       setChangeFor('');
@@ -112,7 +109,7 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
   return (
     <div className="h-[calc(100vh-8rem)] flex flex-col md:flex-row gap-6">
       
-      {/* LADO ESQUERDO: Catálogo de Produtos */}
+      {/* LADO ESQUERDO: Catálogo */}
       <div className="flex-1 flex flex-col bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="p-4 border-b border-gray-100 bg-gray-50 flex flex-col sm:flex-row gap-4 items-center justify-between">
           <div className="flex items-center gap-2 text-gray-800">
@@ -132,7 +129,6 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
           </div>
         </div>
 
-        {/* Categorias */}
         <div className="flex gap-2 overflow-x-auto p-4 border-b border-gray-50 scrollbar-hide">
           {categories.map(cat => (
             <button
@@ -147,7 +143,6 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
           ))}
         </div>
 
-        {/* Grade de Produtos */}
         <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredProducts.map(product => (
             <button
@@ -162,10 +157,10 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                   <div className="w-full h-full flex items-center justify-center text-gray-300"><ShoppingCart className="w-8 h-8"/></div>
                 )}
               </div>
-              <h4 className="font-bold text-gray-800 text-sm line-clamp-2 leading-tight">{product.name}</h4>
-              <p className="text-xs text-gray-400 mt-1 uppercase font-semibold">{product.category}</p>
+              <h4 className="font-bold text-gray-800 text-sm line-clamp-2 leading-tight">{product.name || 'Sem nome'}</h4>
+              <p className="text-xs text-gray-400 mt-1 uppercase font-semibold">{product.category || 'Geral'}</p>
               <div className="mt-auto pt-2 flex justify-between items-center">
-                <span className="font-bold text-green-600">R$ {product.price.toFixed(2)}</span>
+                <span className="font-bold text-green-600">R$ {(product.price || 0).toFixed(2)}</span>
                 <span className="bg-red-50 text-red-600 w-6 h-6 rounded-full flex items-center justify-center group-hover:bg-red-600 group-hover:text-white transition-colors">
                   <Plus className="w-4 h-4" />
                 </span>
@@ -185,7 +180,6 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
           <span className="bg-white/20 px-2 py-1 rounded text-xs font-bold">{cart.length} itens</span>
         </div>
 
-        {/* Lista do Carrinho */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
           {cart.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-50">
@@ -197,7 +191,7 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
               <div key={idx} className="bg-white p-3 rounded-xl border border-gray-100 flex flex-col gap-2 shadow-sm">
                 <div className="flex justify-between items-start">
                   <span className="text-sm font-bold text-gray-800 leading-tight pr-2">{item.productName}</span>
-                  <span className="font-bold text-sm">R$ {(item.price * item.quantity).toFixed(2)}</span>
+                  <span className="font-bold text-sm">R$ {((item.price || 0) * (item.quantity || 1)).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between items-center border-t border-gray-50 pt-2">
                   <div className="flex items-center bg-gray-100 rounded-lg">
@@ -214,7 +208,6 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
           )}
         </div>
 
-        {/* Checkout Form */}
         <div className="p-4 border-t border-gray-100 space-y-4">
           <div>
             <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1 mb-1"><User className="w-3 h-3"/> Nome do Cliente (Opcional)</label>
