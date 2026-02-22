@@ -1,6 +1,3 @@
-
-
-
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Company, Product, Order, FinancialRecord, ChatMessage, CreditCard, Address, WithdrawalRequest, Coupon } from './types';
 import AuthView from './components/AuthView';
@@ -99,14 +96,26 @@ const App: React.FC = () => {
   useEffect(() => {
     fetchInitialData();
 
+    // --- NOVA LÓGICA DE REALTIME DAS MENSAGENS COM PROTEÇÃO ANTI-DUPLICIDADE ---
     const messagesSub = supabase
       .channel('public:messages')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-          const newMsg = payload.new as ChatMessage;
-          setChats(prev => ({
-              ...prev,
-              [newMsg.orderId]: [...(prev[newMsg.orderId] || []), newMsg]
-          }));
+          const newMsg = payload.new as any;
+          const formattedMsg: ChatMessage = {
+              ...newMsg,
+              timestamp: new Date(newMsg.timestamp)
+          };
+          
+          setChats(prev => {
+              const currentChats = prev[formattedMsg.orderId] || [];
+              // Se a mensagem já foi colocada na tela pela atualização otimista, ignora
+              if (currentChats.some(m => m.id === formattedMsg.id)) return prev;
+              
+              return {
+                  ...prev,
+                  [formattedMsg.orderId]: [...currentChats, formattedMsg]
+              };
+          });
       })
       .subscribe();
     
@@ -368,16 +377,41 @@ const App: React.FC = () => {
       setCompanies(prev => prev.map(c => ({ ...c, serviceFeePercentage: newSettings.platformFee })));
   };
 
+  // --- NOVA LÓGICA DE ENVIO (ATUALIZAÇÃO OTIMISTA) ---
   const handleSendMessage = async (orderId: string, text: string, senderId: string, role: 'client' | 'partner') => {
-      const newMessage = {
-          id: `msg-${Date.now()}`,
+      const newMessageId = `msg-${Date.now()}`;
+      const timestampIso = new Date().toISOString();
+      
+      // 1. Atualização Otimista: Força a mensagem aparecer na tela de quem enviou IMEDIATAMENTE
+      const optimisticMessage: ChatMessage = {
+          id: newMessageId,
           orderId,
           senderId,
           senderRole: role,
           text,
-          timestamp: new Date().toISOString()
+          timestamp: new Date(timestampIso)
       };
-      await supabase.from('messages').insert([newMessage]);
+
+      setChats(prev => {
+          const currentChats = prev[orderId] || [];
+          if (currentChats.some(m => m.id === newMessageId)) return prev;
+          return {
+              ...prev,
+              [orderId]: [...currentChats, optimisticMessage]
+          };
+      });
+
+      // 2. Envia para o banco de dados silenciosamente
+      const payloadToInsert = {
+          id: newMessageId,
+          orderId,
+          senderId,
+          senderRole: role,
+          text,
+          timestamp: timestampIso
+      };
+      
+      await supabase.from('messages').insert([payloadToInsert]);
   };
 
   const handleUpdateWithdrawal = async (id: string, status: 'paid' | 'rejected') => {
@@ -395,36 +429,22 @@ const App: React.FC = () => {
     const company = companies.find(c => c.id === companyId);
     if (!company) return false;
 
-    // --- NOVA LÓGICA DE REPASSE (Atualizada) ---
     const isOnlinePayment = paymentMethod !== 'cash';
-    const FIXED_SERVICE_FEE = 0.49; // Agora fixo em 49 centavos
+    const FIXED_SERVICE_FEE = 0.49; 
     
     let repasseValue = 0;
     const subtotalAfterDiscount = subtotal - (discountAmount || 0);
 
     if (isOnlinePayment) {
         if (company.deliveryType === 'own') {
-            // Entrega Própria (Restaurante):
-            // Restaurante recebe: Comida (com desconto) + Entrega.
-            // Plataforma fica com: Taxa de Serviço.
             repasseValue = subtotalAfterDiscount + deliveryFee;
         } else {
-            // Entrega Chegoou (Plataforma):
-            // Restaurante recebe: Apenas Comida (com desconto).
-            // Plataforma fica com: Taxa de Serviço + Taxa de Entrega.
             repasseValue = subtotalAfterDiscount;
         }
     } else {
-        // DINHEIRO
         if (company.deliveryType === 'chegoou') {
-            // Entrega Chegoou mas pago em Dinheiro.
-            // O Restaurante (ou Motoboy) recebe tudo na mão.
-            // O Restaurante fica DEVENDO à plataforma: Taxa de Entrega + Taxa de Serviço.
-            // Saldo Negativo.
             repasseValue = -1 * (deliveryFee + FIXED_SERVICE_FEE);
         } else {
-            // Entrega Própria + Dinheiro.
-            // O Restaurante recebe tudo. A plataforma não cobra a taxa de serviço aqui.
             repasseValue = 0;
         }
     }
@@ -509,7 +529,6 @@ const App: React.FC = () => {
   };
 
   const updateOrderStatus = async (orderId: string, status: Order['status']) => {
-    // --- LÓGICA DE CANCELAMENTO COM ESTORNO ---
     if (status === 'cancelled') {
         const orderToCancel = orders.find(o => o.id === orderId);
         
@@ -531,14 +550,9 @@ const App: React.FC = () => {
         }
     }
 
-    // --- LÓGICA DE REPASSE (12H LOCK) ---
-    // Quando o pedido é entregue, marcamos o repasse como 'bloqueado' e setamos a data.
-    // FIX: Use a specific type instead of 'any' to ensure type safety.
     let updateData: Partial<Order> = { status };
     
-    // Se for entregue e NÃO for cancelado
     if (status === 'delivered') {
-        // Bloqueia o saldo (para liberar em 12h) se não for ignorado
         updateData.repasseStatus = 'blocked';
         updateData.repasseDate = new Date().toISOString();
     }
@@ -550,7 +564,6 @@ const App: React.FC = () => {
   const handleCourierAcceptOrder = async (orderId: string) => {
       if (!currentUser) return;
       
-      // FIX: Explicitly type `updateData` to prevent TypeScript from widening the 'status' property to a generic 'string', resolving the type error.
       const updateData: { status: Order['status']; courierId: string } = {
           status: 'delivering',
           courierId: currentUser.id
@@ -723,10 +736,8 @@ const App: React.FC = () => {
             chats={chats}
             onSendMessage={handleSendMessage}
             onAddAddress={handleAddAddress}
-            // FIX: Corrected function name from 'onRemoveAddress' to 'handleRemoveAddress' to match the available handler.
             onRemoveAddress={handleRemoveAddress}
             onAddCard={handleAddCard}
-            // FIX: Corrected function name from 'onRemoveCard' to 'handleRemoveCard' to match the available handler.
             onRemoveCard={handleRemoveCard}
             onCancelOrder={handleCancelOrder} 
         />;
