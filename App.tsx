@@ -37,6 +37,7 @@ const prepareProductPayload = (product: Product) => {
     };
 };
 
+// --- FUNÇÃO DE NORMALIZAÇÃO DE WHATSAPP ---
 const normalizeWhatsApp = (phone: string) => {
     if (!phone) return phone;
     let clean = phone.replace(/\D/g, ''); // Tira traços, parênteses e espaços
@@ -336,6 +337,11 @@ const App: React.FC = () => {
   };
 
   const handleLogin = async (userAttempt: User) => {
+    // --- NORMALIZAÇÃO AQUI (CORREÇÃO DE CLIENTES NOVOS) ---
+    if (userAttempt.phone) {
+        userAttempt.phone = normalizeWhatsApp(userAttempt.phone);
+    }
+
     if (userAttempt.id === 'login_action') {
         try {
             const { data, error } = await supabase.from('users').select('*').eq('email', userAttempt.email).eq('password', userAttempt.password).single();
@@ -365,11 +371,14 @@ const App: React.FC = () => {
   };
 
   const handleUpdateUser = async (updatedUser: User) => {
+      // --- NORMALIZAÇÃO AQUI (CORREÇÃO DE PERFIL) ---
       if (updatedUser.phone) {
           updatedUser.phone = normalizeWhatsApp(updatedUser.phone);
-      }   
+      }
+      
+      // REMOVIDA A LINHA DUPLICADA QUE CAUSAVA O ERRO
       const { error } = await supabase.from('users').update(updatedUser).eq('id', updatedUser.id);
-      const { error } = await supabase.from('users').update(updatedUser).eq('id', updatedUser.id);
+      
       if (!error) {
         setUsers(users.map(u => u.id === updatedUser.id ? updatedUser : u));
         if (currentUser && currentUser.id === updatedUser.id) setCurrentUser(updatedUser);
