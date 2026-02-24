@@ -37,6 +37,30 @@ const prepareProductPayload = (product: Product) => {
     };
 };
 
+const normalizeWhatsApp = (phone: string) => {
+    if (!phone) return phone;
+    let clean = phone.replace(/\D/g, ''); // Tira traços, parênteses e espaços
+
+    if (clean.startsWith('0')) clean = clean.substring(1); // Tira o zero do DDD (ex: 081)
+
+    // Se digitou sem o código do Brasil (10 ou 11 números)
+    if (clean.length === 10 || clean.length === 11) {
+        clean = '55' + clean;
+    }
+
+    // REGRA DO WHATSAPP BRASIL:
+    // Se o número tem 13 dígitos (tem o 9) e começa com 55.
+    if (clean.length === 13 && clean.startsWith('55')) {
+        const ddd = parseInt(clean.substring(2, 4), 10);
+        // Se o DDD for maior que 28 (ex: 81), o WhatsApp corta o 9º dígito internamente.
+        if (ddd > 28 && clean[4] === '9') {
+            clean = clean.substring(0, 4) + clean.substring(5); // Pula o 9 e junta o resto
+        }
+    }
+
+    return clean;
+};
+
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -341,6 +365,10 @@ const App: React.FC = () => {
   };
 
   const handleUpdateUser = async (updatedUser: User) => {
+      if (updatedUser.phone) {
+          updatedUser.phone = normalizeWhatsApp(updatedUser.phone);
+      }   
+      const { error } = await supabase.from('users').update(updatedUser).eq('id', updatedUser.id);
       const { error } = await supabase.from('users').update(updatedUser).eq('id', updatedUser.id);
       if (!error) {
         setUsers(users.map(u => u.id === updatedUser.id ? updatedUser : u));
