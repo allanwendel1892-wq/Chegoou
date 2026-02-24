@@ -336,7 +336,7 @@ const App: React.FC = () => {
     setCurrentUser(null);
   };
 
-const handleLogin = async (userAttempt: User) => {
+  const handleLogin = async (userAttempt: User) => {
     if (userAttempt.phone) {
         userAttempt.phone = normalizeWhatsApp(userAttempt.phone);
         
@@ -376,9 +376,14 @@ const handleLogin = async (userAttempt: User) => {
   };
 
   const handleUpdateUser = async (updatedUser: User) => {
-      // --- NORMALIZAÇÃO AQUI (CORREÇÃO DE PERFIL) ---
       if (updatedUser.phone) {
           updatedUser.phone = normalizeWhatsApp(updatedUser.phone);
+          
+          // --- TRAVA DE SEGURANÇA AQUI ---
+          if (updatedUser.phone.length < 12) {
+              alert("Número inválido. Digite o número completo com o DDD.");
+              return; 
+          }
       }
       
       // REMOVIDA A LINHA DUPLICADA QUE CAUSAVA O ERRO
