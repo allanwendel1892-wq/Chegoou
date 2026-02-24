@@ -337,16 +337,17 @@ const App: React.FC = () => {
   };
 
   const handleLogin = async (userAttempt: User) => {
+    // 1. Normalização e Trava de Segurança
     if (userAttempt.phone) {
         userAttempt.phone = normalizeWhatsApp(userAttempt.phone);
         
-        // --- TRAVA DE SEGURANÇA AQUI ---
         if (userAttempt.phone.length < 12 && userAttempt.id.startsWith('u-')) {
             alert("Por favor, digite o seu número completo com o DDD (Ex: 81 99999-9999).");
-            return; // Interrompe o cadastro na hora!
+            return;
         }
     }
 
+    // 2. Lógica de LOGIN normal (já tem conta)
     if (userAttempt.id === 'login_action') {
         try {
             const { data, error } = await supabase.from('users').select('*').eq('email', userAttempt.email).eq('password', userAttempt.password).single();
@@ -362,19 +363,56 @@ const App: React.FC = () => {
             alert("Erro fatal no login: " + e.message);
         }
     } 
+    // 3. Lógica de CADASTRO (Novo usuário no App)
     else if (userAttempt.id.startsWith('u-')) {
-        const { data, error } = await supabase.from('users').insert([userAttempt]).select();
-        if (error) {
-             alert("Erro ao criar conta: " + error.message);
-             return;
-        }
-        if (data) {
-            setUsers([...users, data[0]]);
-            setCurrentUser(data[0]);
+        // PERGUNTA AO BANCO: Esse telefone já existe? (Foi criado pelo n8n?)
+        const { data: existingUser } = await supabase
+            .from('users')
+            .select('*')
+            .eq('phone', userAttempt.phone)
+            .single();
+
+        if (existingUser) {
+            // MESCLAGEM DE CONTAS: Atualiza a conta "fantasma" do n8n com os dados reais do app
+            const updatedData = {
+                name: userAttempt.name,
+                email: userAttempt.email,
+                password: userAttempt.password,
+                role: 'client' // Garante que ele é um cliente
+            };
+
+            const { data: updatedRecord, error: updateError } = await supabase
+                .from('users')
+                .update(updatedData)
+                .eq('id', existingUser.id)
+                .select();
+
+            if (updateError) {
+                alert("Erro ao sincronizar sua conta do WhatsApp: " + updateError.message);
+                return;
+            }
+
+            if (updatedRecord) {
+                // Sucesso! Atualiza a memória do app e loga o cara na conta mesclada
+                setUsers(users.map(u => u.id === existingUser.id ? updatedRecord[0] : u));
+                setCurrentUser(updatedRecord[0]);
+                alert("Identificamos que você já pediu no nosso WhatsApp! Suas contas foram unificadas.");
+            }
+        } else {
+            // SE O TELEFONE NÃO EXISTE: Cria uma conta nova do zero normalmente
+            const { data, error } = await supabase.from('users').insert([userAttempt]).select();
+            if (error) {
+                 alert("Erro ao criar conta: " + error.message);
+                 return;
+            }
+            if (data) {
+                setUsers([...users, data[0]]);
+                setCurrentUser(data[0]);
+            }
         }
     }
   };
-
+  
   const handleUpdateUser = async (updatedUser: User) => {
       if (updatedUser.phone) {
           updatedUser.phone = normalizeWhatsApp(updatedUser.phone);
