@@ -336,10 +336,15 @@ const App: React.FC = () => {
     setCurrentUser(null);
   };
 
-  const handleLogin = async (userAttempt: User) => {
-    // --- NORMALIZAÇÃO AQUI (CORREÇÃO DE CLIENTES NOVOS) ---
+const handleLogin = async (userAttempt: User) => {
     if (userAttempt.phone) {
         userAttempt.phone = normalizeWhatsApp(userAttempt.phone);
+        
+        // --- TRAVA DE SEGURANÇA AQUI ---
+        if (userAttempt.phone.length < 12 && userAttempt.id.startsWith('u-')) {
+            alert("Por favor, digite o seu número completo com o DDD (Ex: 81 99999-9999).");
+            return; // Interrompe o cadastro na hora!
+        }
     }
 
     if (userAttempt.id === 'login_action') {
