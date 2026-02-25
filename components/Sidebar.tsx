@@ -51,7 +51,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, isMobileOpen, s
               </div>
               <div>
                 <h1 className="text-gray-900 font-bold text-xl leading-none tracking-tight">Chegoou</h1>
-                <p className="text-gray-400 text-xs font-semibold uppercase tracking-wider mt-1">Partner Portal</p>
+                <p className="text-gray-400 text-xs font-semibold uppercase tracking-wider mt-1">Portal Empresarial</p>
               </div>
             </div>
         </div>
