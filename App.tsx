@@ -9,11 +9,6 @@ import { supabase } from './services/supabaseClient';
 import { PaymentService } from './services/paymentService';
 import { Loader2, AlertCircle, Database, Lock } from 'lucide-react';
 
-// >>> IMPORTA OS SONS DE NOTIFICAÇÕES <<<
-import somMensagem from './somMensagem.mp3';
-import somPedido from './somPedido.mp3';
-import somEntrega from './somEntrega.mp3';
-
 const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
   const R = 6371; 
@@ -65,10 +60,19 @@ const normalizeWhatsApp = (phone: string) => {
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  
-  // SOLUÇÃO: Referência em tempo real para o usuário (evita falha na notificação de mensagens)
   const currentUserRef = useRef<User | null>(null);
+  
+  // Atualiza a referência sempre que o usuário logar/deslogar
   useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
+
+  // --- CONTROLADOR DA NOTIFICAÇÃO VISUAL INTERNA (TOAST) ---
+  const [inAppNotification, setInAppNotification] = useState<{title: string, message: string, icon: string} | null>(null);
+
+  const showInAppNotification = (title: string, message: string, icon: string) => {
+      setInAppNotification({ title, message, icon });
+      setTimeout(() => setInAppNotification(null), 4000); // Some após 4 segundos
+  };
+  // ---------------------------------------------------------
 
   const [isLoading, setIsLoading] = useState(true);
   const [connectionError, setConnectionError] = useState<{title: string, message: string, type: 'network' | 'permission' | 'unknown'} | null>(null);
@@ -89,16 +93,6 @@ const App: React.FC = () => {
   });
 
   const ordersRef = useRef<Order[]>([]);
-  
-  // Pede permissão para Notificações Push assim que o cliente entra
-  useEffect(() => {
-      if (currentUser && currentUser.role === 'client' && "Notification" in window) {
-          if (Notification.permission === "default") {
-              Notification.requestPermission();
-          }
-      }
-  }, [currentUser]);
-
   useEffect(() => { ordersRef.current = orders; }, [orders]);
 
   useEffect(() => {
@@ -137,7 +131,7 @@ const App: React.FC = () => {
   useEffect(() => {
     fetchInitialData();
 
-    // --- LÓGICA DE REALTIME DAS MENSAGENS E SAQUES ---
+    // --- REALTIME DAS MENSAGENS E SAQUES ---
     const messagesSub = supabase
       .channel('public:messages')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
@@ -147,17 +141,15 @@ const App: React.FC = () => {
               timestamp: new Date(newMsg.timestamp)
           };
 
-          // Usa o currentUserRef.current para saber exatamente quem está logado agora!
+          // Notificação de Chat
           if (currentUserRef.current && formattedMsg.senderRole !== currentUserRef.current.role) {
+              new Audio('/somMensagem.mp3').play().catch(() => {});
               
-              // Chama o arquivo importado corretamente
-              new Audio(somMensagem).play().catch(() => console.log("Áudio bloqueado"));
-              
-              if ("Notification" in window && Notification.permission === "granted") {
-                  new Notification(`Nova mensagem de ${formattedMsg.senderRole === 'partner' ? 'Restaurante' : 'Cliente'}`, { 
-                      body: formattedMsg.text 
-                  });
-              }
+              showInAppNotification(
+                  `Nova mensagem de ${formattedMsg.senderRole === 'partner' ? 'Restaurante' : 'Cliente'}`, 
+                  formattedMsg.text,
+                  '💬'
+              );
           }
           
           setChats(prev => {
@@ -189,7 +181,7 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // --- LÓGICA DE REALTIME DOS PEDIDOS ---
+  // --- REALTIME DOS PEDIDOS ---
   useEffect(() => {
       if (!currentUser) return;
 
@@ -213,7 +205,7 @@ const App: React.FC = () => {
                   newOrder.timestamp = new Date(newOrder.timestamp);
 
                   if (currentUser.role === 'partner') {
-                      new Audio(somPedido).play().catch(() => console.log("Áudio bloqueado"));
+                      new Audio('/somPedido.mp3').play().catch(() => {});
                   }
 
                   setOrders(prev => {
@@ -224,22 +216,18 @@ const App: React.FC = () => {
                   const updatedOrder = payload.new as Order;
                   updatedOrder.timestamp = new Date(updatedOrder.timestamp);
                   
-                  // --- NOTIFICAÇÃO DO CLIENTE: SAIU PARA ENTREGA ---
+                  // Notificação de Saída para Entrega (Realtime)
                   const oldOrder = ordersRef.current.find(o => o.id === updatedOrder.id);
                   if (currentUser.role === 'client' && oldOrder && oldOrder.status !== 'delivering' && updatedOrder.status === 'delivering') {
                       
-                      // Chama o arquivo importado corretamente
-                      new Audio(somEntrega).play().catch(() => {});
+                      new Audio('/somEntrega.mp3').play().catch(() => {});
                       
-                      if ("Notification" in window && Notification.permission === "granted") {
-                          new Notification(`Chegoou! 🛵`, { body: `Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!` });
-                      } else {
-                          setTimeout(() => {
-                              alert(`🛵 Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!`);
-                          }, 800);
-                      }
+                      showInAppNotification(
+                          'Chegoou! 🛵', 
+                          `Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!`,
+                          '🛵'
+                      );
                   }
-                  // -------------------------------------------------
 
                   setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
               } else if (payload.eventType === 'DELETE') {
@@ -295,30 +283,22 @@ const App: React.FC = () => {
                            hasChanges = true;
                            
                            if (currentUser.role === 'partner') {
-                               new Audio(somPedido).play().catch(() => {});
+                               new Audio('/somPedido.mp3').play().catch(() => {});
                            }
 
                        } else if (existing.status !== freshOrder.status || existing.paymentStatus !== freshOrder.paymentStatus) {
                            newOrdersMap.set(freshOrder.id, formattedFreshOrder);
                            hasChanges = true;
                            
-                           if (currentUser.role === 'partner') {
-                               new Audio(somPedido).play().catch(() => {});
-                           }
-                           
-                           // --- NOTIFICAÇÃO DO CLIENTE: SAIU PARA ENTREGA (GARANTIA NO POLLING) ---
+                           // Notificação de Saída para Entrega (Segurança no Polling)
                            if (currentUser.role === 'client' && existing.status !== 'delivering' && freshOrder.status === 'delivering') {
+                               new Audio('/somEntrega.mp3').play().catch(() => {});
                                
-                               // Chama o arquivo importado corretamente
-                               new Audio(somEntrega).play().catch(() => {});
-                               
-                               if ("Notification" in window && Notification.permission === "granted") {
-                                   new Notification(`Chegoou! 🛵`, { body: `Oba! Seu pedido de ${freshOrder.companyName} saiu para entrega!` });
-                               } else {
-                                   setTimeout(() => {
-                                       alert(`🛵 Oba! Seu pedido de ${freshOrder.companyName} saiu para entrega!`);
-                                   }, 800);
-                               }
+                               showInAppNotification(
+                                  'Chegoou! 🛵', 
+                                  `Oba! Seu pedido de ${freshOrder.companyName} saiu para entrega!`,
+                                  '🛵'
+                               );
                            }
                        }
                    });
@@ -412,7 +392,6 @@ const App: React.FC = () => {
   };
 
   const handleLogin = async (userAttempt: User) => {
-    // 1. Normalização e Trava de Segurança
     if (userAttempt.phone) {
         userAttempt.phone = normalizeWhatsApp(userAttempt.phone);
         
@@ -422,7 +401,6 @@ const App: React.FC = () => {
         }
     }
 
-    // 2. Lógica de LOGIN normal (já tem conta)
     if (userAttempt.id === 'login_action') {
         try {
             const { data, error } = await supabase.from('users').select('*').eq('email', userAttempt.email).eq('password', userAttempt.password).single();
@@ -438,9 +416,7 @@ const App: React.FC = () => {
             alert("Erro fatal no login: " + e.message);
         }
     } 
-    // 3. Lógica de CADASTRO (Novo usuário no App)
     else if (userAttempt.id.startsWith('u-')) {
-        // PERGUNTA AO BANCO: Esse telefone já existe? (Foi criado pelo n8n?)
         const { data: existingUser } = await supabase
             .from('users')
             .select('*')
@@ -448,7 +424,6 @@ const App: React.FC = () => {
             .single();
 
         if (existingUser) {
-            // MESCLAGEM DE CONTAS: Atualiza a conta "fantasma" do n8n com os dados reais do app
             const updatedData = {
                 name: userAttempt.name,
                 email: userAttempt.email,
@@ -829,9 +804,24 @@ const App: React.FC = () => {
     return <AuthView onLogin={handleLogin} existingUsers={users} />;
   }
 
+  // >>> UI DA NOTIFICAÇÃO VISUAL INTERNA (GARANTIDA) <<<
+  const NotificationToast = inAppNotification && (
+      <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[99999] bg-white rounded-2xl shadow-2xl shadow-black/20 border border-gray-100 p-4 flex items-center gap-4 animate-slide-up w-[90%] max-w-sm pointer-events-none transition-all">
+          <div className="bg-red-50 text-2xl p-2 rounded-full shrink-0 flex items-center justify-center h-12 w-12 border border-red-100">
+              {inAppNotification.icon}
+          </div>
+          <div>
+              <h4 className="font-bold text-gray-900 text-sm">{inAppNotification.title}</h4>
+              <p className="text-xs text-gray-600 leading-tight mt-0.5">{inAppNotification.message}</p>
+          </div>
+      </div>
+  );
+
+  let ViewToRender;
+  
   switch (currentUser.role) {
     case 'admin':
-        return <AdminView 
+        ViewToRender = <AdminView 
             users={users} setUsers={setUsers} 
             companies={companies} setCompanies={setCompanies} 
             orders={orders} 
@@ -845,39 +835,44 @@ const App: React.FC = () => {
             onUpsertCompany={handleUpsertCompany}
             onDeleteCompany={handleDeleteCompany}
         />;
+        break;
     
     case 'partner':
         const myCompany = companies.find(c => c.id === currentUser.id);
-        if (!myCompany) return <div className="h-screen flex items-center justify-center">Loja não encontrada. <button onClick={handleLogout}>Sair</button></div>;
-        
-        return <PartnerView 
-            company={myCompany} 
-            orders={orders.filter(o => o.companyId === myCompany.id)}
-            products={products.filter(p => p.companyId === myCompany.id)}
-            updateOrderStatus={updateOrderStatus}
-            updateCompany={(data) => handleUpdateCompany(myCompany.id, data)}
-            onAddProduct={handleAddProduct}
-            onUpdateProduct={handleUpdateProduct} 
-            onDeleteProduct={handleDeleteProduct} 
-            onLogout={handleLogout}
-            chats={chats}
-            onSendMessage={handleSendMessage}
-            onUpdateFullOrder={handleUpdateFullOrder}
-            onDeleteOrder={handleDeleteOrder}
-        />;
+        if (!myCompany) {
+            ViewToRender = <div className="h-screen flex items-center justify-center">Loja não encontrada. <button onClick={handleLogout}>Sair</button></div>;
+        } else {
+            ViewToRender = <PartnerView 
+                company={myCompany} 
+                orders={orders.filter(o => o.companyId === myCompany.id)}
+                products={products.filter(p => p.companyId === myCompany.id)}
+                updateOrderStatus={updateOrderStatus}
+                updateCompany={(data) => handleUpdateCompany(myCompany.id, data)}
+                onAddProduct={handleAddProduct}
+                onUpdateProduct={handleUpdateProduct} 
+                onDeleteProduct={handleDeleteProduct} 
+                onLogout={handleLogout}
+                chats={chats}
+                onSendMessage={handleSendMessage}
+                onUpdateFullOrder={handleUpdateFullOrder}
+                onDeleteOrder={handleDeleteOrder}
+            />;
+        }
+        break;
 
     case 'courier':
-        return <CourierView 
+        ViewToRender = <CourierView 
             courier={currentUser} 
             availableOrders={orders} 
             acceptOrder={handleCourierAcceptOrder}
             confirmDelivery={(id, code) => updateOrderStatus(id, 'delivered')}
             onLogout={handleLogout}
         />;
+        break;
 
     case 'client':
     default:
-        return <ClientView 
+        ViewToRender = <ClientView 
             user={currentUser} 
             companies={companies} 
             products={products}
@@ -894,7 +889,16 @@ const App: React.FC = () => {
             onRemoveCard={handleRemoveCard}
             onCancelOrder={handleCancelOrder} 
         />;
+        break;
   }
+
+  // Renderiza a Notificação por cima de qualquer tela ativa
+  return (
+      <>
+        {NotificationToast}
+        {ViewToRender}
+      </>
+  );
 };
 
 export default App;
