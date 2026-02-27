@@ -9,9 +9,10 @@ import { supabase } from './services/supabaseClient';
 import { PaymentService } from './services/paymentService';
 import { Loader2, AlertCircle, Database, Lock } from 'lucide-react';
 
-// >>> ADICIONE ESTAS DUAS LINHAS AQUI <<<
-import somMensagem from './somMensagem.mp3'; // Troque pelo nome exato do seu arquivo
-import somPedido from './somPedido.mp3';     // Troque pelo nome exato do seu arquivo
+// >>> IMPORTA OS SONS DE NOTIFICAÇÕES <<<
+import somMensagem from './somMensagem.mp3';
+import somPedido from './somPedido.mp3';
+import somEntrega from './somEntrega.mp3';
 
 const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
@@ -87,6 +88,13 @@ const App: React.FC = () => {
   });
 
   const ordersRef = useRef<Order[]>([]);
+  useEffect(() => {
+      if (currentUser && currentUser.role === 'client' && "Notification" in window) {
+          if (Notification.permission === "default") {
+              Notification.requestPermission();
+          }
+      }
+  }, [currentUser]);
   useEffect(() => { ordersRef.current = orders; }, [orders]);
 
   useEffect(() => {
@@ -154,12 +162,25 @@ const App: React.FC = () => {
     const withdrawalsSub = supabase
       .channel('public:withdrawal_requests')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'withdrawal_requests' }, (payload) => {
-          if (payload.eventType === 'INSERT') {
-             setWithdrawals(prev => [...prev, payload.new as WithdrawalRequest]);
           } else if (payload.eventType === 'UPDATE') {
-             setWithdrawals(prev => prev.map(w => w.id === payload.new.id ? payload.new as WithdrawalRequest : w));
-          }
-      })
+                  const updatedOrder = payload.new as Order;
+                  updatedOrder.timestamp = new Date(updatedOrder.timestamp);
+                  
+                  // --- NOTIFICAÇÃO DO CLIENTE: SAIU PARA ENTREGA ---
+                  const oldOrder = ordersRef.current.find(o => o.id === updatedOrder.id);
+                  if (currentUser.role === 'client' && oldOrder && oldOrder.status !== 'delivering' && updatedOrder.status === 'delivering') {
+                      new Audio(somEntrega).play().catch(() => {});
+                      
+                      if ("Notification" in window && Notification.permission === "granted") {
+                          new Notification(`Chegoou! 🛵`, { body: `Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!` });
+                      } else {
+                          alert(`🛵 Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!`);
+                      }
+                  }
+                  // -------------------------------------------------
+
+                  setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+              }
       .subscribe();
 
     return () => {
@@ -264,6 +285,21 @@ const App: React.FC = () => {
                        } else if (existing.status !== freshOrder.status || existing.paymentStatus !== freshOrder.paymentStatus) {
                            newOrdersMap.set(freshOrder.id, formattedFreshOrder);
                            hasChanges = true;
+                           
+                           if (currentUser.role === 'partner') {
+                               new Audio(somPedido).play().catch(() => {});
+                           }
+                           
+                           // --- NOTIFICAÇÃO DO CLIENTE: SAIU PARA ENTREGA (GARANTIA) ---
+                           if (currentUser.role === 'client' && existing.status !== 'delivering' && freshOrder.status === 'delivering') {
+                               new Audio(somEntrega).play().catch(() => {});
+                               
+                               if ("Notification" in window && Notification.permission === "granted") {
+                                   new Notification(`Chegoou! 🛵`, { body: `Oba! Seu pedido de ${freshOrder.companyName} saiu para entrega!` });
+                               } else {
+                                   alert(`🛵 Oba! Seu pedido de ${freshOrder.companyName} saiu para entrega!`);
+                               }
+                           }
                        }
                    });
 
