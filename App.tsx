@@ -175,7 +175,7 @@ const App: React.FC = () => {
     if (Capacitor.isNativePlatform()) {
         try {
             // SUBSTITUA ISSO AQUI PELO SEU ID DEPOIS:
-            OneSignal.initialize("COLE_SEU_APP_ID_AQUI");
+            OneSignal.initialize("0ecf3ccc-ed42-46e9-b90f-2ddd20fef76e");
             OneSignal.Notifications.requestPermission(true);
         } catch (e) {
             console.error("Erro OneSignal:", e);
