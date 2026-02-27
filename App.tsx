@@ -132,7 +132,7 @@ const App: React.FC = () => {
   useEffect(() => {
     fetchInitialData();
 
-    // LÓGICA DE REALTIME DAS MENSAGENS E SAQUES
+// --- NOVA LÓGICA DE REALTIME DAS MENSAGENS COM PROTEÇÃO ANTI-DUPLICIDADE ---
     const messagesSub = supabase
       .channel('public:messages')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
@@ -141,14 +141,23 @@ const App: React.FC = () => {
               ...newMsg,
               timestamp: new Date(newMsg.timestamp)
           };
+
+          // >>> EFEITOS (SOM E VISUAL) MOVIDOS PARA FORA DA ATUALIZAÇÃO DA TELA <<<
+          // Só apita e notifica se a mensagem NÃO for sua!
+          if (currentUser && formattedMsg.senderRole !== currentUser.role) {
+              new Audio('/somMensagem.mp3').play().catch(() => console.log("Áudio bloqueado"));
+              
+              if ("Notification" in window && Notification.permission === "granted") {
+                  new Notification(`Nova mensagem de ${formattedMsg.senderRole === 'partner' ? 'Restaurante' : 'Cliente'}`, { 
+                      body: formattedMsg.text 
+                  });
+              }
+          }
           
           setChats(prev => {
               const currentChats = prev[formattedMsg.orderId] || [];
               if (currentChats.some(m => m.id === formattedMsg.id)) return prev;
               
-              // >>> TOCA SOM DE MENSAGEM <<<
-              new Audio(somMensagem).play().catch(() => console.log("Áudio bloqueado"));
-
               return {
                   ...prev,
                   [formattedMsg.orderId]: [...currentChats, formattedMsg]
@@ -163,9 +172,29 @@ const App: React.FC = () => {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'withdrawal_requests' }, (payload) => {
           if (payload.eventType === 'INSERT') {
              setWithdrawals(prev => [...prev, payload.new as WithdrawalRequest]);
-          } else if (payload.eventType === 'UPDATE') {
-             setWithdrawals(prev => prev.map(w => w.id === payload.new.id ? payload.new as WithdrawalRequest : w));
-          }
+} else if (payload.eventType === 'UPDATE') {
+                  const updatedOrder = payload.new as Order;
+                  updatedOrder.timestamp = new Date(updatedOrder.timestamp);
+                  
+                  // --- NOTIFICAÇÃO DO CLIENTE: SAIU PARA ENTREGA ---
+                  const oldOrder = ordersRef.current.find(o => o.id === updatedOrder.id);
+                  if (currentUser.role === 'client' && oldOrder && oldOrder.status !== 'delivering' && updatedOrder.status === 'delivering') {
+                      
+                      new Audio('/somEntrega.mp3').play().catch(() => {});
+                      
+                      if ("Notification" in window && Notification.permission === "granted") {
+                          new Notification(`Chegoou! 🛵`, { body: `Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!` });
+                      } else {
+                          // Atraso de 800ms para garantir que a tela mude e o áudio toque antes do Alert congelar o navegador
+                          setTimeout(() => {
+                              alert(`🛵 Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!`);
+                          }, 800);
+                      }
+                  }
+                  // -------------------------------------------------
+
+                  setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+              }
       })
       .subscribe();
 
@@ -285,25 +314,23 @@ const App: React.FC = () => {
                                new Audio(somPedido).play().catch(() => {});
                            }
 
-                       } else if (existing.status !== freshOrder.status || existing.paymentStatus !== freshOrder.paymentStatus) {
+} else if (existing.status !== freshOrder.status || existing.paymentStatus !== freshOrder.paymentStatus) {
                            newOrdersMap.set(freshOrder.id, formattedFreshOrder);
                            hasChanges = true;
                            
-                           // Alerta segurança de Atualização de Pedido (Restaurante)
-                           if (currentUser.role === 'partner') {
-                               new Audio(somPedido).play().catch(() => {});
-                           }
+                           // <<< APAGAMOS O SOM DE "NOVO PEDIDO" QUE ESTAVA AQUI ERRADO >>>
                            
                            // --- NOTIFICAÇÃO DO CLIENTE: SAIU PARA ENTREGA (GARANTIA NO POLLING) ---
                            if (currentUser.role === 'client' && existing.status !== 'delivering' && freshOrder.status === 'delivering') {
-                               new Audio(somEntrega).play().catch(() => {});
+                               new Audio('/somEntrega.mp3').play().catch(() => {});
                                
                                if ("Notification" in window && Notification.permission === "granted") {
                                    new Notification(`Chegoou! 🛵`, { body: `Oba! Seu pedido de ${freshOrder.companyName} saiu para entrega!` });
                                } else {
+                                   // Atraso de 800ms
                                    setTimeout(() => {
                                        alert(`🛵 Oba! Seu pedido de ${freshOrder.companyName} saiu para entrega!`);
-                                   }, 100);
+                                   }, 800);
                                }
                            }
                        }
