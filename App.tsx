@@ -9,7 +9,12 @@ import { supabase } from './services/supabaseClient';
 import { PaymentService } from './services/paymentService';
 import { Loader2, AlertCircle, Database, Lock } from 'lucide-react';
 
-// >>> IMPORTA OS SONS DE NOTIFICAÇÕES (AGORA DO JEITO CERTO!) <<<
+// >>> PLUGINS NATIVOS DO APLICATIVO (GPS E NOTIFICAÇÃO PUSH) <<<
+import { Capacitor } from '@capacitor/core';
+import { Geolocation } from '@capacitor/geolocation';
+import OneSignal from 'onesignal-cordova-plugin';
+
+// >>> IMPORTA OS SONS DE NOTIFICAÇÕES <<<
 import somMensagem from './somMensagem.mp3';
 import somPedido from './somPedido.mp3';
 import somEntrega from './somEntrega.mp3';
@@ -24,6 +29,25 @@ const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon
     Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
+};
+
+// --- FUNÇÃO GLOBAL DE GPS (WEB E NATIVO) ---
+// Onde você for puxar a localização nos outros componentes, use esta função!
+export const getDeviceLocation = async () => {
+    if (Capacitor.isNativePlatform()) {
+        // App: Pede a permissão bonita e usa o GPS do celular
+        const position = await Geolocation.getCurrentPosition({ enableHighAccuracy: true });
+        return { lat: position.coords.latitude, lng: position.coords.longitude };
+    } else {
+        // Web/Vercel: Usa o navegador padrão
+        return new Promise<{lat: number, lng: number}>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(
+                (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+                (err) => reject(err),
+                { enableHighAccuracy: true }
+            );
+        });
+    }
 };
 
 const prepareProductPayload = (product: Product) => {
@@ -42,7 +66,6 @@ const prepareProductPayload = (product: Product) => {
     };
 };
 
-// --- FUNÇÃO DE NORMALIZAÇÃO DE WHATSAPP ---
 const normalizeWhatsApp = (phone: string) => {
     if (!phone) return phone;
     let clean = phone.replace(/\D/g, ''); 
@@ -67,17 +90,15 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const currentUserRef = useRef<User | null>(null);
   
-  // Atualiza a referência sempre que o usuário logar/deslogar
   useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
 
-  // --- CONTROLADOR DA NOTIFICAÇÃO VISUAL INTERNA (TOAST) ---
+  // --- CONTROLADOR DA NOTIFICAÇÃO VISUAL INTERNA ---
   const [inAppNotification, setInAppNotification] = useState<{title: string, message: string, icon: string} | null>(null);
 
   const showInAppNotification = (title: string, message: string, icon: string) => {
       setInAppNotification({ title, message, icon });
-      setTimeout(() => setInAppNotification(null), 4000); // Some após 4 segundos
+      setTimeout(() => setInAppNotification(null), 4000); 
   };
-  // ---------------------------------------------------------
 
   const [isLoading, setIsLoading] = useState(true);
   const [connectionError, setConnectionError] = useState<{title: string, message: string, type: 'network' | 'permission' | 'unknown'} | null>(null);
@@ -99,6 +120,22 @@ const App: React.FC = () => {
 
   const ordersRef = useRef<Order[]>([]);
   useEffect(() => { ordersRef.current = orders; }, [orders]);
+
+  // --- REGISTRO DO USUÁRIO NO ONESIGNAL (PUSH NATIVO) ---
+  useEffect(() => {
+      if (Capacitor.isNativePlatform()) {
+          if (currentUser) {
+              try {
+                  OneSignal.login(currentUser.id); // Avisa ao OneSignal quem é essa pessoa
+                  OneSignal.User.addTag("role", currentUser.role); // Separa entregador de cliente/restaurante
+              } catch (e) {}
+          } else {
+              try {
+                  OneSignal.logout();
+              } catch (e) {}
+          }
+      }
+  }, [currentUser]);
 
   useEffect(() => {
       const handlePaymentReturn = async () => {
@@ -134,9 +171,19 @@ const App: React.FC = () => {
   }, [currentUser]);
 
   useEffect(() => {
+    // --- LIGA O MOTOR DO ONESIGNAL ASSIM QUE O APP ABRE ---
+    if (Capacitor.isNativePlatform()) {
+        try {
+            // SUBSTITUA ISSO AQUI PELO SEU ID DEPOIS:
+            OneSignal.initialize("COLE_SEU_APP_ID_AQUI");
+            OneSignal.Notifications.requestPermission(true);
+        } catch (e) {
+            console.error("Erro OneSignal:", e);
+        }
+    }
+
     fetchInitialData();
 
-    // --- REALTIME DAS MENSAGENS E SAQUES ---
     const messagesSub = supabase
       .channel('public:messages')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
@@ -146,11 +193,8 @@ const App: React.FC = () => {
               timestamp: new Date(newMsg.timestamp)
           };
 
-          // Notificação de Chat
           if (currentUserRef.current && formattedMsg.senderRole !== currentUserRef.current.role) {
-              // Toca o som usando o arquivo importado
               new Audio(somMensagem).play().catch(() => {});
-              
               showInAppNotification(
                   `Nova mensagem de ${formattedMsg.senderRole === 'partner' ? 'Restaurante' : 'Cliente'}`, 
                   formattedMsg.text,
@@ -187,7 +231,6 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // --- REALTIME DOS PEDIDOS ---
   useEffect(() => {
       if (!currentUser) return;
 
@@ -222,12 +265,9 @@ const App: React.FC = () => {
                   const updatedOrder = payload.new as Order;
                   updatedOrder.timestamp = new Date(updatedOrder.timestamp);
                   
-                  // Notificação de Saída para Entrega (Realtime)
                   const oldOrder = ordersRef.current.find(o => o.id === updatedOrder.id);
                   if (currentUser.role === 'client' && oldOrder && oldOrder.status !== 'delivering' && updatedOrder.status === 'delivering') {
-                      
                       new Audio(somEntrega).play().catch(() => {});
-                      
                       showInAppNotification(
                           'Chegoou! 🛵', 
                           `Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!`,
@@ -247,7 +287,6 @@ const App: React.FC = () => {
       };
   }, [currentUser]);
 
-  // --- POLLING (Busca de Segurança) ---
   useEffect(() => {
       if (!currentUser) return;
 
@@ -296,10 +335,8 @@ const App: React.FC = () => {
                            newOrdersMap.set(freshOrder.id, formattedFreshOrder);
                            hasChanges = true;
                            
-                           // Notificação de Saída para Entrega (Segurança no Polling)
                            if (currentUser.role === 'client' && existing.status !== 'delivering' && freshOrder.status === 'delivering') {
                                new Audio(somEntrega).play().catch(() => {});
-                               
                                showInAppNotification(
                                   'Chegoou! 🛵', 
                                   `Oba! Seu pedido de ${freshOrder.companyName} saiu para entrega!`,
@@ -400,7 +437,6 @@ const App: React.FC = () => {
   const handleLogin = async (userAttempt: User) => {
     if (userAttempt.phone) {
         userAttempt.phone = normalizeWhatsApp(userAttempt.phone);
-        
         if (userAttempt.phone.length < 12 && userAttempt.id.startsWith('u-')) {
             alert("Por favor, digite o seu número completo com o DDD (Ex: 81 99999-9999).");
             return;
@@ -423,25 +459,11 @@ const App: React.FC = () => {
         }
     } 
     else if (userAttempt.id.startsWith('u-')) {
-        const { data: existingUser } = await supabase
-            .from('users')
-            .select('*')
-            .eq('phone', userAttempt.phone)
-            .single();
+        const { data: existingUser } = await supabase.from('users').select('*').eq('phone', userAttempt.phone).single();
 
         if (existingUser) {
-            const updatedData = {
-                name: userAttempt.name,
-                email: userAttempt.email,
-                password: userAttempt.password,
-                role: 'client' 
-            };
-
-            const { data: updatedRecord, error: updateError } = await supabase
-                .from('users')
-                .update(updatedData)
-                .eq('id', existingUser.id)
-                .select();
+            const updatedData = { name: userAttempt.name, email: userAttempt.email, password: userAttempt.password, role: 'client' };
+            const { data: updatedRecord, error: updateError } = await supabase.from('users').update(updatedData).eq('id', existingUser.id).select();
 
             if (updateError) {
                 alert("Erro ao sincronizar sua conta do WhatsApp: " + updateError.message);
@@ -470,15 +492,12 @@ const App: React.FC = () => {
   const handleUpdateUser = async (updatedUser: User) => {
       if (updatedUser.phone) {
           updatedUser.phone = normalizeWhatsApp(updatedUser.phone);
-          
           if (updatedUser.phone.length < 12) {
               alert("Número inválido. Digite o número completo com o DDD.");
               return; 
           }
       }
-      
       const { error } = await supabase.from('users').update(updatedUser).eq('id', updatedUser.id);
-      
       if (!error) {
         setUsers(users.map(u => u.id === updatedUser.id ? updatedUser : u));
         if (currentUser && currentUser.id === updatedUser.id) setCurrentUser(updatedUser);
@@ -519,33 +538,18 @@ const App: React.FC = () => {
       const timestampIso = new Date().toISOString();
       
       const optimisticMessage: ChatMessage = {
-          id: newMessageId,
-          orderId,
-          senderId,
-          senderRole: role,
-          text,
-          timestamp: new Date(timestampIso)
+          id: newMessageId, orderId, senderId, senderRole: role, text, timestamp: new Date(timestampIso)
       };
 
       setChats(prev => {
           const currentChats = prev[orderId] || [];
           if (currentChats.some(m => m.id === newMessageId)) return prev;
-          return {
-              ...prev,
-              [orderId]: [...currentChats, optimisticMessage]
-          };
+          return { ...prev, [orderId]: [...currentChats, optimisticMessage] };
       });
 
-      const payloadToInsert = {
-          id: newMessageId,
-          orderId,
-          senderId,
-          senderRole: role,
-          text,
-          timestamp: timestampIso
-      };
-      
-      await supabase.from('messages').insert([payloadToInsert]);
+      await supabase.from('messages').insert([{
+          id: newMessageId, orderId, senderId, senderRole: role, text, timestamp: timestampIso
+      }]);
   };
 
   const handleUpdateWithdrawal = async (id: string, status: 'paid' | 'rejected') => {
@@ -584,37 +588,17 @@ const App: React.FC = () => {
     }
 
     const newOrder: Order = {
-        id: `ord-${Date.now()}`,
-        companyId,
-        companyName: company.name,
-        customerId: currentUser.id,
-        customerName: currentUser.name,
-        customerPhone: currentUser.phone,
+        id: `ord-${Date.now()}`, companyId, companyName: company.name,
+        customerId: currentUser.id, customerName: currentUser.name, customerPhone: currentUser.phone,
         items: cartItems.map((i: any) => ({
-            productId: i.product.id,
-            productName: i.product.name,
-            quantity: i.quantity,
-            price: i.finalPrice, 
-            selectedOptions: i.selectedOptions
+            productId: i.product.id, productName: i.product.name, quantity: i.quantity, price: i.finalPrice, selectedOptions: i.selectedOptions
         })),
-        total: finalTotal,
-        subtotal: subtotal,
-        deliveryFee: deliveryFee,
-        serviceFee: FIXED_SERVICE_FEE, 
-        deliveryMethod: deliveryMethod,
-        paymentMethod: paymentMethod,
-        changeFor: changeFor,
-        status: paymentMethod === 'cash' ? 'pending' : 'waiting_payment',
-        timestamp: new Date(),
-        deliveryCode: currentUser.phone.slice(-4),
-        deliveryAddress: currentUser.address,
+        total: finalTotal, subtotal: subtotal, deliveryFee: deliveryFee, serviceFee: FIXED_SERVICE_FEE, 
+        deliveryMethod: deliveryMethod, paymentMethod: paymentMethod, changeFor: changeFor,
+        status: paymentMethod === 'cash' ? 'pending' : 'waiting_payment', timestamp: new Date(),
+        deliveryCode: currentUser.phone.slice(-4), deliveryAddress: currentUser.address,
         pickupAddress: company.address || { street: '', number: '', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0 },
-        deliveryType: company.deliveryType,
-        paymentStatus: 'pending',
-        repasseValue: repasseValue,
-        repasseStatus: 'pending',
-        couponCode: couponCode,
-        discountAmount: discountAmount
+        deliveryType: company.deliveryType, paymentStatus: 'pending', repasseValue: repasseValue, repasseStatus: 'pending', couponCode: couponCode, discountAmount: discountAmount
     };
 
     const { error } = await supabase.from('orders').insert([newOrder]);
@@ -627,11 +611,7 @@ const App: React.FC = () => {
     if (paymentMethod !== 'cash') {
         try {
             const paymentResponse = await PaymentService.processPayment(
-                finalTotal,
-                paymentMethod,
-                currentUser,
-                `Pedido #${newOrder.id} - ${company.name}`,
-                newOrder.id
+                finalTotal, paymentMethod, currentUser, `Pedido #${newOrder.id} - ${company.name}`, newOrder.id
             );
 
             if (paymentResponse.ticketUrl && !paymentResponse.copyPaste && !paymentResponse.qrCodeBase64) {
@@ -640,11 +620,7 @@ const App: React.FC = () => {
             }
 
             if (paymentMethod === 'pix' && (paymentResponse.copyPaste || paymentResponse.qrCodeBase64)) {
-                 await supabase.from('orders').update({
-                    paymentPixCode: paymentResponse.copyPaste,
-                    paymentPixImage: paymentResponse.qrCodeBase64,
-                    paymentId: paymentResponse.paymentId
-                 }).eq('id', newOrder.id);
+                 await supabase.from('orders').update({ paymentPixCode: paymentResponse.copyPaste, paymentPixImage: paymentResponse.qrCodeBase64, paymentId: paymentResponse.paymentId }).eq('id', newOrder.id);
             }
 
             if (!paymentResponse.success) {
@@ -667,7 +643,6 @@ const App: React.FC = () => {
         const orderToCancel = orders.find(o => o.id === orderId);
         
         if (orderToCancel && orderToCancel.paymentId && orderToCancel.paymentMethod !== 'cash') {
-            console.log("Cancelamento detectado. Iniciando estorno...", orderToCancel.paymentId);
             try {
                 const refundResult = await PaymentService.refundPayment(orderToCancel.paymentId);
                 if (refundResult.success) {
@@ -697,20 +672,14 @@ const App: React.FC = () => {
 
   const handleCourierAcceptOrder = async (orderId: string) => {
       if (!currentUser) return;
-      
-      const updateData: { status: Order['status']; courierId: string } = {
-          status: 'delivering',
-          courierId: currentUser.id
-      };
-
+      const updateData: { status: Order['status']; courierId: string } = { status: 'delivering', courierId: currentUser.id };
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updateData } : o));
       await supabase.from('orders').update(updateData).eq('id', orderId);
   };
 
   const handleCancelOrder = async (orderId: string) => {
       const order = orders.find(o => o.id === orderId);
-      if (!order) return;
-      if (!currentUser) return;
+      if (!order || !currentUser) return;
 
       if (currentUser.role === 'client') {
           if (order.status !== 'pending' && order.status !== 'waiting_payment') {
@@ -718,7 +687,6 @@ const App: React.FC = () => {
               return;
           }
       }
-      
       if (window.confirm("Tem certeza que deseja cancelar este pedido? Se houve pagamento online, o estorno será processado.")) {
           await updateOrderStatus(orderId, 'cancelled');
       }
@@ -754,9 +722,7 @@ const App: React.FC = () => {
   const handleUpdateCompany = async (companyId: string, data: Partial<Company>) => {
       const { error } = await supabase.from('companies').update(data).eq('id', companyId);
       if(!error) {
-        setCompanies(prevCompanies => 
-            prevCompanies.map(c => c.id === companyId ? {...c, ...data} : c)
-        );
+        setCompanies(prevCompanies => prevCompanies.map(c => c.id === companyId ? {...c, ...data} : c));
       }
   };
 
@@ -810,7 +776,6 @@ const App: React.FC = () => {
     return <AuthView onLogin={handleLogin} existingUsers={users} />;
   }
 
-  // >>> UI DA NOTIFICAÇÃO VISUAL INTERNA (CENTRALIZADA E PERFEITA NO MOBILE/PC) <<<
   const NotificationToast = inAppNotification && (
       <div className="fixed top-4 left-0 right-0 z-[99999] flex justify-center pointer-events-none px-4">
           <div className="bg-white rounded-2xl shadow-2xl shadow-black/20 border border-gray-100 p-4 flex items-center gap-4 animate-slide-up w-full max-w-sm pointer-events-auto transition-all">
@@ -830,18 +795,10 @@ const App: React.FC = () => {
   switch (currentUser.role) {
     case 'admin':
         ViewToRender = <AdminView 
-            users={users} setUsers={setUsers} 
-            companies={companies} setCompanies={setCompanies} 
-            orders={orders} 
-            withdrawals={withdrawals}
-            onUpdateWithdrawal={handleUpdateWithdrawal}
-            onLogout={handleLogout}
-            globalSettings={globalSettings} 
-            onUpdateSettings={handleUpdateGlobalSettings}
-            onUpdateUser={handleUpdateUser}
-            onDeleteUser={handleDeleteUser}
-            onUpsertCompany={handleUpsertCompany}
-            onDeleteCompany={handleDeleteCompany}
+            users={users} setUsers={setUsers} companies={companies} setCompanies={setCompanies} 
+            orders={orders} withdrawals={withdrawals} onUpdateWithdrawal={handleUpdateWithdrawal}
+            onLogout={handleLogout} globalSettings={globalSettings} onUpdateSettings={handleUpdateGlobalSettings}
+            onUpdateUser={handleUpdateUser} onDeleteUser={handleDeleteUser} onUpsertCompany={handleUpsertCompany} onDeleteCompany={handleDeleteCompany}
         />;
         break;
     
@@ -851,56 +808,26 @@ const App: React.FC = () => {
             ViewToRender = <div className="h-screen flex items-center justify-center">Loja não encontrada. <button onClick={handleLogout}>Sair</button></div>;
         } else {
             ViewToRender = <PartnerView 
-                company={myCompany} 
-                orders={orders.filter(o => o.companyId === myCompany.id)}
+                company={myCompany} orders={orders.filter(o => o.companyId === myCompany.id)}
                 products={products.filter(p => p.companyId === myCompany.id)}
-                updateOrderStatus={updateOrderStatus}
-                updateCompany={(data) => handleUpdateCompany(myCompany.id, data)}
-                onAddProduct={handleAddProduct}
-                onUpdateProduct={handleUpdateProduct} 
-                onDeleteProduct={handleDeleteProduct} 
-                onLogout={handleLogout}
-                chats={chats}
-                onSendMessage={handleSendMessage}
-                onUpdateFullOrder={handleUpdateFullOrder}
-                onDeleteOrder={handleDeleteOrder}
+                updateOrderStatus={updateOrderStatus} updateCompany={(data) => handleUpdateCompany(myCompany.id, data)}
+                onAddProduct={handleAddProduct} onUpdateProduct={handleUpdateProduct} onDeleteProduct={handleDeleteProduct} 
+                onLogout={handleLogout} chats={chats} onSendMessage={handleSendMessage}
+                onUpdateFullOrder={handleUpdateFullOrder} onDeleteOrder={handleDeleteOrder}
             />;
         }
         break;
 
     case 'courier':
-        ViewToRender = <CourierView 
-            courier={currentUser} 
-            availableOrders={orders} 
-            acceptOrder={handleCourierAcceptOrder}
-            confirmDelivery={(id, code) => updateOrderStatus(id, 'delivered')}
-            onLogout={handleLogout}
-        />;
+        ViewToRender = <CourierView courier={currentUser} availableOrders={orders} acceptOrder={handleCourierAcceptOrder} confirmDelivery={(id, code) => updateOrderStatus(id, 'delivered')} onLogout={handleLogout} />;
         break;
 
     case 'client':
     default:
-        ViewToRender = <ClientView 
-            user={currentUser} 
-            companies={companies} 
-            products={products}
-            onPlaceOrder={handlePlaceOrder}
-            onLogout={handleLogout}
-            orders={orders} 
-            coupons={coupons}
-            onUpdateUser={handleUpdateUser}
-            chats={chats}
-            onSendMessage={handleSendMessage}
-            onAddAddress={handleAddAddress}
-            onRemoveAddress={handleRemoveAddress}
-            onAddCard={handleAddCard}
-            onRemoveCard={handleRemoveCard}
-            onCancelOrder={handleCancelOrder} 
-        />;
+        ViewToRender = <ClientView user={currentUser} companies={companies} products={products} onPlaceOrder={handlePlaceOrder} onLogout={handleLogout} orders={orders} coupons={coupons} onUpdateUser={handleUpdateUser} chats={chats} onSendMessage={handleSendMessage} onAddAddress={handleAddAddress} onRemoveAddress={handleRemoveAddress} onAddCard={handleAddCard} onRemoveCard={handleRemoveCard} onCancelOrder={handleCancelOrder} />;
         break;
   }
 
-  // Renderiza a Notificação por cima de qualquer tela ativa
   return (
       <>
         {NotificationToast}
