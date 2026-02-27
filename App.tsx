@@ -65,6 +65,11 @@ const normalizeWhatsApp = (phone: string) => {
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  
+  // SOLUÇÃO: Referência em tempo real para o usuário (evita falha na notificação de mensagens)
+  const currentUserRef = useRef<User | null>(null);
+  useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
+
   const [isLoading, setIsLoading] = useState(true);
   const [connectionError, setConnectionError] = useState<{title: string, message: string, type: 'network' | 'permission' | 'unknown'} | null>(null);
   
@@ -132,7 +137,7 @@ const App: React.FC = () => {
   useEffect(() => {
     fetchInitialData();
 
-// --- NOVA LÓGICA DE REALTIME DAS MENSAGENS COM PROTEÇÃO ANTI-DUPLICIDADE ---
+    // --- LÓGICA DE REALTIME DAS MENSAGENS E SAQUES ---
     const messagesSub = supabase
       .channel('public:messages')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
@@ -142,10 +147,11 @@ const App: React.FC = () => {
               timestamp: new Date(newMsg.timestamp)
           };
 
-          // >>> EFEITOS (SOM E VISUAL) MOVIDOS PARA FORA DA ATUALIZAÇÃO DA TELA <<<
-          // Só apita e notifica se a mensagem NÃO for sua!
-          if (currentUser && formattedMsg.senderRole !== currentUser.role) {
-              new Audio('/somMensagem.mp3').play().catch(() => console.log("Áudio bloqueado"));
+          // Usa o currentUserRef.current para saber exatamente quem está logado agora!
+          if (currentUserRef.current && formattedMsg.senderRole !== currentUserRef.current.role) {
+              
+              // Chama o arquivo importado corretamente
+              new Audio(somMensagem).play().catch(() => console.log("Áudio bloqueado"));
               
               if ("Notification" in window && Notification.permission === "granted") {
                   new Notification(`Nova mensagem de ${formattedMsg.senderRole === 'partner' ? 'Restaurante' : 'Cliente'}`, { 
@@ -166,35 +172,14 @@ const App: React.FC = () => {
       })
       .subscribe();
     
-    // ONDE O ERRO ESTAVA: Essa função de saques foi restaurada
     const withdrawalsSub = supabase
       .channel('public:withdrawal_requests')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'withdrawal_requests' }, (payload) => {
           if (payload.eventType === 'INSERT') {
              setWithdrawals(prev => [...prev, payload.new as WithdrawalRequest]);
-} else if (payload.eventType === 'UPDATE') {
-                  const updatedOrder = payload.new as Order;
-                  updatedOrder.timestamp = new Date(updatedOrder.timestamp);
-                  
-                  // --- NOTIFICAÇÃO DO CLIENTE: SAIU PARA ENTREGA ---
-                  const oldOrder = ordersRef.current.find(o => o.id === updatedOrder.id);
-                  if (currentUser.role === 'client' && oldOrder && oldOrder.status !== 'delivering' && updatedOrder.status === 'delivering') {
-                      
-                      new Audio('/somEntrega.mp3').play().catch(() => {});
-                      
-                      if ("Notification" in window && Notification.permission === "granted") {
-                          new Notification(`Chegoou! 🛵`, { body: `Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!` });
-                      } else {
-                          // Atraso de 800ms para garantir que a tela mude e o áudio toque antes do Alert congelar o navegador
-                          setTimeout(() => {
-                              alert(`🛵 Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!`);
-                          }, 800);
-                      }
-                  }
-                  // -------------------------------------------------
-
-                  setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-              }
+          } else if (payload.eventType === 'UPDATE') {
+             setWithdrawals(prev => prev.map(w => w.id === payload.new.id ? payload.new as WithdrawalRequest : w));
+          }
       })
       .subscribe();
 
@@ -204,7 +189,7 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // LÓGICA DE REALTIME DOS PEDIDOS (ONDE FICA A NOTIFICAÇÃO DE ENTREGA)
+  // --- LÓGICA DE REALTIME DOS PEDIDOS ---
   useEffect(() => {
       if (!currentUser) return;
 
@@ -227,7 +212,6 @@ const App: React.FC = () => {
                   const newOrder = payload.new as Order;
                   newOrder.timestamp = new Date(newOrder.timestamp);
 
-                  // >>> TOCA ALERTA DE NOVO PEDIDO PARA O RESTAURANTE <<<
                   if (currentUser.role === 'partner') {
                       new Audio(somPedido).play().catch(() => console.log("Áudio bloqueado"));
                   }
@@ -243,15 +227,16 @@ const App: React.FC = () => {
                   // --- NOTIFICAÇÃO DO CLIENTE: SAIU PARA ENTREGA ---
                   const oldOrder = ordersRef.current.find(o => o.id === updatedOrder.id);
                   if (currentUser.role === 'client' && oldOrder && oldOrder.status !== 'delivering' && updatedOrder.status === 'delivering') {
+                      
+                      // Chama o arquivo importado corretamente
                       new Audio(somEntrega).play().catch(() => {});
                       
                       if ("Notification" in window && Notification.permission === "granted") {
                           new Notification(`Chegoou! 🛵`, { body: `Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!` });
                       } else {
-                          // O setTimeout impede que o alert trave a atualização da tela
                           setTimeout(() => {
-                            alert(`🛵 Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!`);
-                          }, 100);
+                              alert(`🛵 Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!`);
+                          }, 800);
                       }
                   }
                   // -------------------------------------------------
@@ -309,25 +294,27 @@ const App: React.FC = () => {
                            newOrdersMap.set(freshOrder.id, formattedFreshOrder);
                            hasChanges = true;
                            
-                           // Alerta segurança de Novo Pedido (Restaurante)
                            if (currentUser.role === 'partner') {
                                new Audio(somPedido).play().catch(() => {});
                            }
 
-} else if (existing.status !== freshOrder.status || existing.paymentStatus !== freshOrder.paymentStatus) {
+                       } else if (existing.status !== freshOrder.status || existing.paymentStatus !== freshOrder.paymentStatus) {
                            newOrdersMap.set(freshOrder.id, formattedFreshOrder);
                            hasChanges = true;
                            
-                           // <<< APAGAMOS O SOM DE "NOVO PEDIDO" QUE ESTAVA AQUI ERRADO >>>
+                           if (currentUser.role === 'partner') {
+                               new Audio(somPedido).play().catch(() => {});
+                           }
                            
                            // --- NOTIFICAÇÃO DO CLIENTE: SAIU PARA ENTREGA (GARANTIA NO POLLING) ---
                            if (currentUser.role === 'client' && existing.status !== 'delivering' && freshOrder.status === 'delivering') {
-                               new Audio('/somEntrega.mp3').play().catch(() => {});
+                               
+                               // Chama o arquivo importado corretamente
+                               new Audio(somEntrega).play().catch(() => {});
                                
                                if ("Notification" in window && Notification.permission === "granted") {
                                    new Notification(`Chegoou! 🛵`, { body: `Oba! Seu pedido de ${freshOrder.companyName} saiu para entrega!` });
                                } else {
-                                   // Atraso de 800ms
                                    setTimeout(() => {
                                        alert(`🛵 Oba! Seu pedido de ${freshOrder.companyName} saiu para entrega!`);
                                    }, 800);
@@ -346,7 +333,6 @@ const App: React.FC = () => {
 
       return () => clearInterval(interval);
   }, [currentUser]); 
-
 
   const fetchInitialData = async () => {
       setIsLoading(true);
