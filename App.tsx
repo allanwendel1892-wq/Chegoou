@@ -219,7 +219,10 @@ const App: React.FC = () => {
                       if ("Notification" in window && Notification.permission === "granted") {
                           new Notification(`Chegoou! 🛵`, { body: `Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!` });
                       } else {
-                          alert(`🛵 Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!`);
+                          // O setTimeout impede que o alert trave a atualização da tela
+                          setTimeout(() => {
+                            alert(`🛵 Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!`);
+                          }, 100);
                       }
                   }
                   // -------------------------------------------------
@@ -298,7 +301,9 @@ const App: React.FC = () => {
                                if ("Notification" in window && Notification.permission === "granted") {
                                    new Notification(`Chegoou! 🛵`, { body: `Oba! Seu pedido de ${freshOrder.companyName} saiu para entrega!` });
                                } else {
-                                   alert(`🛵 Oba! Seu pedido de ${freshOrder.companyName} saiu para entrega!`);
+                                   setTimeout(() => {
+                                       alert(`🛵 Oba! Seu pedido de ${freshOrder.companyName} saiu para entrega!`);
+                                   }, 100);
                                }
                            }
                        }
