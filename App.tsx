@@ -9,6 +9,11 @@ import { supabase } from './services/supabaseClient';
 import { PaymentService } from './services/paymentService';
 import { Loader2, AlertCircle, Database, Lock } from 'lucide-react';
 
+// >>> IMPORTA OS SONS DE NOTIFICAÇÕES (AGORA DO JEITO CERTO!) <<<
+import somMensagem from './somMensagem.mp3';
+import somPedido from './somPedido.mp3';
+import somEntrega from './somEntrega.mp3';
+
 const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
   const R = 6371; 
@@ -143,7 +148,8 @@ const App: React.FC = () => {
 
           // Notificação de Chat
           if (currentUserRef.current && formattedMsg.senderRole !== currentUserRef.current.role) {
-              new Audio('/somMensagem.mp3').play().catch(() => {});
+              // Toca o som usando o arquivo importado
+              new Audio(somMensagem).play().catch(() => {});
               
               showInAppNotification(
                   `Nova mensagem de ${formattedMsg.senderRole === 'partner' ? 'Restaurante' : 'Cliente'}`, 
@@ -205,7 +211,7 @@ const App: React.FC = () => {
                   newOrder.timestamp = new Date(newOrder.timestamp);
 
                   if (currentUser.role === 'partner') {
-                      new Audio('/somPedido.mp3').play().catch(() => {});
+                      new Audio(somPedido).play().catch(() => {});
                   }
 
                   setOrders(prev => {
@@ -220,7 +226,7 @@ const App: React.FC = () => {
                   const oldOrder = ordersRef.current.find(o => o.id === updatedOrder.id);
                   if (currentUser.role === 'client' && oldOrder && oldOrder.status !== 'delivering' && updatedOrder.status === 'delivering') {
                       
-                      new Audio('/somEntrega.mp3').play().catch(() => {});
+                      new Audio(somEntrega).play().catch(() => {});
                       
                       showInAppNotification(
                           'Chegoou! 🛵', 
@@ -283,7 +289,7 @@ const App: React.FC = () => {
                            hasChanges = true;
                            
                            if (currentUser.role === 'partner') {
-                               new Audio('/somPedido.mp3').play().catch(() => {});
+                               new Audio(somPedido).play().catch(() => {});
                            }
 
                        } else if (existing.status !== freshOrder.status || existing.paymentStatus !== freshOrder.paymentStatus) {
@@ -292,7 +298,7 @@ const App: React.FC = () => {
                            
                            // Notificação de Saída para Entrega (Segurança no Polling)
                            if (currentUser.role === 'client' && existing.status !== 'delivering' && freshOrder.status === 'delivering') {
-                               new Audio('/somEntrega.mp3').play().catch(() => {});
+                               new Audio(somEntrega).play().catch(() => {});
                                
                                showInAppNotification(
                                   'Chegoou! 🛵', 
@@ -804,15 +810,17 @@ const App: React.FC = () => {
     return <AuthView onLogin={handleLogin} existingUsers={users} />;
   }
 
-  // >>> UI DA NOTIFICAÇÃO VISUAL INTERNA (GARANTIDA) <<<
+  // >>> UI DA NOTIFICAÇÃO VISUAL INTERNA (CENTRALIZADA E PERFEITA NO MOBILE/PC) <<<
   const NotificationToast = inAppNotification && (
-      <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[99999] bg-white rounded-2xl shadow-2xl shadow-black/20 border border-gray-100 p-4 flex items-center gap-4 animate-slide-up w-[90%] max-w-sm pointer-events-none transition-all">
-          <div className="bg-red-50 text-2xl p-2 rounded-full shrink-0 flex items-center justify-center h-12 w-12 border border-red-100">
-              {inAppNotification.icon}
-          </div>
-          <div>
-              <h4 className="font-bold text-gray-900 text-sm">{inAppNotification.title}</h4>
-              <p className="text-xs text-gray-600 leading-tight mt-0.5">{inAppNotification.message}</p>
+      <div className="fixed top-4 left-0 right-0 z-[99999] flex justify-center pointer-events-none px-4">
+          <div className="bg-white rounded-2xl shadow-2xl shadow-black/20 border border-gray-100 p-4 flex items-center gap-4 animate-slide-up w-full max-w-sm pointer-events-auto transition-all">
+              <div className="bg-red-50 text-2xl p-2 rounded-full shrink-0 flex items-center justify-center h-12 w-12 border border-red-100">
+                  {inAppNotification.icon}
+              </div>
+              <div>
+                  <h4 className="font-bold text-gray-900 text-sm">{inAppNotification.title}</h4>
+                  <p className="text-xs text-gray-600 leading-tight mt-0.5">{inAppNotification.message}</p>
+              </div>
           </div>
       </div>
   );
