@@ -45,22 +45,18 @@ const prepareProductPayload = (product: Product) => {
 // --- FUNÇÃO DE NORMALIZAÇÃO DE WHATSAPP ---
 const normalizeWhatsApp = (phone: string) => {
     if (!phone) return phone;
-    let clean = phone.replace(/\D/g, ''); // Tira traços, parênteses e espaços
+    let clean = phone.replace(/\D/g, ''); 
 
-    if (clean.startsWith('0')) clean = clean.substring(1); // Tira o zero do DDD (ex: 081)
+    if (clean.startsWith('0')) clean = clean.substring(1); 
 
-    // Se digitou sem o código do Brasil (10 ou 11 números)
     if (clean.length === 10 || clean.length === 11) {
         clean = '55' + clean;
     }
 
-    // REGRA DO WHATSAPP BRASIL:
-    // Se o número tem 13 dígitos (tem o 9) e começa com 55.
     if (clean.length === 13 && clean.startsWith('55')) {
         const ddd = parseInt(clean.substring(2, 4), 10);
-        // Se o DDD for maior que 28 (ex: 81), o WhatsApp corta o 9º dígito internamente.
         if (ddd > 28 && clean[4] === '9') {
-            clean = clean.substring(0, 4) + clean.substring(5); // Pula o 9 e junta o resto
+            clean = clean.substring(0, 4) + clean.substring(5); 
         }
     }
 
@@ -82,12 +78,14 @@ const App: React.FC = () => {
   const [chats, setChats] = useState<Record<string, ChatMessage[]>>({});
 
   const [globalSettings, setGlobalSettings] = useState({
-      platformFee: 0.49, // VALOR FIXO EM REAIS (R$ 0,49)
+      platformFee: 0.49, 
       minWithdrawal: 50,
       maintenanceMode: false
   });
 
   const ordersRef = useRef<Order[]>([]);
+  
+  // Pede permissão para Notificações Push assim que o cliente entra
   useEffect(() => {
       if (currentUser && currentUser.role === 'client' && "Notification" in window) {
           if (Notification.permission === "default") {
@@ -95,6 +93,7 @@ const App: React.FC = () => {
           }
       }
   }, [currentUser]);
+
   useEffect(() => { ordersRef.current = orders; }, [orders]);
 
   useEffect(() => {
@@ -133,7 +132,7 @@ const App: React.FC = () => {
   useEffect(() => {
     fetchInitialData();
 
-    // --- NOVA LÓGICA DE REALTIME DAS MENSAGENS COM PROTEÇÃO ANTI-DUPLICIDADE ---
+    // LÓGICA DE REALTIME DAS MENSAGENS E SAQUES
     const messagesSub = supabase
       .channel('public:messages')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
@@ -145,10 +144,9 @@ const App: React.FC = () => {
           
           setChats(prev => {
               const currentChats = prev[formattedMsg.orderId] || [];
-              // Se a mensagem já foi colocada na tela pela atualização otimista, ignora
               if (currentChats.some(m => m.id === formattedMsg.id)) return prev;
               
-              // >>> ADICIONE ESTA LINHA AQUI <<<
+              // >>> TOCA SOM DE MENSAGEM <<<
               new Audio(somMensagem).play().catch(() => console.log("Áudio bloqueado"));
 
               return {
@@ -159,28 +157,16 @@ const App: React.FC = () => {
       })
       .subscribe();
     
+    // ONDE O ERRO ESTAVA: Essa função de saques foi restaurada
     const withdrawalsSub = supabase
       .channel('public:withdrawal_requests')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'withdrawal_requests' }, (payload) => {
+          if (payload.eventType === 'INSERT') {
+             setWithdrawals(prev => [...prev, payload.new as WithdrawalRequest]);
           } else if (payload.eventType === 'UPDATE') {
-                  const updatedOrder = payload.new as Order;
-                  updatedOrder.timestamp = new Date(updatedOrder.timestamp);
-                  
-                  // --- NOTIFICAÇÃO DO CLIENTE: SAIU PARA ENTREGA ---
-                  const oldOrder = ordersRef.current.find(o => o.id === updatedOrder.id);
-                  if (currentUser.role === 'client' && oldOrder && oldOrder.status !== 'delivering' && updatedOrder.status === 'delivering') {
-                      new Audio(somEntrega).play().catch(() => {});
-                      
-                      if ("Notification" in window && Notification.permission === "granted") {
-                          new Notification(`Chegoou! 🛵`, { body: `Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!` });
-                      } else {
-                          alert(`🛵 Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!`);
-                      }
-                  }
-                  // -------------------------------------------------
-
-                  setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-              }
+             setWithdrawals(prev => prev.map(w => w.id === payload.new.id ? payload.new as WithdrawalRequest : w));
+          }
+      })
       .subscribe();
 
     return () => {
@@ -189,6 +175,7 @@ const App: React.FC = () => {
     };
   }, []);
 
+  // LÓGICA DE REALTIME DOS PEDIDOS (ONDE FICA A NOTIFICAÇÃO DE ENTREGA)
   useEffect(() => {
       if (!currentUser) return;
 
@@ -211,8 +198,7 @@ const App: React.FC = () => {
                   const newOrder = payload.new as Order;
                   newOrder.timestamp = new Date(newOrder.timestamp);
 
-                  // >>> ADICIONE ESTE BLOCO AQUI <<<
-                  // Toca o alerta apenas para o parceiro (restaurante)
+                  // >>> TOCA ALERTA DE NOVO PEDIDO PARA O RESTAURANTE <<<
                   if (currentUser.role === 'partner') {
                       new Audio(somPedido).play().catch(() => console.log("Áudio bloqueado"));
                   }
@@ -224,6 +210,20 @@ const App: React.FC = () => {
               } else if (payload.eventType === 'UPDATE') {
                   const updatedOrder = payload.new as Order;
                   updatedOrder.timestamp = new Date(updatedOrder.timestamp);
+                  
+                  // --- NOTIFICAÇÃO DO CLIENTE: SAIU PARA ENTREGA ---
+                  const oldOrder = ordersRef.current.find(o => o.id === updatedOrder.id);
+                  if (currentUser.role === 'client' && oldOrder && oldOrder.status !== 'delivering' && updatedOrder.status === 'delivering') {
+                      new Audio(somEntrega).play().catch(() => {});
+                      
+                      if ("Notification" in window && Notification.permission === "granted") {
+                          new Notification(`Chegoou! 🛵`, { body: `Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!` });
+                      } else {
+                          alert(`🛵 Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!`);
+                      }
+                  }
+                  // -------------------------------------------------
+
                   setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
               } else if (payload.eventType === 'DELETE') {
                   setOrders(prev => prev.filter(o => o.id !== payload.old.id));
@@ -236,7 +236,7 @@ const App: React.FC = () => {
       };
   }, [currentUser]);
 
-  // --- POLLING ---
+  // --- POLLING (Busca de Segurança) ---
   useEffect(() => {
       if (!currentUser) return;
 
@@ -277,7 +277,7 @@ const App: React.FC = () => {
                            newOrdersMap.set(freshOrder.id, formattedFreshOrder);
                            hasChanges = true;
                            
-                           // >>> ADICIONE ESTE BLOCO AQUI <<<
+                           // Alerta segurança de Novo Pedido (Restaurante)
                            if (currentUser.role === 'partner') {
                                new Audio(somPedido).play().catch(() => {});
                            }
@@ -286,11 +286,12 @@ const App: React.FC = () => {
                            newOrdersMap.set(freshOrder.id, formattedFreshOrder);
                            hasChanges = true;
                            
+                           // Alerta segurança de Atualização de Pedido (Restaurante)
                            if (currentUser.role === 'partner') {
                                new Audio(somPedido).play().catch(() => {});
                            }
                            
-                           // --- NOTIFICAÇÃO DO CLIENTE: SAIU PARA ENTREGA (GARANTIA) ---
+                           // --- NOTIFICAÇÃO DO CLIENTE: SAIU PARA ENTREGA (GARANTIA NO POLLING) ---
                            if (currentUser.role === 'client' && existing.status !== 'delivering' && freshOrder.status === 'delivering') {
                                new Audio(somEntrega).play().catch(() => {});
                                
@@ -434,7 +435,7 @@ const App: React.FC = () => {
                 name: userAttempt.name,
                 email: userAttempt.email,
                 password: userAttempt.password,
-                role: 'client' // Garante que ele é um cliente
+                role: 'client' 
             };
 
             const { data: updatedRecord, error: updateError } = await supabase
@@ -449,13 +450,11 @@ const App: React.FC = () => {
             }
 
             if (updatedRecord) {
-                // Sucesso! Atualiza a memória do app e loga o cara na conta mesclada
                 setUsers(users.map(u => u.id === existingUser.id ? updatedRecord[0] : u));
                 setCurrentUser(updatedRecord[0]);
                 alert("Identificamos que você já pediu no nosso WhatsApp! Suas contas foram unificadas.");
             }
         } else {
-            // SE O TELEFONE NÃO EXISTE: Cria uma conta nova do zero normalmente
             const { data, error } = await supabase.from('users').insert([userAttempt]).select();
             if (error) {
                  alert("Erro ao criar conta: " + error.message);
@@ -473,14 +472,12 @@ const App: React.FC = () => {
       if (updatedUser.phone) {
           updatedUser.phone = normalizeWhatsApp(updatedUser.phone);
           
-          // --- TRAVA DE SEGURANÇA AQUI ---
           if (updatedUser.phone.length < 12) {
               alert("Número inválido. Digite o número completo com o DDD.");
               return; 
           }
       }
       
-      // REMOVIDA A LINHA DUPLICADA QUE CAUSAVA O ERRO
       const { error } = await supabase.from('users').update(updatedUser).eq('id', updatedUser.id);
       
       if (!error) {
@@ -518,12 +515,10 @@ const App: React.FC = () => {
       setCompanies(prev => prev.map(c => ({ ...c, serviceFeePercentage: newSettings.platformFee })));
   };
 
-  // --- NOVA LÓGICA DE ENVIO (ATUALIZAÇÃO OTIMISTA) ---
   const handleSendMessage = async (orderId: string, text: string, senderId: string, role: 'client' | 'partner') => {
       const newMessageId = `msg-${Date.now()}`;
       const timestampIso = new Date().toISOString();
       
-      // 1. Atualização Otimista: Força a mensagem aparecer na tela de quem enviou IMEDIATAMENTE
       const optimisticMessage: ChatMessage = {
           id: newMessageId,
           orderId,
@@ -542,7 +537,6 @@ const App: React.FC = () => {
           };
       });
 
-      // 2. Envia para o banco de dados silenciosamente
       const payloadToInsert = {
           id: newMessageId,
           orderId,
