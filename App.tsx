@@ -9,6 +9,10 @@ import { supabase } from './services/supabaseClient';
 import { PaymentService } from './services/paymentService';
 import { Loader2, AlertCircle, Database, Lock } from 'lucide-react';
 
+// >>> ADICIONE ESTAS DUAS LINHAS AQUI <<<
+import somMensagem from './somMensagem.mp3'; // Troque pelo nome exato do seu arquivo
+import somPedido from './somPedido.mp3';     // Troque pelo nome exato do seu arquivo
+
 const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
   const R = 6371; 
@@ -136,6 +140,9 @@ const App: React.FC = () => {
               // Se a mensagem já foi colocada na tela pela atualização otimista, ignora
               if (currentChats.some(m => m.id === formattedMsg.id)) return prev;
               
+              // >>> ADICIONE ESTA LINHA AQUI <<<
+              new Audio(somMensagem).play().catch(() => console.log("Áudio bloqueado"));
+
               return {
                   ...prev,
                   [formattedMsg.orderId]: [...currentChats, formattedMsg]
@@ -182,6 +189,13 @@ const App: React.FC = () => {
               if (payload.eventType === 'INSERT') {
                   const newOrder = payload.new as Order;
                   newOrder.timestamp = new Date(newOrder.timestamp);
+
+                  // >>> ADICIONE ESTE BLOCO AQUI <<<
+                  // Toca o alerta apenas para o parceiro (restaurante)
+                  if (currentUser.role === 'partner') {
+                      new Audio(somPedido).play().catch(() => console.log("Áudio bloqueado"));
+                  }
+
                   setOrders(prev => {
                       if (prev.some(o => o.id === newOrder.id)) return prev;
                       return [newOrder, ...prev]; 
@@ -241,6 +255,12 @@ const App: React.FC = () => {
                        if (!existing) {
                            newOrdersMap.set(freshOrder.id, formattedFreshOrder);
                            hasChanges = true;
+                           
+                           // >>> ADICIONE ESTE BLOCO AQUI <<<
+                           if (currentUser.role === 'partner') {
+                               new Audio(somPedido).play().catch(() => {});
+                           }
+
                        } else if (existing.status !== freshOrder.status || existing.paymentStatus !== freshOrder.paymentStatus) {
                            newOrdersMap.set(freshOrder.id, formattedFreshOrder);
                            hasChanges = true;
