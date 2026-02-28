@@ -119,6 +119,20 @@ const App: React.FC = () => {
   });
 
   const ordersRef = useRef<Order[]>([]);
+  
+  useEffect(() => {
+  // Dispara um log para você ver no console se o PWA foi detectado
+  window.addEventListener('beforeinstallprompt', (e) => {
+    console.log('PWA pronto para instalar!');
+  });
+
+  // Se for iPhone, avisa como instalar manualmente
+  const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+  if (isIos && !isStandalone) {
+    alert("Para instalar o Chegoou, clique no ícone de 'Compartilhar' do Safari e depois em 'Adicionar à Tela de Início' 📲");
+  }
+}, []);
   useEffect(() => { ordersRef.current = orders; }, [orders]);
 
   // --- REGISTRO DO USUÁRIO NO ONESIGNAL (PUSH NATIVO) ---
