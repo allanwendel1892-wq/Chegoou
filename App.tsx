@@ -38,7 +38,8 @@ import {
     Loader2, 
     AlertCircle, 
     Database, 
-    Lock 
+    Lock,
+    Download // Adicionado para o botão de instalação
 } from 'lucide-react';
 
 // >>> MOTOR DO PWA (Registro do Service Worker) <<<
@@ -164,6 +165,40 @@ const App: React.FC = () => {
   useEffect(() => { 
     currentUserRef.current = currentUser; 
   }, [currentUser]);
+
+  // --- LÓGICA DE INSTALAÇÃO PWA ---
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      // Impede que o mini-infobar apareça no mobile
+      e.preventDefault();
+      // Guarda o evento para ser disparado depois
+      setDeferredPrompt(e);
+      console.log("Evento beforeinstallprompt capturado.");
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstall = async () => {
+    if (!deferredPrompt) return;
+
+    // Mostra o prompt de instalação
+    deferredPrompt.prompt();
+
+    // Aguarda a resposta do usuário
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log(`Usuário respondeu ao prompt de instalação: ${outcome}`);
+
+    // Limpa o prompt independentemente do resultado
+    setDeferredPrompt(null);
+  };
+  // --------------------------------
 
   // ESTADOS DE NOTIFICAÇÃO (TOAST INTERNO)
   const [inAppNotification, setInAppNotification] = useState<{
@@ -1189,6 +1224,19 @@ const App: React.FC = () => {
       </div>
   );
 
+  /**
+   * BOTÃO DE INSTALAÇÃO PWA (CUSTOMIZADO)
+   */
+  const InstallPWAButton = deferredPrompt && (
+      <button
+        onClick={handleInstall}
+        className="fixed bottom-24 right-6 z-[100] bg-red-600 text-white px-5 py-3 rounded-full shadow-2xl flex items-center gap-3 animate-bounce hover:scale-105 active:scale-95 transition-all border-2 border-white"
+      >
+          <Download className="w-5 h-5" />
+          <span className="font-black text-xs uppercase tracking-widest">Instalar App</span>
+      </button>
+  );
+
   // SELEÇÃO DE VIEW POR PERFIL
   let ViewToRender;
   
@@ -1278,6 +1326,7 @@ const App: React.FC = () => {
   return (
       <div className="antialiased font-sans select-none">
         {NotificationToast}
+        {InstallPWAButton}
         <main className="min-h-screen bg-white relative overflow-x-hidden">
             {ViewToRender}
         </main>
