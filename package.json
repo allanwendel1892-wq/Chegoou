@@ -17,15 +17,13 @@
     "@google/genai": "^1.35.0",
     "lucide-react": "^0.562.0",
     "recharts": "^3.6.0",
-    "@supabase/supabase-js": "^2.90.1",
-    "vite": "^7.3.1",
-    "@vitejs/plugin-react": "^5.1.2"
+    "@supabase/supabase-js": "^2.90.1"
   },
   "devDependencies": {
+    "vite": "^6.2.0",
     "vite-plugin-pwa": "^0.21.1",
+    "@vitejs/plugin-react": "^5.1.2",
     "@types/node": "^22.14.0",
-    "@vitejs/plugin-react": "^5.0.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "typescript": "~5.8.2"
   }
 }
