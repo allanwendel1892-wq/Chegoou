@@ -243,8 +243,24 @@ const App: React.FC = () => {
           if (payload.eventType === 'INSERT') {
              setWithdrawals(prev => [...prev, payload.new as WithdrawalRequest]);
           } else if (payload.eventType === 'UPDATE') {
-             setWithdrawals(prev => prev.map(w => w.id === payload.new.id ? payload.new as WithdrawalRequest : w));
-          }
+    const updatedOrder = payload.new as Order;
+    updatedOrder.timestamp = new Date(updatedOrder.timestamp);
+    const oldOrder = ordersRef.current.find(o => o.id === updatedOrder.id);
+    
+    if (currentUser.role === 'client' && oldOrder) {
+        // CASO 1: ENTREGA - Status "Saiu para entrega"
+        if (updatedOrder.deliveryMethod === 'delivery' && oldOrder.status !== 'delivering' && updatedOrder.status === 'delivering') {
+            new Audio(somEntrega).play().catch(() => {});
+            showInAppNotification('Chegoou! 🛵', `Seu pedido de ${updatedOrder.companyName} saiu para entrega!`, '🛵');
+        }
+        // CASO 2: RETIRADA - Status "Pronto"
+        else if (updatedOrder.deliveryMethod === 'pickup' && oldOrder.status !== 'ready' && updatedOrder.status === 'ready') {
+            new Audio(somEntrega).play().catch(() => {});
+            showInAppNotification('Tá na mão! 🛍️', `Seu pedido de ${updatedOrder.companyName} já pode ser retirado!`, '🛍️');
+        }
+    }
+    setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+}
       })
       .subscribe();
 
