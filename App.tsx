@@ -1,3 +1,34 @@
+//Botão de Instalação
+
+import { useEffect, useState } from 'react';
+
+function App() {
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    window.addEventListener('beforeinstallprompt', (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    });
+  }, []);
+
+  const handleInstall = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    await deferredPrompt.userChoice;
+    setDeferredPrompt(null);
+  };
+
+  return (
+    <>
+      <button onClick={handleInstall}>
+        📲 Instalar Chegoou
+      </button>
+      {/* resto do seu app */}
+    </>
+  );
+}
+
 /**
  * SISTEMA CHEGOOU - CORE APPLICATION
  * Versão: 2.0.0 (PWA Optimized)
