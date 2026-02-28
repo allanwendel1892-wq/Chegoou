@@ -19,6 +19,11 @@ import somMensagem from './somMensagem.mp3';
 import somPedido from './somPedido.mp3';
 import somEntrega from './somEntrega.mp3';
 
+import { registerSW } from 'virtual:pwa-register';
+
+// Logo no início do useEffect principal ou fora do componente
+registerSW({ immediate: true });
+
 const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
   const R = 6371; 
