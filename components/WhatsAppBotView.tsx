@@ -28,7 +28,7 @@ interface QueueItem {
 }
 
 const N8N_WEBHOOK_URL = "https://n8n-webhook.znzrqn.easypanel.host/webhook/chegooudisparo";
-const VERCEL_APP_URL = "https://chegoou.vercel.app";
+const VERCEL_APP_URL = "https://chegoou.com.br";
 
 // Função auxiliar de delay (promessa real)
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
