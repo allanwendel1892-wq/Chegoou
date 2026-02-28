@@ -8,6 +8,10 @@ import ClientView from './components/ClientView';
 import { supabase } from './services/supabaseClient';
 import { PaymentService } from './services/paymentService';
 import { Loader2, AlertCircle, Database, Lock } from 'lucide-react';
+import { registerSW } from 'virtual:pwa-register';
+
+// Isso registra o Service Worker assim que o site carrega
+registerSW({ immediate: true });
 
 // >>> PLUGINS NATIVOS DO APLICATIVO (GPS E NOTIFICAÇÃO PUSH) <<<
 import { Capacitor } from '@capacitor/core';
