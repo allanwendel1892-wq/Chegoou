@@ -7,6 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
       manifest: {
         name: 'Chegoou Delivery',
         short_name: 'Chegoou',
@@ -14,6 +15,8 @@ export default defineConfig({
         theme_color: '#dc2626',
         background_color: '#ffffff',
         display: 'standalone',
+        start_url: '/', // OBRIGATÓRIO PARA PWA
+        scope: '/',
         icons: [
           {
             src: '/icon-192x192.png',
