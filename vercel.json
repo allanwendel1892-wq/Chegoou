@@ -1,14 +1,56 @@
-{
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist",
-  "framework": "vite",
-  "routes": [
-    {
-      "handle": "filesystem"
-    },
-    {
-      "src": "/.*",
-      "dest": "/index.html"
-    }
-  ]
-}
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import { VitePWA } from 'vite-plugin-pwa';
+
+export default defineConfig({
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: 'autoUpdate', // atualiza SW automaticamente
+      includeAssets: [
+        'favicon.ico',
+        'robots.txt',
+        'apple-touch-icon.png',
+        'icon-192.png',      // <-- NOME NOVO AQUI
+        'icon-512.png',      // <-- NOME NOVO AQUI
+        'maskable-icon.png'
+      ],
+      manifest: {
+        name: 'Chegoou Delivery',
+        short_name: 'Chegoou',
+        description: 'Delivery da sua região',
+        theme_color: '#EA1D2C',
+        background_color: '#ffffff',
+        display: 'standalone',
+        start_url: '/',
+        icons: [
+          { 
+            src: '/icon-192.png', // <-- NOME NOVO AQUI
+            sizes: '192x192', 
+            type: 'image/png',
+            purpose: 'any'
+          },
+          { 
+            src: '/icon-512.png', // <-- NOME NOVO AQUI
+            sizes: '512x512', 
+            type: 'image/png',
+            purpose: 'any'
+          },
+          { 
+            src: '/maskable-icon.png', 
+            sizes: '512x512', 
+            type: 'image/png', 
+            purpose: 'maskable' 
+          }
+        ]
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,png,svg,ico,json}'],
+        cleanupOutdatedCaches: true // Adiciona segurança extra limpando lixo antigo
+      },
+      devOptions: {
+        enabled: true 
+      }
+    })
+  ],
+});
