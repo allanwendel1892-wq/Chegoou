@@ -434,11 +434,18 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
       {/* Left Side - Image */}
       <div className="hidden lg:flex w-1/2 bg-brand relative overflow-hidden items-center justify-center">
         <div className="absolute inset-0 bg-black opacity-20 z-10"></div>
+        
+        {/* 👇👇👇 COMO TROCAR A IMAGEM FEIA DE COMIDA 👇👇👇 
+            1. Salve uma imagem bonita na sua pasta "public" (ex: fundo.jpg)
+            2. Troque o link abaixo do "src" por "/fundo.jpg"
+            3. Ou cole um link de outra imagem da internet. */}
         <img 
             src="https://images.unsplash.com/photo-1504674900247-0877df9cc836?q=80&w=2070&auto=format&fit=crop" 
             className="absolute inset-0 w-full h-full object-cover"
             alt="Food Background"
         />
+        {/* 👆👆👆 ==================================== 👆👆👆 */}
+
         <div className="relative z-20 text-white p-12 max-w-lg">
             <div className="bg-brand/90 backdrop-blur-sm p-8 rounded-3xl shadow-2xl">
                 <div className="flex items-center gap-3 mb-4">
@@ -468,7 +475,17 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
                         <ArrowLeft className="w-6 h-6" />
                     </button>
                 )}
+                
                 <div className="text-center lg:text-left flex-1">
+                    
+                    {/* INÍCIO DA LOGO ADICIONADA AQUI */}
+                    <img 
+                        src="/icon-192.png" 
+                        alt="Logo Chegoou" 
+                        className="w-20 h-20 mx-auto lg:mx-0 mb-6 rounded-2xl shadow-lg border-2 border-white object-cover"
+                    />
+                    {/* FIM DA LOGO */}
+
                     <h2 className="text-3xl font-bold text-gray-900 tracking-tight">
                         {isRegistering ? 'Crie sua conta' : 'Bem-vindo de volta'}
                     </h2>
