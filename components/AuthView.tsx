@@ -440,7 +440,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
             2. Troque o link abaixo do "src" por "/fundo.jpg"
             3. Ou cole um link de outra imagem da internet. */}
         <img 
-            src="/fundo.png" 
+            src="https://shpdyqsrqudtwagqwart.supabase.co/storage/v1/object/sign/chegoou_imagens_sites/fundo.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV8xYjJlNzgwYS00Mzk3LTRiNTUtYjE4OS1lOTcwMzNjNWU0YWYiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJjaGVnb291X2ltYWdlbnNfc2l0ZXMvZnVuZG8ucG5nIiwiaWF0IjoxNzcyMzkwMTE0LCJleHAiOjE4MDM5MjYxMTR9.ZVPDRKt7dd0JTu-O8WmIhknarYayEbuJ7SI1-dueXCw" 
             className="absolute inset-0 w-full h-full object-cover"
             alt="Food Background"
         />
