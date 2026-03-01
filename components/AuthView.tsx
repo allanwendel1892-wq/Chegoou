@@ -440,7 +440,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
             2. Troque o link abaixo do "src" por "/fundo.jpg"
             3. Ou cole um link de outra imagem da internet. */}
         <img 
-            src="https://images.unsplash.com/photo-1504674900247-0877df9cc836?q=80&w=2070&auto=format&fit=crop" 
+            src="/fundo.png" 
             className="absolute inset-0 w-full h-full object-cover"
             alt="Food Background"
         />
