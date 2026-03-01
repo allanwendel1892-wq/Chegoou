@@ -6,14 +6,13 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate', // atualiza SW automaticamente
+      registerType: 'autoUpdate',
       includeAssets: [
         'favicon.ico',
         'robots.txt',
         'apple-touch-icon.png',
         'pwa-192x192.png',
-        'pwa-512x512.png',
-        'maskable-icon.png' // Adicionado para garantir o cache do ícone adaptativo
+        'pwa-512x512.png'
       ],
       manifest: {
         name: 'Chegoou Delivery',
@@ -24,30 +23,16 @@ export default defineConfig({
         display: 'standalone',
         start_url: '/',
         icons: [
-          {
-            src: 'pwa-192x192.png',
-            sizes: '192x192',
-            type: 'image/png'
-          },
-          {
-            src: 'pwa-512x512.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'any' // ESSENCIAL: Força o SO a usar este arquivo para o ícone da home
-          },
-          {
-            src: 'maskable-icon.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'maskable' // Garante que o ícone preencha corretamente formas arredondadas/quadradas no Android
-          }
+          { src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
         ]
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,png,svg,ico,json}'],
       },
       devOptions: {
-        enabled: true 
+        enabled: true
       }
     })
   ],
