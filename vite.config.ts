@@ -37,6 +37,3 @@ export default defineConfig({
     })
   ],
 });
-
-
-E aí?
