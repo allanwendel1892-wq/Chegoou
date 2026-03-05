@@ -369,7 +369,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
               <span>R$ ${(item.price * item.quantity).toFixed(2)}</span>
           </div>
           ${item.selectedOptions && item.selectedOptions.length > 0 ? 
-              `<div style="font-size: 10px; color: #555; margin-left: 20px; margin-bottom: 5px;">
+              /* CORREÇÃO: Preto absoluto (#000000), fonte 12px e negrito para não borrar na térmica */
+              `<div style="font-size: 12px; color: #000000; font-weight: bold; margin-left: 20px; margin-bottom: 5px;">
                   ${item.selectedOptions.map(opt => `+ ${opt.optionName}`).join('<br/>')}
               </div>` : ''
           }
@@ -399,7 +400,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                           margin: 0; 
                           padding: 10px; 
                           font-size: 12px; 
-                          color: #000;
+                          color: #000000; /* Força o preto absoluto na raiz */
                       }
                       .center { text-align: center; }
                       .line { border-bottom: 1px dashed #000; margin: 10px 0; }
@@ -470,7 +471,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       printWindow.document.write(htmlContent);
       printWindow.document.close();
   };
-
+  
   useEffect(() => {
     const healFinancials = async () => {
         const ordersToFix = orders.filter(o => 
