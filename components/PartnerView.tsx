@@ -279,6 +279,10 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
 
+  // --- ADICIONADO: ESTADO PARA IMPRESSÃO AUTOMÁTICA ---
+  const [autoPrintEnabled, setAutoPrintEnabled] = useState(false);
+  const prevOrdersCount = useRef(orders.length);
+
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [editingProductId, setEditingProductId] = useState<string | null>(null); 
   const [productToDelete, setProductToDelete] = useState<string | null>(null);
@@ -312,6 +316,20 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   
   useEffect(() => { setLocalCompany(company); }, [company]);
+
+  // --- ADICIONADO: EFEITO PARA IMPRESSÃO AUTOMÁTICA DE NOVOS PEDIDOS ---
+  useEffect(() => {
+      // Se a impressão automática estiver ligada e um novo pedido chegou
+      if (autoPrintEnabled && orders.length > prevOrdersCount.current) {
+          // Pega o pedido mais recente
+          const newOrder = orders[0]; 
+          
+          if (newOrder && (newOrder.status === 'pending' || newOrder.status === 'waiting_payment')) {
+              handlePrintOrder(newOrder);
+          }
+      }
+      prevOrdersCount.current = orders.length;
+  }, [orders, autoPrintEnabled]);
 
   // INTERCEPTOR DE NAVEGAÇÃO
   const handleNavigation = (newView: ViewState) => {
@@ -354,7 +372,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
     setIsConfirmingStatus(false);
   };
 
-  // --- LOGIC: PRINT THERMAL RECEIPT ---
+  // --- CORRIGIDO: LÓGICA DE IMPRESSÃO TÉRMICA ---
   const handlePrintOrder = (order: Order) => {
       const printWindow = window.open('', '', 'width=400,height=600');
       if (!printWindow) {
@@ -369,7 +387,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
               <span>R$ ${(item.price * item.quantity).toFixed(2)}</span>
           </div>
           ${item.selectedOptions && item.selectedOptions.length > 0 ? 
-              /* CORREÇÃO: Preto absoluto (#000000), fonte 12px e negrito para não borrar na térmica */
               `<div style="font-size: 12px; color: #000000; font-weight: bold; margin-left: 20px; margin-bottom: 5px;">
                   ${item.selectedOptions.map(opt => `+ ${opt.optionName}`).join('<br/>')}
               </div>` : ''
@@ -400,7 +417,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                           margin: 0; 
                           padding: 10px; 
                           font-size: 12px; 
-                          color: #000000; /* Força o preto absoluto na raiz */
+                          color: #000000; /* Força preto absoluto para impressoras térmicas */
                       }
                       .center { text-align: center; }
                       .line { border-bottom: 1px dashed #000; margin: 10px 0; }
@@ -471,7 +488,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       printWindow.document.write(htmlContent);
       printWindow.document.close();
   };
-  
+
   useEffect(() => {
     const healFinancials = async () => {
         const ordersToFix = orders.filter(o => 
@@ -1346,8 +1363,22 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                  <h1 className="font-bold text-gray-900 hidden md:block">Chegoou Gestão</h1>
              </div>
              
-             {/* BOTÃO DE BLOQUEIO (MODO GERENTE -> MODO CAIXA) */}
+             {/* BOTÕES E CONTROLES DO LADO DIREITO */}
              <div className="flex items-center gap-4">
+                 {/* --- ADICIONADO: CONTROLO DE IMPRESSÃO AUTOMÁTICA --- */}
+                 <div className="hidden md:flex items-center gap-2 bg-gray-100 px-3 py-1.5 rounded-lg">
+                    <label className="text-sm font-bold text-gray-700 cursor-pointer flex items-center gap-2 select-none">
+                        <Printer size={16} className={autoPrintEnabled ? "text-red-600" : "text-gray-400"} />
+                        Auto-Imprimir
+                        <input 
+                            type="checkbox" 
+                            className="w-4 h-4 text-red-600 rounded focus:ring-red-500 cursor-pointer"
+                            checked={autoPrintEnabled}
+                            onChange={(e) => setAutoPrintEnabled(e.target.checked)}
+                        />
+                    </label>
+                 </div>
+
                  {localCompany.adminPin && isUnlocked && (
                      <button 
                         onClick={handleLockSession} 
