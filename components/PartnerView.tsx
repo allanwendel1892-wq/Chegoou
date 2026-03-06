@@ -77,7 +77,6 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
   };
 
   return (
-    {/* A MÁGICA DA LARGURA AQUI: Adicionado w-[300px] max-w-[300px] shrink-0 para não estourar no celular */}
     <div 
         className={`flex flex-col h-full w-[300px] min-w-[300px] max-w-[300px] shrink-0 bg-gray-50 rounded-2xl border-t-4 ${color} ${!isLast ? 'mr-4' : ''} transition-colors ${isOver ? 'bg-gray-100 ring-2 ring-gray-300' : ''}`}
         onDragOver={handleDragOver}
