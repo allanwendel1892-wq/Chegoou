@@ -182,7 +182,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
 
                       <div className="mb-2">
                           {pMethod.includes('cash') || pMethod.includes('dinheiro') ? (
-                              <div className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-green-200">
+                              <div className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-green-200 w-fit">
                                   <DollarSign className="w-3 h-3 shrink-0"/>
                                   <span className="truncate">Dinheiro {order.changeFor ? `(Troco p/ R$ ${order.changeFor.toFixed(2)})` : ''}</span>
                               </div>
@@ -216,7 +216,6 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                           
                           <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
                               
-                              {/* --- BOTÃO AVANÇAR (APARECE NO CELULAR) --- */}
                               {status !== 'delivered' && status !== 'cancelled' && (
                                   <button 
                                       onClick={(e) => {
@@ -294,7 +293,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
     company, orders, products, updateOrderStatus, updateCompany, onAddProduct, onUpdateProduct, onDeleteProduct, onLogout,
     chats, onSendMessage, onUpdateFullOrder, onDeleteOrder
 }) => {
-  // LÓGICA DE BLOQUEIO (MODO CAIXA / MODO GERENTE)
   const [view, setView] = useState<ViewState>(company.adminPin ? ViewState.POS : ViewState.DASHBOARD);
   const [isUnlocked, setIsUnlocked] = useState(!company.adminPin);
   const [pinModalOpen, setPinModalOpen] = useState(false);
@@ -302,7 +300,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
 
-  // --- ADICIONADO: ESTADO PARA IMPRESSÃO AUTOMÁTICA ---
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(false);
   const prevOrdersCount = useRef(orders.length);
 
@@ -340,13 +337,9 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   
   useEffect(() => { setLocalCompany(company); }, [company]);
 
-  // --- ADICIONADO: EFEITO PARA IMPRESSÃO AUTOMÁTICA DE NOVOS PEDIDOS ---
   useEffect(() => {
-      // Se a impressão automática estiver ligada e um novo pedido chegou
       if (autoPrintEnabled && orders.length > prevOrdersCount.current) {
-          // Pega o pedido mais recente
           const newOrder = orders[0]; 
-          
           if (newOrder && (newOrder.status === 'pending' || newOrder.status === 'waiting_payment')) {
               handlePrintOrder(newOrder);
           }
@@ -354,7 +347,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       prevOrdersCount.current = orders.length;
   }, [orders, autoPrintEnabled]);
 
-  // INTERCEPTOR DE NAVEGAÇÃO
   const handleNavigation = (newView: ViewState) => {
     if (localCompany.adminPin && !isUnlocked && PROTECTED_VIEWS.includes(newView)) {
         setPendingView(newView);
@@ -382,7 +374,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
   const handleLockSession = () => {
       setIsUnlocked(false);
-      setView(ViewState.POS); // Quando bloqueia, joga pro Frente de Caixa
+      setView(ViewState.POS);
   };
 
   const handleToggleStatus = () => {
@@ -395,14 +387,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
     setIsConfirmingStatus(false);
   };
 
-  // --- CORRIGIDO: LÓGICA DE IMPRESSÃO TÉRMICA ---
   const handlePrintOrder = (order: Order) => {
-      const printWindow = window.open('', '', 'width=400,height=600');
-      if (!printWindow) {
-          alert("Pop-up bloqueado. Permita pop-ups para imprimir.");
-          return;
-      }
-
       const itemsHtml = Array.isArray(order.items) ? order.items.map(item => `
           <div style="display:flex; justify-content:space-between; margin-bottom: 5px;">
               <span style="font-weight:bold;">${item.quantity}x</span>
@@ -440,7 +425,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                           margin: 0; 
                           padding: 10px; 
                           font-size: 12px; 
-                          color: #000000; /* Força preto absoluto para impressoras térmicas */
+                          color: #000000; 
                       }
                       .center { text-align: center; }
                       .line { border-bottom: 1px dashed #000; margin: 10px 0; }
@@ -459,20 +444,14 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                       <p>${new Date(order.timestamp).toLocaleString()}</p>
                       <h2 style="font-size: 24px; margin: 10px 0;">#${order.id.slice(-4)}</h2>
                   </div>
-                  
                   <div class="line"></div>
-                  
                   <div style="margin-bottom: 10px;">
                       <span class="bold">Cliente:</span> ${order.customerName}<br/>
                       <span class="bold">Tel:</span> ${order.customerPhone}
                   </div>
-
                   <div class="line"></div>
-                  
                   ${itemsHtml}
-                  
                   <div class="line"></div>
-                  
                   <div class="flex">
                       <span>Subtotal:</span>
                       <span>R$ ${order.subtotal.toFixed(2)}</span>
@@ -485,31 +464,37 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                       <span>TOTAL:</span>
                       <span>R$ ${order.total.toFixed(2)}</span>
                   </div>
-
                   <div class="line"></div>
-                  
                   <p class="center bold">${paymentInfo}</p>
-                  
                   <div class="line"></div>
-                  
                   <div style="margin-top: 10px;">
                       ${addressHtml}
                   </div>
-
                   <div class="center" style="margin-top: 20px;">
                       <p>*** NÃO É DOCUMENTO FISCAL ***</p>
                       <p>Chegoou Delivery</p>
                   </div>
-
-                  <script>
-                      window.onload = function() { window.print(); window.close(); }
-                  </script>
               </body>
           </html>
       `;
 
-      printWindow.document.write(htmlContent);
-      printWindow.document.close();
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+
+      const iframeDoc = iframe.contentWindow?.document;
+      if (iframeDoc) {
+          iframeDoc.write(htmlContent);
+          iframeDoc.close();
+
+          setTimeout(() => {
+              iframe.contentWindow?.focus();
+              iframe.contentWindow?.print();
+              setTimeout(() => {
+                  document.body.removeChild(iframe);
+              }, 2000);
+          }, 500);
+      }
   };
 
   useEffect(() => {
@@ -1031,7 +1016,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   return (
     <div className="flex h-screen bg-gray-50 relative">
         
-        {/* MODAL DO PIN GERENCIAL */}
         {pinModalOpen && (
             <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
                 <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-scale-in text-center">
@@ -1370,7 +1354,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
       <Sidebar 
         currentView={view} 
-        setView={handleNavigation} // PASSA O INTERCEPTOR
+        setView={handleNavigation} 
         isMobileOpen={isMobileOpen} 
         setIsMobileOpen={setIsMobileOpen} 
         onLogout={onLogout}
@@ -1386,9 +1370,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                  <h1 className="font-bold text-gray-900 hidden md:block">Chegoou Gestão</h1>
              </div>
              
-             {/* BOTÕES E CONTROLES DO LADO DIREITO */}
              <div className="flex items-center gap-4">
-                 {/* --- ADICIONADO: CONTROLO DE IMPRESSÃO AUTOMÁTICA --- */}
                  <div className="hidden md:flex items-center gap-2 bg-gray-100 px-3 py-1.5 rounded-lg">
                     <label className="text-sm font-bold text-gray-700 cursor-pointer flex items-center gap-2 select-none">
                         <Printer size={16} className={autoPrintEnabled ? "text-red-600" : "text-gray-400"} />
@@ -1912,7 +1894,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                     
                     <div className="space-y-6">
 
-                        {/* NOVO: CONTROLE DE ACESSO */}
                         <div className="bg-red-50 border border-red-100 rounded-xl p-6 mb-6">
                             <h3 className="font-bold text-red-900 mb-2 flex items-center gap-2">
                                 <Lock className="w-5 h-5" /> Controle de Acesso (Modo Caixa)
