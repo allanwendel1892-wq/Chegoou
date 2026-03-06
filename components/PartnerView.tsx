@@ -77,15 +77,16 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
   };
 
   return (
+    {/* A MÁGICA DA LARGURA AQUI: Adicionado w-[300px] max-w-[300px] shrink-0 para não estourar no celular */}
     <div 
-        className={`flex flex-col h-full min-w-[300px] bg-gray-50 rounded-2xl border-t-4 ${color} ${!isLast ? 'mr-4' : ''} transition-colors ${isOver ? 'bg-gray-100 ring-2 ring-gray-300' : ''}`}
+        className={`flex flex-col h-full w-[300px] min-w-[300px] max-w-[300px] shrink-0 bg-gray-50 rounded-2xl border-t-4 ${color} ${!isLast ? 'mr-4' : ''} transition-colors ${isOver ? 'bg-gray-100 ring-2 ring-gray-300' : ''}`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
     >
-      <div className="p-4 flex justify-between items-center border-b border-gray-100">
-        <h3 className="font-bold text-gray-700">{title}</h3>
-        <span className="bg-white px-2 py-1 rounded-lg text-xs font-bold text-gray-500 shadow-sm">{items.length}</span>
+      <div className="p-4 flex justify-between items-center border-b border-gray-100 shrink-0">
+        <h3 className="font-bold text-gray-700 truncate pr-2">{title}</h3>
+        <span className="bg-white px-2 py-1 rounded-lg text-xs font-bold text-gray-500 shadow-sm shrink-0">{items.length}</span>
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
           {items.map(order => {
@@ -94,7 +95,6 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
               const lastMsg = hasMessages ? orderChats[orderChats.length - 1] : null;
               const hasUnread = lastMsg?.senderRole === 'client';
               
-              // Normalize data from IA/N8N
               const isWhatsapp = order.origin?.toLowerCase() === 'whatsapp';
               const pMethod = order.paymentMethod?.toLowerCase() || '';
               const dMethod = order.deliveryMethod?.toLowerCase() || '';
@@ -112,7 +112,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                           e.currentTarget.style.opacity = "1";
                       }}
                       onClick={() => onClickOrder(order)}
-                      className={`bg-white p-4 rounded-xl shadow-sm border ${isWhatsapp ? 'border-green-200 bg-green-50/30' : 'border-gray-100'} hover:shadow-md transition-all cursor-grab active:cursor-grabbing group select-none relative`}
+                      className={`bg-white p-4 rounded-xl shadow-sm border ${isWhatsapp ? 'border-green-200 bg-green-50/30' : 'border-gray-100'} hover:shadow-md transition-all cursor-grab active:cursor-grabbing group select-none relative overflow-hidden`}
                   >
                       {isWhatsapp && (
                           <div className="absolute -top-2 -right-2 bg-green-500 text-white rounded-full p-1 shadow-sm z-10" title="Pedido via WhatsApp (IA)">
@@ -122,7 +122,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
 
                       <div className="flex justify-between items-start mb-2">
                           <span className="font-bold text-gray-900 group-hover:text-red-600 transition-colors">#{order.id.slice(-4)}</span>
-                          <span className="text-xs text-gray-400 flex items-center gap-1">
+                          <span className="text-xs text-gray-400 flex items-center gap-1 shrink-0">
                               <Clock className="w-3 h-3" />
                               {new Date(order.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                           </span>
@@ -141,14 +141,14 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                       
                       <div className="mb-3">
                           <div className="flex items-center gap-2 mb-1">
-                              <div className="w-6 h-6 bg-gray-100 rounded-full flex items-center justify-center font-bold text-gray-600 text-[10px]">
+                              <div className="w-6 h-6 bg-gray-100 rounded-full flex items-center justify-center font-bold text-gray-600 text-[10px] shrink-0">
                                   {order.customerName.charAt(0)}
                               </div>
                               <span className="text-sm font-medium text-gray-800 truncate">{order.customerName}</span>
                           </div>
                           {order.deliveryAddress && (
-                              <p className="text-[10px] text-gray-500 flex items-center gap-1 pl-1">
-                                  <MapPin className="w-3 h-3"/> {order.deliveryAddress.street}, {order.deliveryAddress.number} - {order.deliveryAddress.neighborhood}
+                              <p className="text-[10px] text-gray-500 flex items-start gap-1 pl-1 line-clamp-2">
+                                  <MapPin className="w-3 h-3 shrink-0 mt-0.5"/> {order.deliveryAddress.street}, {order.deliveryAddress.number} - {order.deliveryAddress.neighborhood}
                               </p>
                           )}
                       </div>
@@ -158,13 +158,13 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                               <>
                                   {order.items.slice(0, 3).map((item, idx) => (
                                       <div key={idx} className="flex flex-col border-b border-gray-100 last:border-0 pb-1 last:pb-0">
-                                          <div className="text-xs text-gray-800 font-medium flex justify-between">
-                                              <span>{item.quantity}x {item.productName}</span>
+                                          <div className="text-xs text-gray-800 font-medium flex justify-between gap-2">
+                                              <span className="truncate">{item.quantity}x {item.productName}</span>
                                           </div>
                                           {item.selectedOptions && item.selectedOptions.length > 0 && (
                                               <div className="pl-3 mt-0.5 space-y-0.5">
                                                   {item.selectedOptions.map((opt, optIdx) => (
-                                                      <p key={optIdx} className="text-[10px] text-gray-500 leading-tight">
+                                                      <p key={optIdx} className="text-[10px] text-gray-500 leading-tight truncate">
                                                           • {opt.optionName}
                                                       </p>
                                                   ))}
@@ -175,7 +175,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                                   {order.items.length > 3 && <div className="text-[10px] text-center text-gray-400 font-medium pt-1">Ver mais {order.items.length - 3} itens...</div>}
                               </>
                           ) : (
-                              <p className="text-xs text-gray-600 italic whitespace-pre-wrap leading-relaxed">
+                              <p className="text-xs text-gray-600 italic whitespace-pre-wrap leading-relaxed break-words">
                                   {order.raw_description || "Sem descrição"}
                               </p>
                           )}
@@ -184,40 +184,65 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                       <div className="mb-2">
                           {pMethod.includes('cash') || pMethod.includes('dinheiro') ? (
                               <div className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-green-200">
-                                  <DollarSign className="w-3 h-3"/>
-                                  Dinheiro {order.changeFor ? `(Troco p/ R$ ${order.changeFor.toFixed(2)})` : ''}
+                                  <DollarSign className="w-3 h-3 shrink-0"/>
+                                  <span className="truncate">Dinheiro {order.changeFor ? `(Troco p/ R$ ${order.changeFor.toFixed(2)})` : ''}</span>
                               </div>
                           ) : pMethod.includes('pix') ? (
-                              <div className="bg-teal-100 text-teal-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-teal-200">
-                                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-4.33-6.027l2.997 2.998 2.062-2.064-2.997-2.997 2.997-2.998-2.063-2.063-2.996 2.997-2.998-2.997-2.063 2.063 2.997 2.998-2.997 2.063 2.064 2.998-2.998z"/></svg>
+                              <div className="bg-teal-100 text-teal-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-teal-200 w-fit">
+                                  <svg className="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-4.33-6.027l2.997 2.998 2.062-2.064-2.997-2.997 2.997-2.998-2.063-2.063-2.996 2.997-2.998-2.997-2.063 2.063 2.997 2.998-2.997 2.063 2.064 2.998-2.998z"/></svg>
                                   Pix
                               </div>
                           ) : pMethod.includes('card') || pMethod.includes('cartao') || pMethod.includes('cartão') ? (
-                              <div className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-blue-200">
-                                  <CreditCard className="w-3 h-3"/>
+                              <div className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-blue-200 w-fit">
+                                  <CreditCard className="w-3 h-3 shrink-0"/>
                                   Cartão
                               </div>
                           ) : (
-                              <div className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-green-200">
-                                  <MessageSquare className="w-3 h-3"/>
+                              <div className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-green-200 w-fit">
+                                  <MessageSquare className="w-3 h-3 shrink-0"/>
                                   Combinado no Chat
                               </div>
                           )}
                       </div>
 
                       {order.status === 'waiting_payment' && !isWhatsapp && (
-                           <div className="bg-yellow-100 text-yellow-800 text-[10px] font-bold px-2 py-1 rounded mb-2 flex items-center gap-1 border border-yellow-200">
-                               <Clock className="w-3 h-3"/>
+                           <div className="bg-yellow-100 text-yellow-800 text-[10px] font-bold px-2 py-1 rounded mb-2 flex items-center gap-1 border border-yellow-200 w-fit">
+                               <Clock className="w-3 h-3 shrink-0"/>
                                Aguardando Pagamento
                            </div>
                       )}
 
                       <div className="flex justify-between items-center pt-2 border-t border-gray-50 mt-2">
-                          <span className="font-bold text-sm">R$ {order.total.toFixed(2)}</span>
-                          <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm shrink-0">R$ {order.total.toFixed(2)}</span>
+                          
+                          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                              
+                              {/* --- BOTÃO AVANÇAR (APARECE NO CELULAR) --- */}
+                              {status !== 'delivered' && status !== 'cancelled' && (
+                                  <button 
+                                      onClick={(e) => {
+                                          e.stopPropagation();
+                                          const nextStatusMap: Record<string, Order['status']> = {
+                                              'waiting_payment': 'pending',
+                                              'pending': 'preparing',
+                                              'preparing': 'ready',
+                                              'ready': 'delivering',
+                                              'waiting_courier': 'delivering',
+                                              'delivering': 'delivered'
+                                          };
+                                          const nextStatus = nextStatusMap[status];
+                                          if (nextStatus) onDrop(order.id, nextStatus);
+                                      }}
+                                      className="md:hidden bg-red-100 text-red-700 hover:bg-red-200 px-2 py-1 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shrink-0"
+                                      title="Avançar Pedido"
+                                  >
+                                      Avançar <ArrowRight className="w-3 h-3" />
+                                  </button>
+                              )}
+
                               <button
                                 onClick={(e) => { e.stopPropagation(); onPrintOrder(order); }}
-                                className="p-2 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-800 transition-colors"
+                                className="p-2 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-800 transition-colors shrink-0"
                                 title="Imprimir Pedido"
                               >
                                   <Printer className="w-4 h-4" />
@@ -226,7 +251,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                               {!isWhatsapp && (
                                 <button 
                                     onClick={(e) => { e.stopPropagation(); onOpenChat(order.id); }}
-                                    className={`p-2 rounded-full transition-all flex items-center gap-1
+                                    className={`p-2 rounded-full transition-all flex items-center gap-1 shrink-0
                                         ${hasUnread 
                                             ? 'bg-red-600 text-white animate-pulse shadow-md shadow-red-200' 
                                             : hasMessages ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
@@ -239,11 +264,10 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                                 </button>
                               )}
                               {isWhatsapp && (
-                                  <button onClick={() => window.open(`https://wa.me/${order.customerPhone}`, '_blank')} className="p-2 rounded-full bg-green-100 text-green-600 hover:bg-green-200">
+                                  <button onClick={() => window.open(`https://wa.me/${order.customerPhone}`, '_blank')} className="p-2 rounded-full bg-green-100 text-green-600 hover:bg-green-200 shrink-0">
                                       <MessageSquare className="w-4 h-4"/>
                                   </button>
                               )}
-                              <div className={`w-2 h-2 rounded-full ${color.replace('border-', 'bg-').replace('200', '500')}`}></div>
                           </div>
                       </div>
                   </div>
@@ -251,7 +275,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
           })}
           {items.length === 0 && (
               <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-50 pointer-events-none">
-                  <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center mb-2">
+                  <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center mb-2 shrink-0">
                       <ShoppingBag className="w-6 h-6 text-gray-400" />
                   </div>
                   <p className="text-sm font-medium">Solte aqui</p>
