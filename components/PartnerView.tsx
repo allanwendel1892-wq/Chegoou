@@ -1353,10 +1353,10 @@ const PartnerView: React.FC<PartnerViewProps> = ({
         )}
 
       <Sidebar 
-        currentView={currentView}
-        setView={setCurrentView}
-        isMobileOpen={isSidebarOpen}
-        setIsMobileOpen={setIsSidebarOpen}
+        currentView={view} 
+        setView={handleNavigation} 
+        isMobileOpen={isMobileOpen} 
+        setIsMobileOpen={setIsMobileOpen} 
         onLogout={onLogout}
         companyStatus={localCompany.status}
         onToggleStatus={handleToggleStatus}
