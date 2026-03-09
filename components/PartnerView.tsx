@@ -1360,9 +1360,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       onLogout={onLogout}
       companyStatus={localCompany.status}
       onToggleStatus={handleToggleStatus}
-      company={localCompany}  {/* <--- VOCÊ PRECISA ADICIONAR ESTA LINHA AQUI! */}
-  />
-
+      company={localCompany}
+          
       <div className="flex-1 overflow-auto flex flex-col">
         <div className="bg-white p-4 flex justify-between items-center border-b border-gray-100 sticky top-0 z-20 shadow-sm">
              <div className="flex items-center gap-2">
