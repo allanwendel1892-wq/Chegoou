@@ -1352,15 +1352,16 @@ const PartnerView: React.FC<PartnerViewProps> = ({
              </div>
         )}
 
-        <Sidebar 
-      currentView={currentView}
-      setView={setCurrentView}
-      isMobileOpen={isSidebarOpen}
-      setIsMobileOpen={setIsSidebarOpen}
-      onLogout={onLogout}
-      companyStatus={localCompany.status}
-      onToggleStatus={handleToggleStatus}
-      company={localCompany}
+      <Sidebar 
+        currentView={currentView}
+        setView={setCurrentView}
+        isMobileOpen={isSidebarOpen}
+        setIsMobileOpen={setIsSidebarOpen}
+        onLogout={onLogout}
+        companyStatus={localCompany.status}
+        onToggleStatus={handleToggleStatus}
+        company={localCompany}
+      />
           
       <div className="flex-1 overflow-auto flex flex-col">
         <div className="bg-white p-4 flex justify-between items-center border-b border-gray-100 sticky top-0 z-20 shadow-sm">
