@@ -1352,15 +1352,16 @@ const PartnerView: React.FC<PartnerViewProps> = ({
              </div>
         )}
 
-      <Sidebar 
-        currentView={view} 
-        setView={handleNavigation} 
-        isMobileOpen={isMobileOpen} 
-        setIsMobileOpen={setIsMobileOpen} 
-        onLogout={onLogout}
-        companyStatus={company.status}
-        onToggleStatus={handleToggleStatus}
-      />
+        <Sidebar 
+      currentView={currentView}
+      setView={setCurrentView}
+      isMobileOpen={isSidebarOpen}
+      setIsMobileOpen={setIsSidebarOpen}
+      onLogout={onLogout}
+      companyStatus={localCompany.status}
+      onToggleStatus={handleToggleStatus}
+      company={localCompany}  {/* <--- VOCÊ PRECISA ADICIONAR ESTA LINHA AQUI! */}
+  />
 
       <div className="flex-1 overflow-auto flex flex-col">
         <div className="bg-white p-4 flex justify-between items-center border-b border-gray-100 sticky top-0 z-20 shadow-sm">
