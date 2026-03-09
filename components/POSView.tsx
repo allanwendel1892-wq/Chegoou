@@ -99,11 +99,15 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
             customerName: finalCustomerName,
             customerPhone: customerPhone || 'Não informado',
             items: cart.map(item => ({
+                id: item.id,                       // Adicionado para evitar erro de 'key' no React do Kanban
                 productId: item.product.id,
+                name: item.product.name,           // O App geralmente lê 'name' direto
                 productName: item.product.name,
                 quantity: item.quantity,
                 price: item.finalPrice,
-                selectedOptions: item.selectedOptions
+                options: item.selectedOptions,     // Padrão muito comum no lado do App
+                selectedOptions: item.selectedOptions,
+                complements: item.selectedOptions  // Garantia extra
             })),
             subtotal,
             deliveryFee: 0,
@@ -185,7 +189,7 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                 </div>
             </div>
 
-            {/* LADO DIREITO: CARRINHO DESKTOP (JSX DIRETO PARA EVITAR BUG DE FOCO) */}
+            {/* LADO DIREITO: CARRINHO DESKTOP */}
             <div className="hidden md:flex w-96 bg-white border-l border-gray-200 shadow-xl z-20 flex-col h-full">
                 <div className="p-4 border-b border-gray-100 bg-white sticky top-0 z-10 shrink-0">
                     <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
@@ -298,7 +302,7 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                 </div>
             )}
 
-            {/* MODAL CARRINHO FULLSCREEN MOBILE (JSX DIRETO PARA EVITAR BUG DE FOCO) */}
+            {/* MODAL CARRINHO FULLSCREEN MOBILE */}
             {isMobileCartOpen && (
                 <div className="md:hidden fixed inset-0 z-50 bg-white flex flex-col animate-slide-up">
                     <div className="p-4 bg-gray-900 text-white flex justify-between items-center pb-safe-top pt-safe-top shrink-0">
@@ -413,11 +417,19 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                                                                 if (e.target.checked) {
                                                                     if (group.max === 1) {
                                                                         const filtered = currentOptions.filter(co => !group.options.some(go => go.name === co.name));
-                                                                        setCurrentOptions([...filtered, {name: opt.name, price: opt.price || 0} as any]);
+                                                                        setCurrentOptions([...filtered, {
+                                                                            name: opt.name, 
+                                                                            optionName: opt.name, // É isto que o PartnerView (Kanban) procura!
+                                                                            price: opt.price || 0
+                                                                        } as any]);
                                                                     } else {
                                                                         const currentInGroup = currentOptions.filter(co => group.options.some(go => go.name === co.name));
                                                                         if (currentInGroup.length < group.max) {
-                                                                            setCurrentOptions([...currentOptions, {name: opt.name, price: opt.price || 0} as any]);
+                                                                            setCurrentOptions([...currentOptions, {
+                                                                                name: opt.name, 
+                                                                                optionName: opt.name, // É isto que o PartnerView (Kanban) procura!
+                                                                                price: opt.price || 0
+                                                                            } as any]);
                                                                         }
                                                                     }
                                                                 } else {
