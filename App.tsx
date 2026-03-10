@@ -547,7 +547,7 @@ const App: React.FC = () => {
           if (companiesData) setCompanies(companiesData);
 
           // Busca de Produtos
-          const { data: productsData, error: productsError } = await supabase.from('products').select('*');
+          const { data: productsData, error: productsError } = await supabase.from('products').select('*').limit(5000);//limite de dados do banco
           if (productsError) throw productsError;
           if (productsData) setProducts(productsData);
 
