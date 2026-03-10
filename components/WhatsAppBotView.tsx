@@ -1,4 +1,3 @@
-console.log("DEBUG: Total de orders recebidas do banco:", orders.length);
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Product, Order, Company, Coupon } from '../types';
 // FIX: Add missing 'X' icon import.
