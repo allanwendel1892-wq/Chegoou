@@ -552,7 +552,7 @@ const App: React.FC = () => {
           if (productsData) setProducts(productsData);
 
           // Busca de Pedidos
-          const { data: ordersData, error: ordersError } = await supabase.from('orders').select('*');
+          const { data: ordersData, error: ordersError } = await supabase.from('orders').select('*').limit(5000);
           if (ordersError) throw ordersError;
           if (ordersData) {
               const formattedOrders = ordersData.map(o => ({
@@ -564,7 +564,7 @@ const App: React.FC = () => {
           }
 
           // Busca de Usuários (Apenas se Admin no futuro, ou limitado)
-          const { data: usersData, error: usersError } = await supabase.from('users').select('*');
+          const { data: usersData, error: usersError } = await supabase.from('users').select('*').limit(5000);
           if (usersError) throw usersError;
           if (usersData) setUsers(usersData);
 
