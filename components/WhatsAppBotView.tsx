@@ -56,30 +56,35 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
   const isCancelledRef = useRef(false);
   
 
-  // --- 1. LÓGICA DE CLIENTES (CRM) ---
+  // --- 1. LÓGICA DE CLIENTES (CRM) CORRIGIDA ---
   const customers = useMemo(() => {
       const customerMap = new Map<string, CustomerCRM>();
       const now = new Date();
 
       orders.forEach(order => {
-          const phone = order.customerPhone.replace(/\D/g, '');
-          if (!phone) return;
+          // Usamos o customerPhone original como chave para não perder duplicatas de limpeza
+          // Mas se não existir, usamos o ID que você disse ser o telefone
+          const key = order.customerPhone || order.id;
+          if (!key) return;
 
+          const phoneDigits = key.replace(/\D/g, '');
           const orderDate = new Date(order.timestamp);
           
-          if (!customerMap.has(phone)) {
-              customerMap.set(phone, {
-                  name: order.customerName,
-                  phone: phone,
+          if (!customerMap.has(key)) {
+              customerMap.set(key, {
+                  name: order.customerName || 'Cliente',
+                  phone: phoneDigits,
                   lastPurchase: orderDate,
                   totalOrders: 0,
                   status: 'inativo'
               });
           }
 
-          const customer = customerMap.get(phone)!;
+          const customer = customerMap.get(key)!;
           customer.totalOrders += 1;
-          if (orderDate > customer.lastPurchase) {
+          
+          // Atualiza para a data mais recente
+          if (!isNaN(orderDate.getTime()) && orderDate > customer.lastPurchase) {
               customer.lastPurchase = orderDate;
               customer.name = order.customerName;
           }
