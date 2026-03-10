@@ -123,28 +123,32 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
 
   // --- 3. QUEUE PROCESSOR LOGIC ---
   const processMessageQueue = async (currentQueue: QueueItem[]) => {
-    isCancelledRef.current = false; // Reset on start
+    isCancelledRef.current = false;
+    const BATCH_SIZE = 3; // Envia de 3 em 3 para acelerar
+
     for (let i = 0; i < currentQueue.length; i++) {
-        if (isCancelledRef.current) {
-            console.log("Fila de disparos cancelada.");
-            return; 
-        }
+        if (isCancelledRef.current) return;
 
         const item = currentQueue[i];
-
         if (item.status === 'sent' || item.status === 'error') continue;
 
         setQueue(prev => prev.map((q, idx) => idx === i ? { ...q, status: 'sending' } : q));
         
-        const randomDelay = Math.floor(Math.random() * (60000 - 30000 + 1)) + 30000;
-        
-        if (i > 0) { 
-            let secondsLeft = Math.ceil(randomDelay / 1000);
+        // --- LÓGICA DE VELOCIDADE INTELIGENTE ---
+        if (i > 0) {
+            let waitTime = 0;
+            
+            if (i % BATCH_SIZE === 0) {
+                // Pausa após o lote de 3 (Simula o humano parando)
+                waitTime = Math.floor(Math.random() * (45000 - 30000 + 1)) + 30000; 
+            } else {
+                // Micro-pausa dentro do lote (Simula o tempo de colar e enviar)
+                waitTime = Math.floor(Math.random() * (5000 - 2000 + 1)) + 2000; 
+            }
+
+            let secondsLeft = Math.ceil(waitTime / 1000);
             while (secondsLeft > 0) {
-                if (isCancelledRef.current) {
-                    console.log("Fila de disparos cancelada durante o delay.");
-                    return;
-                }
+                if (isCancelledRef.current) return;
                 setCountdown(secondsLeft);
                 await wait(1000); 
                 secondsLeft--;
@@ -152,14 +156,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
         }
         setCountdown(0);
 
-        if (isCancelledRef.current) { // Check again after delay
-             console.log("Fila de disparos cancelada após o delay.");
-             return;
-        }
-
         try {
-            console.log(`[${i+1}/${currentQueue.length}] Disparando para: ${item.name} (${item.phone})`);
-            
             const payload = {
                 phone: item.phone,
                 name: item.name,
@@ -168,33 +165,19 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
                 companyName: company.name
             };
 
-            const response = await fetch(N8N_WEBHOOK_URL, {
+            await fetch(N8N_WEBHOOK_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
 
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`N8N Recusou: ${response.status} - ${errorText}`);
-            }
-
-            console.log(`✅ Sucesso n8n: ${item.name}`);
-            
             setQueue(prev => prev.map((q, idx) => idx === i ? { ...q, status: 'sent' } : q));
 
         } catch (error: any) {
-            console.error(`❌ Falha: ${item.name}`, error);
             setQueue(prev => prev.map((q, idx) => idx === i ? { ...q, status: 'error', log: error.message } : q));
         }
-        
-        await wait(1000);
     }
-    
-    if (isCancelledRef.current) return;
-
     setQueueStatus('completed');
-    alert("Todos os disparos foram processados!");
   };
   
   
