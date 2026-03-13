@@ -3,15 +3,13 @@ import { Product, Order, Company, Coupon } from '../types';
 import { MessageSquare, Users, Send, CheckCircle, AlertCircle, Clock, Calendar, RefreshCw, Zap, Search, Filter, Play, Pause, StopCircle, ArrowLeft, Ticket, X } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
-// NOVO: Adicionado 'last_message_sent_at' como opcional caso não esteja no seu type Order original.
-// Se preferir, coloque isso direto no seu arquivo '../types'
 interface ExtendedOrder extends Order {
     last_message_sent_at?: string | null;
 }
 
 interface WhatsAppBotViewProps {
   products: Product[]; 
-  orders: ExtendedOrder[]; // NOVO: Usando a interface estendida
+  orders: ExtendedOrder[]; 
   company: Company;
   updateCompany: (data: Partial<Company>) => void;
   coupons: Coupon[]; 
@@ -21,9 +19,9 @@ interface CustomerCRM {
     name: string;
     phone: string;
     lastPurchase: Date;
-    lastMessageAt: Date | null; // NOVO: Rastrea a data do último disparo
+    lastMessageAt: Date | null;
     totalOrders: number;
-    status: 'recente' | 'morno' | 'inativo' | 'contatado'; // NOVO: Status contatado
+    status: 'recente' | 'morno' | 'inativo' | 'contatado';
 }
 
 interface QueueItem {
@@ -43,7 +41,6 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
   const [messageText, setMessageText] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   
-  // NOVO: Adicionado 'contatado' aos filtros
   const [statusFilter, setStatusFilter] = useState<'all' | 'recente' | 'morno' | 'inativo' | 'contatado'>('all');
   const [viewMode, setViewMode] = useState<'list' | 'compose' | 'queue'>('list');
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -57,7 +54,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
   const finalMessageForBatch = useRef('');
   const isCancelledRef = useRef(false);
   
-  // --- 1. LÓGICA DE CLIENTES (CRM) ATUALIZADA ---
+  // --- 1. LÓGICA DE CLIENTES (CRM) ATUALIZADA E CORRIGIDA ---
   const customers = useMemo(() => {
       const customerMap = new Map<string, CustomerCRM>();
       const now = new Date();
@@ -69,15 +66,15 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
           const phoneDigits = key.replace(/\D/g, '');
           const orderDate = new Date(order.timestamp);
           
-          // NOVO: Captura a data da mensagem, se existir
           const msgDate = order.last_message_sent_at ? new Date(order.last_message_sent_at) : null;
           
           if (!customerMap.has(key)) {
               customerMap.set(key, {
                   name: order.customerName || 'Cliente',
                   phone: phoneDigits,
-                  lastPurchase: orderDate,
-                  lastMessageAt: msgDate, // NOVO
+                  // Previne Invalid Date usando uma data zero caso a conversão falhe
+                  lastPurchase: !isNaN(orderDate.getTime()) ? orderDate : new Date(0), 
+                  lastMessageAt: msgDate,
                   totalOrders: 0,
                   status: 'inativo'
               });
@@ -91,7 +88,6 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
               customer.name = order.customerName;
           }
 
-          // NOVO: Salva a data de mensagem mais recente entre todos os pedidos desse cliente
           if (msgDate && !isNaN(msgDate.getTime())) {
               if (!customer.lastMessageAt || msgDate > customer.lastMessageAt) {
                   customer.lastMessageAt = msgDate;
@@ -101,13 +97,25 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
 
       return Array.from(customerMap.values()).map(c => {
           let status: 'recente' | 'morno' | 'inativo' | 'contatado' = 'inativo';
+          let isContatado = false;
 
-          // NOVO: Lógica do Desempate
-          if (c.lastMessageAt && c.lastMessageAt > c.lastPurchase) {
-              // A última ação foi O ROBO mandar mensagem
+          if (c.lastMessageAt) {
+              // Zera as horas para comparar apenas os dias de forma justa
+              const msgTime = new Date(c.lastMessageAt).setHours(0, 0, 0, 0);
+              const purchaseTime = new Date(c.lastPurchase).setHours(0, 0, 0, 0);
+
+              // A mensagem só ganha se for de um dia ESTRITAMENTE posterior à última compra
+              if (msgTime > purchaseTime) {
+                  isContatado = true;
+              }
+          }
+
+          // Lógica do Desempate Corrigida
+          if (isContatado) {
+              // A última ação em dias distintos foi O ROBO mandar mensagem
               status = 'contatado';
           } else {
-              // A última ação foi O CLIENTE comprar (ou nunca mandamos mensagem)
+              // A última ação foi O CLIENTE comprar (ou ambos ocorreram no mesmo dia)
               const diffTime = Math.abs(now.getTime() - c.lastPurchase.getTime());
               const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
 
@@ -186,14 +194,11 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
 
             if (!response.ok) throw new Error('Erro no webhook N8N');
 
-            // NOVO: Atualiza a nova coluna no Supabase após disparo de sucesso
-            // Ele vai encontrar todos os pedidos daquele telefone e atualizar a coluna
             const nowIso = new Date().toISOString();
             await supabase
                 .from('orders')
                 .update({ last_message_sent_at: nowIso })
                 .eq('customerPhone', item.phone); 
-                // Obs: Ajuste 'customerPhone' se a coluna que guarda o telefone no Supabase tiver outro nome.
 
             setQueue(prev => prev.map((q, idx) => idx === i ? { ...q, status: 'sent' } : q));
 
@@ -204,7 +209,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
     setQueueStatus('completed');
   };
   
-  // --- ACTIONS (Mantidas) ---
+  // --- ACTIONS ---
   const handleSelect = (phone: string) => {
       if (selectedLeads.includes(phone)) {
           setSelectedLeads(prev => prev.filter(p => p !== phone));
@@ -322,7 +327,6 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
   if (viewMode === 'queue') {
       const progress = queue.length > 0 ? Math.round((queue.filter(i => i.status === 'sent' || i.status === 'error').length / queue.length) * 100) : 0;
       return (
-          // ... [O código do viewMode === 'queue' permanece igual] ...
           <div className="flex flex-col h-[calc(100vh-6rem)] max-w-4xl mx-auto">
             <div className="mb-6 flex items-center gap-4">
                 <button 
@@ -380,7 +384,6 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
 
   if (viewMode === 'compose') {
       return (
-          // ... [O código do viewMode === 'compose' permanece igual] ...
           <div className="flex flex-col h-full max-w-4xl mx-auto">
               <div className="mb-6 flex items-center justify-between gap-4">
                   <div className="flex items-center gap-4">
@@ -519,7 +522,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
                         {id: 'recente', label: 'Recentes'},
                         {id: 'morno', label: 'Mornos'},
                         {id: 'inativo', label: 'Inativos'},
-                        {id: 'contatado', label: 'Contatados'} // NOVO: Botão de filtro Contatados
+                        {id: 'contatado', label: 'Contatados'}
                     ].map(filter => (
                         <button 
                             key={filter.id}
@@ -567,7 +570,6 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
                       <p className="text-xs text-gray-500 font-mono">{c.phone}</p>
                   </td>
                   <td className="p-4">
-                      {/* NOVO: Renderiza a tag "Contatado" em azul */}
                       <span className={`px-2 py-1 rounded-full text-xs font-bold inline-block
                           ${c.status === 'recente' ? 'bg-green-100 text-green-700' : ''}
                           ${c.status === 'morno' ? 'bg-yellow-100 text-yellow-700' : ''}
