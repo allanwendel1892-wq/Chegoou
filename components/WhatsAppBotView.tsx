@@ -146,7 +146,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
   const selectionLimit = company.leadsPerBlastLimit || 20;
   const remainingBlasts = Math.max(0, dailyLimit - messagesSentToday);
 
-  // --- 3. QUEUE PROCESSOR ATUALIZADO (SUPABASE) ---
+  // --- 3. QUEUE PROCESSOR ATUALIZADO E PROTEGIDO ---
   const processMessageQueue = async (currentQueue: QueueItem[]) => {
     isCancelledRef.current = false;
     const BATCH_SIZE = 3; 
@@ -162,9 +162,11 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
         if (i > 0) {
             let waitTime = 0;
             if (i % BATCH_SIZE === 0) {
-                waitTime = Math.floor(Math.random() * (45000 - 30000 + 1)) + 30000; 
+                // Pausa LONGA entre lotes: 60 a 120 segundos (1 a 2 minutos)
+                waitTime = Math.floor(Math.random() * (120000 - 60000 + 1)) + 60000; 
             } else {
-                waitTime = Math.floor(Math.random() * (5000 - 2000 + 1)) + 2000; 
+                // Pausa NORMAL entre mensagens: 15 a 25 segundos
+                waitTime = Math.floor(Math.random() * (25000 - 15000 + 1)) + 15000; 
             }
 
             let secondsLeft = Math.ceil(waitTime / 1000);
@@ -186,6 +188,7 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
                 companyName: company.name
             };
 
+            // Disparo para o N8N
             const response = await fetch(N8N_WEBHOOK_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -195,10 +198,23 @@ const WhatsAppBotView: React.FC<WhatsAppBotViewProps> = ({ orders, company, upda
             if (!response.ok) throw new Error('Erro no webhook N8N');
 
             const nowIso = new Date().toISOString();
-            await supabase
+            
+            // OTIMIZAÇÃO SUPABASE: Pega apenas o ID do pedido mais recente desse cliente
+            const { data: latestOrder } = await supabase
                 .from('orders')
-                .update({ last_message_sent_at: nowIso })
-                .eq('customerPhone', item.phone); 
+                .select('id')
+                .eq('customerPhone', item.phone)
+                .order('timestamp', { ascending: false })
+                .limit(1)
+                .single();
+
+            // Atualiza o last_message_sent_at apenas na linha mais recente
+            if (latestOrder) {
+                await supabase
+                    .from('orders')
+                    .update({ last_message_sent_at: nowIso })
+                    .eq('id', latestOrder.id);
+            }
 
             setQueue(prev => prev.map((q, idx) => idx === i ? { ...q, status: 'sent' } : q));
 
