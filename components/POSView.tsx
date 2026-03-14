@@ -88,7 +88,6 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
     const handleCheckout = () => {
         if (cart.length === 0) return alert("O carrinho está vazio!");
 
-        // NOME OPCIONAL: Se não preencher, assume "Cliente Balcão"
         const finalCustomerName = customerName.trim() !== '' ? customerName.trim() : 'Cliente Balcão';
 
         const newOrder = {
@@ -99,15 +98,15 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
             customerName: finalCustomerName,
             customerPhone: customerPhone || 'Não informado',
             items: cart.map(item => ({
-                id: item.id,                       // Adicionado para evitar erro de 'key' no React do Kanban
+                id: item.id,
                 productId: item.product.id,
-                name: item.product.name,           // O App geralmente lê 'name' direto
+                name: item.product.name,
                 productName: item.product.name,
                 quantity: item.quantity,
                 price: item.finalPrice,
-                options: item.selectedOptions,     // Padrão muito comum no lado do App
+                options: item.selectedOptions,
                 selectedOptions: item.selectedOptions,
-                complements: item.selectedOptions  // Garantia extra
+                complements: item.selectedOptions
             })),
             subtotal,
             deliveryFee: 0,
@@ -116,8 +115,14 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
             deliveryMethod,
             paymentMethod,
             changeFor: changeFor ? Number(changeFor) : undefined,
-            status: paymentMethod === 'cash' ? 'pending' : 'waiting_payment',
-            paymentStatus: paymentMethod === 'cash' ? 'pending' : 'approved',
+            
+            // --- CORREÇÃO DA CARTEIRA / PAGAMENTOS OFFLINE ---
+            paymentType: 'offline', // Avisa o sistema que não passou pelo gateway online
+            isOfflinePayment: true, // Flag de segurança adicional
+            status: 'pending', // Sempre cai como pendente para a cozinha
+            paymentStatus: paymentMethod === 'cash' ? 'pending' : 'paid', // 'paid' em vez de 'approved'
+            // -------------------------------------------------
+
             timestamp: new Date().toISOString(),
             origin: 'pos' 
         };
@@ -405,44 +410,41 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                                     </div>
                                     <div className="divide-y divide-gray-100">
                                         {group.options.map((opt, oIdx) => {
-                                            // Verifica se a opção está selecionada baseada no nome E no índice do grupo
                                             const isSelected = currentOptions.some(co => co.name === opt.name && (co as any).groupIndex === idx);
                                             return (
                                                 <label key={oIdx} className={`flex items-center justify-between p-4 cursor-pointer transition-colors ${isSelected ? 'bg-red-50/50' : 'hover:bg-gray-50'}`}>
                                                     <div className="flex items-center gap-3">
                                                         <input 
-                                                            type={group.max === 1 ? "radio" : "checkbox"}
+                                                            type="checkbox" // Sempre checkbox para permitir desmarcar
                                                             name={`group-${idx}`}
                                                             checked={isSelected}
                                                             onChange={(e) => {
                                                                 if (e.target.checked) {
                                                                     if (group.max === 1) {
-                                                                        // Limpa apenas as seleções do GRUPO ATUAL antes de adicionar a nova
                                                                         const filtered = currentOptions.filter(co => (co as any).groupIndex !== idx);
                                                                         setCurrentOptions([...filtered, {
                                                                             name: opt.name, 
                                                                             optionName: opt.name,
                                                                             price: opt.price || 0,
-                                                                            groupIndex: idx // Salva o índice do grupo aqui
+                                                                            groupIndex: idx
                                                                         } as any]);
                                                                     } else {
-                                                                        // Conta o limite máximo olhando apenas para o GRUPO ATUAL
                                                                         const currentInGroup = currentOptions.filter(co => (co as any).groupIndex === idx);
                                                                         if (currentInGroup.length < group.max) {
                                                                             setCurrentOptions([...currentOptions, {
                                                                                 name: opt.name, 
                                                                                 optionName: opt.name,
                                                                                 price: opt.price || 0,
-                                                                                groupIndex: idx // Salva o índice do grupo aqui
+                                                                                groupIndex: idx
                                                                             } as any]);
                                                                         }
                                                                     }
                                                                 } else {
-                                                                    // Ao desmarcar, remove apenas se o nome E o grupo baterem
                                                                     setCurrentOptions(currentOptions.filter(co => !(co.name === opt.name && (co as any).groupIndex === idx)));
                                                                 }
                                                             }}
-                                                            className="w-5 h-5 text-red-600 border-gray-300 focus:ring-red-500"
+                                                            // Visual de radio (bolinha) se max=1, ou quadrado se for múltipla
+                                                            className={`w-5 h-5 text-red-600 border-gray-300 focus:ring-red-500 ${group.max === 1 ? 'rounded-full' : 'rounded'}`}
                                                         />
                                                         <span className="text-sm font-medium text-gray-800">{opt.name}</span>
                                                     </div>
