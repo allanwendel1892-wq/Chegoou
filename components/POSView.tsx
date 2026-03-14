@@ -405,7 +405,8 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                                     </div>
                                     <div className="divide-y divide-gray-100">
                                         {group.options.map((opt, oIdx) => {
-                                            const isSelected = currentOptions.some(co => co.name === opt.name);
+                                            // Verifica se a opção está selecionada baseada no nome E no índice do grupo
+                                            const isSelected = currentOptions.some(co => co.name === opt.name && (co as any).groupIndex === idx);
                                             return (
                                                 <label key={oIdx} className={`flex items-center justify-between p-4 cursor-pointer transition-colors ${isSelected ? 'bg-red-50/50' : 'hover:bg-gray-50'}`}>
                                                     <div className="flex items-center gap-3">
@@ -416,24 +417,29 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                                                             onChange={(e) => {
                                                                 if (e.target.checked) {
                                                                     if (group.max === 1) {
-                                                                        const filtered = currentOptions.filter(co => !group.options.some(go => go.name === co.name));
+                                                                        // Limpa apenas as seleções do GRUPO ATUAL antes de adicionar a nova
+                                                                        const filtered = currentOptions.filter(co => (co as any).groupIndex !== idx);
                                                                         setCurrentOptions([...filtered, {
                                                                             name: opt.name, 
-                                                                            optionName: opt.name, // É isto que o PartnerView (Kanban) procura!
-                                                                            price: opt.price || 0
+                                                                            optionName: opt.name,
+                                                                            price: opt.price || 0,
+                                                                            groupIndex: idx // Salva o índice do grupo aqui
                                                                         } as any]);
                                                                     } else {
-                                                                        const currentInGroup = currentOptions.filter(co => group.options.some(go => go.name === co.name));
+                                                                        // Conta o limite máximo olhando apenas para o GRUPO ATUAL
+                                                                        const currentInGroup = currentOptions.filter(co => (co as any).groupIndex === idx);
                                                                         if (currentInGroup.length < group.max) {
                                                                             setCurrentOptions([...currentOptions, {
                                                                                 name: opt.name, 
-                                                                                optionName: opt.name, // É isto que o PartnerView (Kanban) procura!
-                                                                                price: opt.price || 0
+                                                                                optionName: opt.name,
+                                                                                price: opt.price || 0,
+                                                                                groupIndex: idx // Salva o índice do grupo aqui
                                                                             } as any]);
                                                                         }
                                                                     }
                                                                 } else {
-                                                                    setCurrentOptions(currentOptions.filter(co => co.name !== opt.name));
+                                                                    // Ao desmarcar, remove apenas se o nome E o grupo baterem
+                                                                    setCurrentOptions(currentOptions.filter(co => !(co.name === opt.name && (co as any).groupIndex === idx)));
                                                                 }
                                                             }}
                                                             className="w-5 h-5 text-red-600 border-gray-300 focus:ring-red-500"
