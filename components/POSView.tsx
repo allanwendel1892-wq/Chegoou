@@ -116,12 +116,10 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
             paymentMethod,
             changeFor: changeFor ? Number(changeFor) : undefined,
             
-            // --- CORREÇÃO DA CARTEIRA / PAGAMENTOS OFFLINE ---
-            paymentType: 'offline', // Avisa o sistema que não passou pelo gateway online
-            isOfflinePayment: true, // Flag de segurança adicional
-            status: 'pending', // Sempre cai como pendente para a cozinha
-            paymentStatus: paymentMethod === 'cash' ? 'pending' : 'paid', // 'paid' em vez de 'approved'
-            // -------------------------------------------------
+            // CORREÇÃO: Enviando sempre como pending para evitar o erro do Supabase
+            // e também evitar que o sistema credite o Pix na carteira do cliente.
+            status: 'pending',
+            paymentStatus: 'pending',
 
             timestamp: new Date().toISOString(),
             origin: 'pos' 
@@ -415,7 +413,7 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                                                 <label key={oIdx} className={`flex items-center justify-between p-4 cursor-pointer transition-colors ${isSelected ? 'bg-red-50/50' : 'hover:bg-gray-50'}`}>
                                                     <div className="flex items-center gap-3">
                                                         <input 
-                                                            type="checkbox" // Sempre checkbox para permitir desmarcar
+                                                            type="checkbox"
                                                             name={`group-${idx}`}
                                                             checked={isSelected}
                                                             onChange={(e) => {
@@ -443,7 +441,6 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                                                                     setCurrentOptions(currentOptions.filter(co => !(co.name === opt.name && (co as any).groupIndex === idx)));
                                                                 }
                                                             }}
-                                                            // Visual de radio (bolinha) se max=1, ou quadrado se for múltipla
                                                             className={`w-5 h-5 text-red-600 border-gray-300 focus:ring-red-500 ${group.max === 1 ? 'rounded-full' : 'rounded'}`}
                                                         />
                                                         <span className="text-sm font-medium text-gray-800">{opt.name}</span>
