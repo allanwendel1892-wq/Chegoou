@@ -531,6 +531,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             o.status === 'delivered' && 
             o.paymentMethod !== 'cash' && 
             o.origin !== 'whatsapp' && 
+            o.origin !== 'pos' && // TRAVA ADICIONADA: Impede geração de repasse para PDV
             (o.repasseStatus === 'pending' || !o.repasseStatus)
         );
 
@@ -647,8 +648,9 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const financialSummary = useMemo(() => {
       const validOrders = orders.filter(o => {
           const isWhatsapp = o.origin?.toLowerCase() === 'whatsapp';
-          const isIgnored = o.repasseStatus === 'ignored';
-          return !isWhatsapp && !isIgnored;
+          const isPos = o.origin?.toLowerCase() === 'pos'; // TRAVA ADICIONADA
+          const isIgnored = o.repasseStatus === 'ignored' || o.repasseStatus === 'none'; // CORREÇÃO PARA 'none'
+          return !isWhatsapp && !isPos && !isIgnored; // FILTRO ATUALIZADO
       });
 
       const blocked = validOrders
