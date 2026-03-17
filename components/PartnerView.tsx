@@ -161,12 +161,22 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                                               <span className="truncate">{item.quantity}x {item.productName}</span>
                                           </div>
                                           {item.selectedOptions && item.selectedOptions.length > 0 && (
-                                              <div className="pl-3 mt-0.5 space-y-0.5">
-                                                  {item.selectedOptions.map((opt, optIdx) => (
-                                                      <p key={optIdx} className="text-[10px] text-gray-500 leading-tight truncate">
-                                                          • {opt.optionName}
-                                                      </p>
-                                                  ))}
+                                              <div className="pl-3 mt-1 space-y-1">
+                                                  {(() => {
+                                                      const groups: Record<string, string[]> = {};
+                                                      item.selectedOptions.forEach(opt => {
+                                                          const g = (opt as any).groupName || '';
+                                                          if (!groups[g]) groups[g] = [];
+                                                          groups[g].push(opt.optionName || opt.name);
+                                                      });
+                                                      
+                                                      return Object.entries(groups).map(([gName, opts], groupIdx) => (
+                                                          <div key={groupIdx} className="text-[10px] text-gray-600 leading-tight">
+                                                              {gName ? <span className="font-bold text-gray-800 uppercase">{gName}: </span> : <span className="font-bold text-gray-800">+ </span>}
+                                                              {opts.join(', ')}
+                                                          </div>
+                                                      ));
+                                                  })()}
                                               </div>
                                           )}
                                       </div>
@@ -388,18 +398,36 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   };
 
   const handlePrintOrder = (order: Order) => {
-      const itemsHtml = Array.isArray(order.items) ? order.items.map(item => `
-          <div style="display:flex; justify-content:space-between; margin-bottom: 5px;">
-              <span style="font-weight:bold;">${item.quantity}x</span>
-              <span style="flex:1; margin-left: 5px;">${item.productName}</span>
-              <span>R$ ${(item.price * item.quantity).toFixed(2)}</span>
-          </div>
-          ${item.selectedOptions && item.selectedOptions.length > 0 ? 
-              `<div style="font-size: 12px; color: #000000; font-weight: bold; margin-left: 20px; margin-bottom: 5px;">
-                  ${item.selectedOptions.map(opt => `+ ${opt.optionName}`).join('<br/>')}
-              </div>` : ''
+      const itemsHtml = Array.isArray(order.items) ? order.items.map(item => {
+          let optionsHtml = '';
+          if (item.selectedOptions && item.selectedOptions.length > 0) {
+              const groups: Record<string, string[]> = {};
+              item.selectedOptions.forEach(opt => {
+                  const g = (opt as any).groupName || '';
+                  if (!groups[g]) groups[g] = [];
+                  groups[g].push(opt.optionName || opt.name);
+              });
+              
+              optionsHtml = `<div style="font-size: 11px; margin-left: 10px; margin-bottom: 5px;">
+                  ${Object.entries(groups).map(([gName, opts]) => {
+                      if (gName) {
+                          return `<div style="margin-bottom: 3px;"><b>${gName.toUpperCase()}:</b> ${opts.join(', ')}</div>`;
+                      } else {
+                          return opts.map(o => `<div style="margin-bottom: 3px;">+ ${o}</div>`).join('');
+                      }
+                  }).join('')}
+              </div>`;
           }
-      `).join('') : `<p>${order.raw_description || 'Itens não estruturados'}</p>`;
+
+          return `
+              <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
+                  <span style="font-weight:bold;">${item.quantity}x</span>
+                  <span style="flex:1; margin-left: 5px; font-weight:bold;">${item.productName}</span>
+                  <span style="font-weight:bold;">R$ ${(item.price * item.quantity).toFixed(2)}</span>
+              </div>
+              ${optionsHtml}
+          `;
+      }).join('') : `<p>${order.raw_description || 'Itens não estruturados'}</p>`;
 
       const addressHtml = order.deliveryMethod === 'pickup' 
         ? '<p style="text-align:center; font-weight:bold; font-size:14px; margin: 10px 0;">RETIRADA NO BALCÃO</p>'
@@ -1241,12 +1269,12 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                      <div key={idx} className="flex flex-col bg-white p-3 rounded-lg shadow-sm border border-gray-100">
                                          <div className="flex justify-between items-center mb-1">
                                              <div className="flex items-center gap-3">
-                                                  <div className="flex items-center border rounded-lg">
-                                                      <button onClick={() => handleUpdateItemQuantity(idx, -1)} className="px-2 py-1 hover:bg-gray-100">-</button>
-                                                      <span className="px-2 font-bold text-sm">{item.quantity}</span>
-                                                      <button onClick={() => handleUpdateItemQuantity(idx, 1)} className="px-2 py-1 hover:bg-gray-100">+</button>
-                                                  </div>
-                                                  <span className="text-sm font-medium">{item.productName}</span>
+                                                 <div className="flex items-center border rounded-lg">
+                                                     <button onClick={() => handleUpdateItemQuantity(idx, -1)} className="px-2 py-1 hover:bg-gray-100">-</button>
+                                                     <span className="px-2 font-bold text-sm">{item.quantity}</span>
+                                                     <button onClick={() => handleUpdateItemQuantity(idx, 1)} className="px-2 py-1 hover:bg-gray-100">+</button>
+                                                 </div>
+                                                 <span className="text-sm font-medium">{item.productName}</span>
                                              </div>
                                              <div className="flex items-center gap-4">
                                                  <span className="font-bold text-sm">R$ {item.price.toFixed(2)}</span>
@@ -1256,12 +1284,21 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                              </div>
                                          </div>
                                          {item.selectedOptions && item.selectedOptions.length > 0 && (
-                                              <div className="pl-24 space-y-0.5 border-t border-gray-50 pt-1 mt-1">
-                                                  {item.selectedOptions.map((opt, optIdx) => (
-                                                      <p key={optIdx} className="text-[10px] text-gray-500">
-                                                          + {opt.optionName}
-                                                      </p>
-                                                  ))}
+                                              <div className="pl-24 space-y-1 border-t border-gray-50 pt-1 mt-1">
+                                                  {(() => {
+                                                      const groups: Record<string, string[]> = {};
+                                                      item.selectedOptions.forEach(opt => {
+                                                          const g = (opt as any).groupName || '';
+                                                          if (!groups[g]) groups[g] = [];
+                                                          groups[g].push(opt.optionName || opt.name);
+                                                      });
+                                                      return Object.entries(groups).map(([gName, opts], oIdx) => (
+                                                          <div key={oIdx} className="text-[10px] text-gray-600">
+                                                              {gName ? <span className="font-bold text-gray-800 uppercase">{gName}: </span> : <span className="font-bold text-gray-800">+ </span>}
+                                                              {opts.join(', ')}
+                                                          </div>
+                                                      ));
+                                                  })()}
                                               </div>
                                          )}
                                      </div>
