@@ -424,7 +424,8 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                                                                             name: opt.name, 
                                                                             optionName: opt.name,
                                                                             price: opt.price || 0,
-                                                                            groupIndex: idx
+                                                                            groupIndex: idx,
+                                                                            groupName: group.name
                                                                         } as any]);
                                                                     } else {
                                                                         const currentInGroup = currentOptions.filter(co => (co as any).groupIndex === idx);
@@ -433,7 +434,8 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                                                                                 name: opt.name, 
                                                                                 optionName: opt.name,
                                                                                 price: opt.price || 0,
-                                                                                groupIndex: idx
+                                                                                groupIndex: idx,
+                                                                                groupName: group.name
                                                                             } as any]);
                                                                         }
                                                                     }
