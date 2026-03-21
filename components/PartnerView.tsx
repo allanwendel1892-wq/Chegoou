@@ -173,7 +173,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                                                       return Object.entries(groups).map(([gName, opts], groupIdx) => (
                                                           <div key={groupIdx} className="text-[10px] text-gray-600 leading-tight">
                                                               {gName ? <span className="font-bold text-gray-800 uppercase">{gName}: </span> : <span className="font-bold text-gray-800">+ </span>}
-                                                              {opts.join(', ')}
+                                                              <span className="font-bold text-gray-800">{opts.join(', ')}</span>
                                                           </div>
                                                       ));
                                                   })()}
@@ -411,9 +411,9 @@ const PartnerView: React.FC<PartnerViewProps> = ({
               optionsHtml = `<div style="font-size: 11px; margin-left: 10px; margin-bottom: 5px;">
                   ${Object.entries(groups).map(([gName, opts]) => {
                       if (gName) {
-                          return `<div style="margin-bottom: 3px;"><b>${gName.toUpperCase()}:</b> ${opts.join(', ')}</div>`;
+                          return `<div style="margin-bottom: 3px;"><b>${gName.toUpperCase()}:</b> <b>${opts.join(', ')}</b></div>`;
                       } else {
-                          return opts.map(o => `<div style="margin-bottom: 3px;">+ ${o}</div>`).join('');
+                          return opts.map(o => `<div style="margin-bottom: 3px;"><b>+ ${o}</b></div>`).join('');
                       }
                   }).join('')}
               </div>`;
@@ -1297,7 +1297,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                                       return Object.entries(groups).map(([gName, opts], oIdx) => (
                                                           <div key={oIdx} className="text-[10px] text-gray-600">
                                                               {gName ? <span className="font-bold text-gray-800 uppercase">{gName}: </span> : <span className="font-bold text-gray-800">+ </span>}
-                                                              {opts.join(', ')}
+                                                              <span className="font-bold text-gray-800">{opts.join(', ')}</span>
                                                           </div>
                                                       ));
                                                   })()}
