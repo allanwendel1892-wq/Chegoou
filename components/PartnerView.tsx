@@ -170,12 +170,19 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                                                           groups[g].push(opt.optionName || opt.name);
                                                       });
                                                       
-                                                      return Object.entries(groups).map(([gName, opts], groupIdx) => (
-                                                          <div key={groupIdx} className="text-[10px] text-gray-600 leading-tight">
-                                                              {gName ? <span className="font-bold text-gray-800 uppercase">{gName}: </span> : <span className="font-bold text-gray-800">+ </span>}
-                                                              <span className="font-bold text-gray-800">{opts.join(', ')}</span>
-                                                          </div>
-                                                      ));
+                                                      const isPizza = (item as any).pricingMode === 'pizza';
+
+                                                      return Object.entries(groups).map(([gName, opts], groupIdx) => {
+                                                          const fraction = (isPizza && opts.length > 1) ? `1/${opts.length} ` : '';
+                                                          const displayOpts = opts.map(o => `${fraction}${o}`);
+
+                                                          return (
+                                                              <div key={groupIdx} className="text-[10px] text-gray-600 leading-tight">
+                                                                  {gName ? <span className="font-bold text-gray-800 uppercase">{gName}: </span> : <span className="font-bold text-gray-800">+ </span>}
+                                                                  <span className="font-bold text-gray-800">{displayOpts.join(', ')}</span>
+                                                              </div>
+                                                          );
+                                                      });
                                                   })()}
                                               </div>
                                           )}
@@ -400,6 +407,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const handlePrintOrder = (order: Order) => {
       const itemsHtml = Array.isArray(order.items) ? order.items.map(item => {
           let optionsHtml = '';
+          const isPizza = (item as any).pricingMode === 'pizza';
+
           if (item.selectedOptions && item.selectedOptions.length > 0) {
               const groups: Record<string, string[]> = {};
               item.selectedOptions.forEach(opt => {
@@ -410,10 +419,13 @@ const PartnerView: React.FC<PartnerViewProps> = ({
               
               optionsHtml = `<div style="font-size: 11px; margin-left: 10px; margin-bottom: 5px;">
                   ${Object.entries(groups).map(([gName, opts]) => {
+                      const fraction = (isPizza && opts.length > 1) ? `1/${opts.length} ` : '';
+                      const displayOpts = opts.map(o => `${fraction}${o}`);
+
                       if (gName) {
-                          return `<div style="margin-bottom: 3px;"><b>${gName.toUpperCase()}:</b> <b>${opts.join(', ')}</b></div>`;
+                          return `<div style="margin-bottom: 3px;"><b>${gName.toUpperCase()}:</b> <b>${displayOpts.join(', ')}</b></div>`;
                       } else {
-                          return opts.map(o => `<div style="margin-bottom: 3px;"><b>+ ${o}</b></div>`).join('');
+                          return displayOpts.map(o => `<div style="margin-bottom: 3px;"><b>+ ${o}</b></div>`).join('');
                       }
                   }).join('')}
               </div>`;
@@ -1294,12 +1306,18 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                                           if (!groups[g]) groups[g] = [];
                                                           groups[g].push(opt.optionName || opt.name);
                                                       });
-                                                      return Object.entries(groups).map(([gName, opts], oIdx) => (
-                                                          <div key={oIdx} className="text-[10px] text-gray-600">
-                                                              {gName ? <span className="font-bold text-gray-800 uppercase">{gName}: </span> : <span className="font-bold text-gray-800">+ </span>}
-                                                              <span className="font-bold text-gray-800">{opts.join(', ')}</span>
-                                                          </div>
-                                                      ));
+                                                      const isPizza = (item as any).pricingMode === 'pizza';
+
+                                                      return Object.entries(groups).map(([gName, opts], oIdx) => {
+                                                          const fraction = (isPizza && opts.length > 1) ? `1/${opts.length} ` : '';
+                                                          const displayOpts = opts.map(o => `${fraction}${o}`);
+                                                          return (
+                                                              <div key={oIdx} className="text-[10px] text-gray-600">
+                                                                  {gName ? <span className="font-bold text-gray-800 uppercase">{gName}: </span> : <span className="font-bold text-gray-800">+ </span>}
+                                                                  <span className="font-bold text-gray-800">{displayOpts.join(', ')}</span>
+                                                              </div>
+                                                          );
+                                                      });
                                                   })()}
                                               </div>
                                          )}
@@ -1782,6 +1800,39 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                         placeholder="Ingredientes e detalhes..." 
                                     />
                                 </div>
+                                
+                                {/* NOVO MODO DE VENDA (PIZZARIA VS PADRÃO) */}
+                                <div className="col-span-2">
+                                    <label className="text-xs font-bold text-gray-500 uppercase ml-1">Modo de Venda (Cálculo)</label>
+                                    <div className="flex gap-4 mt-2">
+                                        <label className="flex items-center gap-2 cursor-pointer bg-gray-50 px-3 py-2 rounded-lg border border-gray-200 hover:border-red-300 transition-colors">
+                                            <input
+                                                type="radio"
+                                                name="pricingMode"
+                                                checked={newProduct.pricingMode === 'default' || !newProduct.pricingMode}
+                                                onChange={() => setNewProduct({...newProduct, pricingMode: 'default'})}
+                                                className="text-red-600 focus:ring-red-500"
+                                            />
+                                            <span className="text-sm font-medium text-gray-700">Padrão (Soma tudo)</span>
+                                        </label>
+                                        <label className="flex items-center gap-2 cursor-pointer bg-gray-50 px-3 py-2 rounded-lg border border-gray-200 hover:border-red-300 transition-colors">
+                                            <input
+                                                type="radio"
+                                                name="pricingMode"
+                                                checked={newProduct.pricingMode === 'pizza'}
+                                                onChange={() => setNewProduct({...newProduct, pricingMode: 'pizza'})}
+                                                className="text-red-600 focus:ring-red-500"
+                                            />
+                                            <span className="text-sm font-medium text-gray-700">Pizzaria (Frações 1/2, 1/3)</span>
+                                        </label>
+                                    </div>
+                                    {newProduct.pricingMode === 'pizza' && (
+                                        <p className="text-xs text-blue-600 mt-2 flex items-center gap-1">
+                                            <Info className="w-4 h-4 shrink-0" /> Se o cliente selecionar mais de um item no grupo, o sistema fará a divisão proporcional.
+                                        </p>
+                                    )}
+                                </div>
+
                                 <div>
                                     <label className="text-xs font-bold text-gray-500 uppercase ml-1">Preço (R$)</label>
                                     <input 
@@ -1818,7 +1869,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                         <div className="flex justify-between mb-2">
                                             <input value={group.name} onChange={e => {
                                                 const g = [...(newProduct.groups || [])]; g[idx].name = e.target.value; setNewProduct({...newProduct, groups: g});
-                                            }} className="font-bold text-sm border-b border-dashed border-gray-300 w-2/3" placeholder="Nome do Grupo" />
+                                            }} className="font-bold text-sm border-b border-dashed border-gray-300 w-2/3" placeholder="Nome do Grupo (Ex: Sabores)" />
                                             <Trash2 onClick={() => removeGroup(idx)} className="w-4 h-4 text-gray-400 hover:text-red-500 cursor-pointer" />
                                         </div>
                                         <div className="flex gap-2 mb-2">
