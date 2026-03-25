@@ -105,6 +105,7 @@ export interface Product {
   pricingMode: 'default' | 'average' | 'highest'; // Pizza Logic
   groups: ProductGroup[]; // Complements/Toppings
   stock?: number;
+  isPizza?: boolean;
 }
 
 export interface OrderItem {
