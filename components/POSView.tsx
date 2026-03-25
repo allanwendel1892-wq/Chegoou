@@ -14,6 +14,7 @@ interface CartItem {
     quantity: number;
     selectedOptions: ProductOption[];
     finalPrice: number;
+    displayName: string; // Adicionado para guardar o nome formatado da pizza
 }
 
 const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) => {
@@ -54,7 +55,20 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
     };
 
     const addToCart = (product: Product, options: ProductOption[]) => {
-        const optionsTotal = options.reduce((acc, opt) => acc + (opt.price || 0), 0);
+        const numFlavors = options.length;
+        let optionsTotal = 0;
+        let displayName = product.name;
+
+        // Lógica do Modo Pizzaria: Fração de valores e formatação do nome
+        if (product.isPizza && numFlavors > 0) {
+            optionsTotal = options.reduce((acc, opt) => acc + (opt.price || 0), 0) / numFlavors;
+            const fraction = numFlavors > 1 ? `1/${numFlavors}` : '';
+            const flavorsText = options.map(o => `${fraction} ${o.name}`.trim()).join(', ');
+            displayName = `${product.name} (${flavorsText})`;
+        } else {
+            optionsTotal = options.reduce((acc, opt) => acc + (opt.price || 0), 0);
+        }
+
         const finalPrice = product.price + optionsTotal;
 
         const newItem: CartItem = {
@@ -62,7 +76,8 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
             product,
             quantity: 1,
             selectedOptions: options,
-            finalPrice
+            finalPrice,
+            displayName
         };
 
         setCart(prev => [...prev, newItem]);
@@ -100,8 +115,8 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
             items: cart.map(item => ({
                 id: item.id,
                 productId: item.product.id,
-                name: item.product.name,
-                productName: item.product.name,
+                name: item.displayName, // Usa o nome formatado com as frações
+                productName: item.displayName, // Usa o nome formatado com as frações
                 quantity: item.quantity,
                 price: item.finalPrice,
                 options: item.selectedOptions,
@@ -115,12 +130,8 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
             deliveryMethod,
             paymentMethod,
             changeFor: changeFor ? Number(changeFor) : undefined,
-            
-            // CORREÇÃO: Enviando sempre como pending para evitar o erro do Supabase
-            // e também evitar que o sistema credite o Pix na carteira do cliente.
             status: 'pending',
             paymentStatus: 'pending',
-
             timestamp: new Date().toISOString(),
             origin: 'pos' 
         };
@@ -131,6 +142,16 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
         setCustomerPhone('');
         setChangeFor('');
         setIsMobileCartOpen(false);
+    };
+
+    // Calcula o preço dinâmico para o botão do modal de complementos
+    const getModalCurrentPrice = () => {
+        if (!selectedProduct) return 0;
+        const numFlavors = currentOptions.length;
+        const optionsTotal = (selectedProduct.isPizza && numFlavors > 0)
+            ? currentOptions.reduce((acc, opt) => acc + (opt.price || 0), 0) / numFlavors
+            : currentOptions.reduce((acc, opt) => acc + (opt.price || 0), 0);
+        return selectedProduct.price + optionsTotal;
     };
 
     return (
@@ -210,12 +231,13 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                         cart.map(item => (
                             <div key={item.id} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100">
                                 <div className="flex justify-between items-start mb-2">
-                                    <span className="font-bold text-gray-800 text-sm leading-tight pr-2">{item.product.name}</span>
+                                    <span className="font-bold text-gray-800 text-sm leading-tight pr-2">{item.displayName}</span>
                                     <button onClick={() => removeFromCart(item.id)} className="text-red-400 hover:text-red-600 p-1">
                                         <Trash2 className="w-4 h-4" />
                                     </button>
                                 </div>
-                                {item.selectedOptions.length > 0 && (
+                                {/* Oculta a listagem padrão de opções se for pizza, já que os sabores já estão no título */}
+                                {item.selectedOptions.length > 0 && !item.product.isPizza && (
                                     <div className="text-[10px] text-gray-500 mb-2 leading-tight">
                                         {item.selectedOptions.map(o => `+ ${o.name}`).join(', ')}
                                     </div>
@@ -316,10 +338,10 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                         {cart.map(item => (
                             <div key={item.id} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100">
                                 <div className="flex justify-between items-start mb-2">
-                                    <span className="font-bold text-gray-800 text-sm leading-tight pr-2">{item.product.name}</span>
+                                    <span className="font-bold text-gray-800 text-sm leading-tight pr-2">{item.displayName}</span>
                                     <button onClick={() => removeFromCart(item.id)} className="text-red-400 hover:text-red-600 p-1"><Trash2 className="w-4 h-4" /></button>
                                 </div>
-                                {item.selectedOptions.length > 0 && (
+                                {item.selectedOptions.length > 0 && !item.product.isPizza && (
                                     <div className="text-[10px] text-gray-500 mb-2 leading-tight">
                                         {item.selectedOptions.map(o => `+ ${o.name}`).join(', ')}
                                     </div>
@@ -397,6 +419,7 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                             <h2 className="text-xl font-black text-gray-900 leading-tight">{selectedProduct.name}</h2>
                             <p className="text-sm text-gray-500 mt-1 line-clamp-2">{selectedProduct.description}</p>
                             <p className="text-lg font-bold text-red-600 mt-2">R$ {selectedProduct.price.toFixed(2)}</p>
+                            {selectedProduct.isPizza && <span className="inline-block mt-1 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-bold rounded">Modo Pizzaria Ativo</span>}
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-5 bg-gray-50 space-y-5">
@@ -462,7 +485,7 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                                 className="w-full bg-red-600 text-white font-bold py-4 rounded-xl flex justify-between items-center px-6 hover:bg-red-700 active:scale-95 transition-all shadow-lg shadow-red-200"
                             >
                                 <span>Adicionar Item</span>
-                                <span>R$ {(selectedProduct.price + currentOptions.reduce((acc, opt) => acc + (opt.price || 0), 0)).toFixed(2)}</span>
+                                <span>R$ {getModalCurrentPrice().toFixed(2)}</span>
                             </button>
                         </div>
                     </div>
