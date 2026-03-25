@@ -53,9 +53,10 @@ interface KanbanColumnProps {
   chats: Record<string, ChatMessage[]>;
   onOpenChat: (orderId: string) => void;
   onPrintOrder: (order: Order) => void;
+  products: Product[];
 }
 
-const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color, isLast, onClickOrder, onDrop, chats, onOpenChat, onPrintOrder }) => {
+const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color, isLast, onClickOrder, onDrop, chats, onOpenChat, onPrintOrder, products }) => {
   const [isOver, setIsOver] = useState(false);
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -163,25 +164,36 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                                           {item.selectedOptions && item.selectedOptions.length > 0 && (
                                               <div className="pl-3 mt-1 space-y-1">
                                                   {(() => {
+                                                      const originalProduct = products.find(p => p.name === item.productName);
+                                                      const isPizza = (item as any).pricingMode === 'pizza' || originalProduct?.pricingMode === 'pizza';
                                                       const groups: Record<string, string[]> = {};
+                                                      
                                                       item.selectedOptions.forEach(opt => {
                                                           const g = (opt as any).groupName || '';
                                                           if (!groups[g]) groups[g] = [];
                                                           groups[g].push(opt.optionName || opt.name);
                                                       });
                                                       
-                                                      const isPizza = (item as any).pricingMode === 'pizza';
-
                                                       return Object.entries(groups).map(([gName, opts], groupIdx) => {
-                                                          const fraction = (isPizza && opts.length > 1) ? `1/${opts.length} ` : '';
-                                                          const displayOpts = opts.map(o => `${fraction}${o}`);
-
-                                                          return (
-                                                              <div key={groupIdx} className="text-[10px] text-gray-600 leading-tight">
-                                                                  {gName ? <span className="font-bold text-gray-800 uppercase">{gName}: </span> : <span className="font-bold text-gray-800">+ </span>}
-                                                                  <span className="font-bold text-gray-800">{displayOpts.join(', ')}</span>
-                                                              </div>
-                                                          );
+                                                          if (isPizza) {
+                                                              const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
+                                                              return (
+                                                                  <React.Fragment key={groupIdx}>
+                                                                      {opts.map((o, i) => (
+                                                                          <div key={i} className="text-[10px] text-gray-600 leading-tight mt-0.5">
+                                                                              <span className="font-bold text-gray-800">+ {fraction}{o}</span>
+                                                                          </div>
+                                                                      ))}
+                                                                  </React.Fragment>
+                                                              );
+                                                          } else {
+                                                              return (
+                                                                  <div key={groupIdx} className="text-[10px] text-gray-600 leading-tight mt-0.5">
+                                                                      {gName ? <span className="font-bold text-gray-800 uppercase">{gName}: </span> : <span className="font-bold text-gray-800">+ </span>}
+                                                                      <span className="font-bold text-gray-800">{opts.join(', ')}</span>
+                                                                  </div>
+                                                              );
+                                                          }
                                                       });
                                                   })()}
                                               </div>
@@ -407,7 +419,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const handlePrintOrder = (order: Order) => {
       const itemsHtml = Array.isArray(order.items) ? order.items.map(item => {
           let optionsHtml = '';
-          const isPizza = (item as any).pricingMode === 'pizza';
+          const originalProduct = products.find(p => p.name === item.productName);
+          const isPizza = (item as any).pricingMode === 'pizza' || originalProduct?.pricingMode === 'pizza';
 
           if (item.selectedOptions && item.selectedOptions.length > 0) {
               const groups: Record<string, string[]> = {};
@@ -419,13 +432,15 @@ const PartnerView: React.FC<PartnerViewProps> = ({
               
               optionsHtml = `<div style="font-size: 11px; margin-left: 10px; margin-bottom: 5px;">
                   ${Object.entries(groups).map(([gName, opts]) => {
-                      const fraction = (isPizza && opts.length > 1) ? `1/${opts.length} ` : '';
-                      const displayOpts = opts.map(o => `${fraction}${o}`);
-
-                      if (gName) {
-                          return `<div style="margin-bottom: 3px;"><b>${gName.toUpperCase()}:</b> <b>${displayOpts.join(', ')}</b></div>`;
+                      if (isPizza) {
+                          const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
+                          return opts.map(o => `<div style="margin-bottom: 3px;"><b>+ ${fraction}${o}</b></div>`).join('');
                       } else {
-                          return displayOpts.map(o => `<div style="margin-bottom: 3px;"><b>+ ${o}</b></div>`).join('');
+                          if (gName) {
+                              return `<div style="margin-bottom: 3px;"><b>${gName.toUpperCase()}:</b> <b>${opts.join(', ')}</b></div>`;
+                          } else {
+                              return opts.map(o => `<div style="margin-bottom: 3px;"><b>+ ${o}</b></div>`).join('');
+                          }
                       }
                   }).join('')}
               </div>`;
@@ -1300,23 +1315,36 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                          {item.selectedOptions && item.selectedOptions.length > 0 && (
                                               <div className="pl-24 space-y-1 border-t border-gray-50 pt-1 mt-1">
                                                   {(() => {
+                                                      const originalProduct = products.find(p => p.name === item.productName);
+                                                      const isPizza = (item as any).pricingMode === 'pizza' || originalProduct?.pricingMode === 'pizza';
                                                       const groups: Record<string, string[]> = {};
+                                                      
                                                       item.selectedOptions.forEach(opt => {
                                                           const g = (opt as any).groupName || '';
                                                           if (!groups[g]) groups[g] = [];
                                                           groups[g].push(opt.optionName || opt.name);
                                                       });
-                                                      const isPizza = (item as any).pricingMode === 'pizza';
 
                                                       return Object.entries(groups).map(([gName, opts], oIdx) => {
-                                                          const fraction = (isPizza && opts.length > 1) ? `1/${opts.length} ` : '';
-                                                          const displayOpts = opts.map(o => `${fraction}${o}`);
-                                                          return (
-                                                              <div key={oIdx} className="text-[10px] text-gray-600">
-                                                                  {gName ? <span className="font-bold text-gray-800 uppercase">{gName}: </span> : <span className="font-bold text-gray-800">+ </span>}
-                                                                  <span className="font-bold text-gray-800">{displayOpts.join(', ')}</span>
-                                                              </div>
-                                                          );
+                                                          if (isPizza) {
+                                                              const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
+                                                              return (
+                                                                  <React.Fragment key={oIdx}>
+                                                                      {opts.map((o, i) => (
+                                                                          <div key={i} className="text-[10px] text-gray-600 mt-0.5">
+                                                                              <span className="font-bold text-gray-800">+ {fraction}{o}</span>
+                                                                          </div>
+                                                                      ))}
+                                                                  </React.Fragment>
+                                                              );
+                                                          } else {
+                                                              return (
+                                                                  <div key={oIdx} className="text-[10px] text-gray-600 mt-0.5">
+                                                                      {gName ? <span className="font-bold text-gray-800 uppercase">{gName}: </span> : <span className="font-bold text-gray-800">+ </span>}
+                                                                      <span className="font-bold text-gray-800">{opts.join(', ')}</span>
+                                                                  </div>
+                                                              );
+                                                          }
                                                       });
                                                   })()}
                                               </div>
@@ -1680,6 +1708,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 chats={chats}
                                 onOpenChat={setActiveChatOrder}
                                 onPrintOrder={handlePrintOrder}
+                                products={products}
                             />
                             <KanbanColumn 
                                 title="Pendentes" 
@@ -1691,6 +1720,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 chats={chats}
                                 onOpenChat={setActiveChatOrder}
                                 onPrintOrder={handlePrintOrder}
+                                products={products}
                             />
                             <KanbanColumn 
                                 title="Em Preparo" 
@@ -1702,6 +1732,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 chats={chats}
                                 onOpenChat={setActiveChatOrder}
                                 onPrintOrder={handlePrintOrder}
+                                products={products}
                             />
                             <KanbanColumn 
                                 title="Pronto" 
@@ -1713,6 +1744,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 chats={chats}
                                 onOpenChat={setActiveChatOrder}
                                 onPrintOrder={handlePrintOrder}
+                                products={products}
                             />
                             <KanbanColumn 
                                 title="Em Entrega" 
@@ -1724,6 +1756,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 chats={chats}
                                 onOpenChat={setActiveChatOrder}
                                 onPrintOrder={handlePrintOrder}
+                                products={products}
                             />
                             <KanbanColumn 
                                 title="Concluídos" 
@@ -1735,6 +1768,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 chats={chats}
                                 onOpenChat={setActiveChatOrder}
                                 onPrintOrder={handlePrintOrder}
+                                products={products}
                             />
                             <KanbanColumn 
                                 title="Cancelados" 
@@ -1747,6 +1781,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 chats={chats}
                                 onOpenChat={setActiveChatOrder}
                                 onPrintOrder={handlePrintOrder}
+                                products={products}
                             />
                         </div>
                     </div>
