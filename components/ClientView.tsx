@@ -1,5 +1,3 @@
-
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Company, Product, Order, ChatMessage, Address, CreditCard as CreditCardType, ProductOption, User, Coupon } from '../types';
 import { Search, MapPin, Star, ShoppingBag, Plus, CreditCard, ChevronRight, Clock, CheckCircle, X, Bike, Store, Home, FileText, User as UserIcon, Wallet, MessageCircle, Send, ArrowLeft, Trash2, Loader2, Navigation, MousePointer2, Map as MapIcon, Pizza, Utensils, UtensilsCrossed, Fish, Coffee, Cake, ShoppingCart, Salad, DollarSign, QrCode, Copy, Timer, Settings, LogOut, Crosshair, AlertCircle, ClipboardCheck, ScanLine, XCircle, Ticket } from 'lucide-react';
@@ -83,7 +81,10 @@ const ClientView: React.FC<ClientViewProps> = ({
   const [chatOrderId, setChatOrderId] = useState<string | null>(null);
 
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
-  const [cart, setCart] = useState<{product: Product, quantity: number, selectedOptions?: { groupName: string, optionName: string, price: number }[], finalPrice: number }[]>([]);
+  
+  // Carrinho tipado com suporte a nomes formatados
+  const [cart, setCart] = useState<{product: Product, quantity: number, selectedOptions?: { groupName: string, optionName: string, name?: string, price: number }[], finalPrice: number }[]>([]);
+  
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [deliveryMethod, setDeliveryMethod] = useState<'delivery' | 'pickup'>('delivery'); 
   const [searchTerm, setSearchTerm] = useState('');
@@ -109,7 +110,6 @@ const ClientView: React.FC<ClientViewProps> = ({
   const [isMapDragging, setIsMapDragging] = useState(false);
   const [mapError, setMapError] = useState(false);
 
-  // --- NEW COUPON STATES ---
   const [couponCodeInput, setCouponCodeInput] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
   const [couponError, setCouponError] = useState<string>('');
@@ -301,33 +301,50 @@ const ClientView: React.FC<ClientViewProps> = ({
         setSelections({});
     }
   };
+
+  // CÁLCULO PROPORCIONAL DE PREÇO (FRAÇÕES MODO PIZZARIA)
   const currentPrice = useMemo(() => {
     if (!customizingProduct) return 0;
     let total = customizingProduct.price; 
+
+    // Trava de segurança para identificar pizzas
+    const isPizzaMode = customizingProduct.isPizza || 
+                        customizingProduct.name.toLowerCase().includes('pizza') || 
+                        (customizingProduct.category && customizingProduct.category.toLowerCase().includes('pizza'));
+
     customizingProduct.groups.forEach(group => {
         const selected = selections[group.id] || [];
         if (selected.length === 0) return;
-        if (group.max > 1 && customizingProduct.pricingMode === 'average') total += (selected.reduce((a,c)=>a+c.price,0)/selected.length);
-        else if (group.max > 1 && customizingProduct.pricingMode === 'highest') total += Math.max(...selected.map(o=>o.price));
-        else total += selected.reduce((a,c)=>a+c.price,0);
+
+        if (isPizzaMode && selected.length > 0) {
+            // Rachar o valor pelo número de sabores selecionados
+            total += selected.reduce((a,c) => a + (c.price || 0), 0) / selected.length;
+        } else {
+            if (group.max > 1 && customizingProduct.pricingMode === 'average') total += (selected.reduce((a,c)=>a+c.price,0)/selected.length);
+            else if (group.max > 1 && customizingProduct.pricingMode === 'highest') total += Math.max(...selected.map(o=>o.price));
+            else total += selected.reduce((a,c)=>a+c.price,0);
+        }
     });
     return total;
   }, [customizingProduct, selections]);
   
   const addToCart = (product: Product, finalPrice: number, selectedOptions: any[]) => {
     if (cart.length > 0 && cart[0].product.companyId !== product.companyId) {
-        if (!window.confirm("Limpar carrinho atual?")) return;
+        if (!window.confirm("Seu carrinho atual será limpo. Deseja continuar?")) return;
         setCart([]);
-        setAppliedCoupon(null); // Clear coupon when cart changes
+        setAppliedCoupon(null); 
     }
-    setCart([...cart, {product, quantity: 1, selectedOptions, finalPrice}]);
+    setCart(prev => [...prev, {product, quantity: 1, selectedOptions, finalPrice}]);
     setIsCartOpen(true); 
   };
+
   const removeFromCart = (index: number) => {
     const newCart = [...cart];
     if (newCart[index].quantity > 1) newCart[index].quantity--; else newCart.splice(index, 1);
     setCart(newCart);
+    if (newCart.length === 0) setIsCartOpen(false);
   };
+
   const openChat = (orderId: string) => { setChatOrderId(orderId); setSubView('chat'); };
   const handleSendMessage = () => { if(chatInput.trim() && chatOrderId) { onSendMessage(chatOrderId, chatInput, user.id, 'client'); setChatInput(''); }};
   const handleSelectAddress = (addr: Address) => { onUpdateUser({ ...user, address: addr }); setSubView('none'); };
@@ -345,7 +362,7 @@ const ClientView: React.FC<ClientViewProps> = ({
   const handleCopyPix = (code: string) => {
       navigator.clipboard.writeText(code);
       setCopiedPix(code);
-      setTimeout(() => setCopiedPix(null), 2000); // Reset feedback after 2s
+      setTimeout(() => setCopiedPix(null), 2000); 
   };
 
   // --- RENDERERS ---
@@ -758,7 +775,27 @@ const ClientView: React.FC<ClientViewProps> = ({
                             </div>
                         )}
 
-                        <div className="mb-4">{cart.map((i, idx) => (<div key={idx} className="flex justify-between border-b py-2"><div>{i.quantity}x {i.product.name}</div><div className="flex gap-2 font-bold">R$ {i.finalPrice.toFixed(2)} <Trash2 onClick={() => removeFromCart(idx)} className="w-4 h-4 text-red-500"/></div></div>))}</div>
+                        <div className="mb-4">
+                            {cart.map((i, idx) => (
+                                <div key={idx} className="flex flex-col border-b py-3">
+                                    <div className="flex justify-between">
+                                        <div className="font-medium text-gray-800">{i.quantity}x {i.product.name}</div>
+                                        <div className="flex gap-3 items-center font-bold text-brand">
+                                            R$ {i.finalPrice.toFixed(2)} 
+                                            <button onClick={() => removeFromCart(idx)} className="p-1 hover:bg-red-50 rounded-lg text-red-500 transition-colors">
+                                                <Trash2 className="w-4 h-4"/>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {/* Mostra complementos só se não for uma pizza já formatada */}
+                                    {i.selectedOptions && i.selectedOptions.length > 0 && !i.product.name.includes('1/') && (
+                                        <div className="text-xs text-gray-500 mt-1 pl-5">
+                                            {i.selectedOptions.map(o => `+ ${o.optionName || o.name}`).join(', ')}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
                         <div className="space-y-2 border-t pt-4 text-sm text-gray-600">
                             <div className="flex justify-between">
                                 <span>Subtotal</span>
@@ -830,9 +867,15 @@ const ClientView: React.FC<ClientViewProps> = ({
            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
                <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl relative flex flex-col max-h-[90vh] overflow-hidden">
                    
-                   <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-white z-10 shrink-0">
-                        <h2 className="font-bold text-xl truncate pr-8">{customizingProduct.name}</h2>
-                        <button onClick={() => setCustomizingProduct(null)} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X className="w-5 h-5"/></button>
+                   <div className="p-4 border-b border-gray-100 bg-white z-10 shrink-0">
+                        <div className="flex justify-between items-center">
+                            <h2 className="font-bold text-xl truncate pr-8">{customizingProduct.name}</h2>
+                            <button onClick={() => setCustomizingProduct(null)} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X className="w-5 h-5"/></button>
+                        </div>
+                        {/* Aviso visual que o Modo Pizzaria está ativo no App */}
+                        {(customizingProduct.isPizza || customizingProduct.name.toLowerCase().includes('pizza')) && (
+                            <span className="inline-block mt-2 px-2 py-1 bg-brandLight text-brand text-[10px] font-bold rounded uppercase tracking-wider">Modo Pizzaria Ativo</span>
+                        )}
                    </div>
                    
                    <div className="p-4 overflow-y-auto flex-1">
@@ -884,9 +927,45 @@ const ClientView: React.FC<ClientViewProps> = ({
                                    }
                                }
 
+                               // LÓGICA MODO PIZZARIA NA HORA DE ADICIONAR AO CARRINHO DO APP
+                               const isPizzaMode = customizingProduct!.isPizza || 
+                                                   customizingProduct!.name.toLowerCase().includes('pizza') || 
+                                                   (customizingProduct!.category && customizingProduct!.category.toLowerCase().includes('pizza'));
+
                                const flatOptions: any[] = []; 
-                               customizingProduct.groups.forEach(g => (selections[g.id] || []).forEach(o => flatOptions.push({groupName: g.name, optionName: o.name, price: o.price}))); 
-                               addToCart(customizingProduct, currentPrice, flatOptions); 
+                               let flavorsForTitle: string[] = [];
+
+                               customizingProduct!.groups.forEach(g => {
+                                   const selectedInGroup = selections[g.id] || [];
+                                   const numFlavors = selectedInGroup.length;
+
+                                   selectedInGroup.forEach(o => {
+                                       let finalOptionName = o.name;
+                                       let finalOptionPrice = o.price || 0;
+
+                                       if (isPizzaMode && numFlavors > 0) {
+                                           const fraction = numFlavors > 1 ? `1/${numFlavors}` : '';
+                                           finalOptionName = `${fraction} ${o.name}`.trim();
+                                           finalOptionPrice = finalOptionPrice / numFlavors;
+                                           flavorsForTitle.push(finalOptionName);
+                                       }
+
+                                       flatOptions.push({
+                                           groupName: g.name, 
+                                           optionName: finalOptionName,
+                                           name: finalOptionName, // Mantendo compatibilidade
+                                           price: finalOptionPrice
+                                       });
+                                   });
+                               }); 
+
+                               // Altera o nome do produto raiz para já englobar as frações de forma natural
+                               let modifiedProduct = { ...customizingProduct! };
+                               if (isPizzaMode && flavorsForTitle.length > 0) {
+                                   modifiedProduct.name = `${customizingProduct!.name} (${flavorsForTitle.join(', ')})`;
+                               }
+
+                               addToCart(modifiedProduct, currentPrice, flatOptions); 
                                setCustomizingProduct(null); 
                            }} 
                            className="w-full bg-brand text-white font-bold py-3.5 rounded-xl shadow-lg shadow-red-200 hover:bg-brandHover transition-colors flex justify-between px-6 items-center"
