@@ -175,7 +175,13 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                                                       });
                                                       
                                                       return Object.entries(groups).map(([gName, opts], groupIdx) => {
-                                                          if (isPizza) {
+                                                          // Busca a regra específica deste grupo no produto original
+                                                          const originalGroup = originalProduct?.groups?.find(g => g.name === gName || g.name.toUpperCase() === gName);
+                                                          
+                                                          // Fallback: se o produto era modo pizza e o grupo chama sabor, a gente mantém fracionado para não quebrar pedidos antigos
+                                                          const divideThisGroup = originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
+                                                      
+                                                          if (divideThisGroup) {
                                                               const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
                                                               return (
                                                                   <React.Fragment key={groupIdx}>
@@ -431,9 +437,12 @@ const PartnerView: React.FC<PartnerViewProps> = ({
               });
               
               optionsHtml = `<div style="font-size: 11px; margin-left: 10px; margin-bottom: 5px;">
-                  ${Object.entries(groups).map(([gName, opts]) => {
-                      if (isPizza) {
-                          const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
+              ${Object.entries(groups).map(([gName, opts]) => {
+                  const originalGroup = originalProduct?.groups?.find(g => g.name === gName || g.name.toUpperCase() === gName);
+                  const divideThisGroup = originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
+              
+                  if (divideThisGroup) {
+                      const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
                           return opts.map(o => `<div style="margin-bottom: 3px;"><b>+ ${fraction}${o}</b></div>`).join('');
                       } else {
                           if (gName) {
@@ -1325,8 +1334,14 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                                           groups[g].push(opt.optionName || opt.name);
                                                       });
 
-                                                      return Object.entries(groups).map(([gName, opts], oIdx) => {
-                                                          if (isPizza) {
+                                                      return Object.entries(groups).map(([gName, opts], groupIdx) => {
+                                                          // Busca a regra específica deste grupo no produto original
+                                                          const originalGroup = originalProduct?.groups?.find(g => g.name === gName || g.name.toUpperCase() === gName);
+                                                          
+                                                          // Fallback: se o produto era modo pizza e o grupo chama sabor, a gente mantém fracionado para não quebrar pedidos antigos
+                                                          const divideThisGroup = originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
+                                                      
+                                                          if (divideThisGroup) {
                                                               const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
                                                               return (
                                                                   <React.Fragment key={oIdx}>
@@ -1907,13 +1922,29 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                             }} className="font-bold text-sm border-b border-dashed border-gray-300 w-2/3" placeholder="Nome do Grupo (Ex: Sabores)" />
                                             <Trash2 onClick={() => removeGroup(idx)} className="w-4 h-4 text-gray-400 hover:text-red-500 cursor-pointer" />
                                         </div>
-                                        <div className="flex gap-2 mb-2">
+                                        <div className="flex gap-2 mb-2 items-center">
                                             <input type="number" placeholder="Min" className="w-12 text-xs border rounded px-1" value={group.min} onChange={e => {
                                                 const g = [...(newProduct.groups || [])]; g[idx].min = parseInt(e.target.value); setNewProduct({...newProduct, groups: g});
                                             }}/>
                                             <input type="number" placeholder="Max" className="w-12 text-xs border rounded px-1" value={group.max} onChange={e => {
                                                 const g = [...(newProduct.groups || [])]; g[idx].max = parseInt(e.target.value); setNewProduct({...newProduct, groups: g});
                                             }}/>
+                                            
+                                            {/* NOVA OPÇÃO AQUI */}
+                                            <label className="flex items-center gap-1 text-xs text-gray-600 ml-2 cursor-pointer">
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={group.dividePrice || false} 
+                                                    onChange={e => {
+                                                        const g = [...(newProduct.groups || [])]; 
+                                                        g[idx].dividePrice = e.target.checked; 
+                                                        setNewProduct({...newProduct, groups: g});
+                                                    }}
+                                                    className="text-red-600 focus:ring-red-500 rounded"
+                                                />
+                                                Divide o preço? (ex: Sabores)
+                                            </label>
+                                        
                                             <button onClick={() => addOptionToGroup(idx)} className="text-xs text-blue-600 font-bold ml-auto">+ Opção</button>
                                         </div>
                                         {group.options.map((opt, oIdx) => (
