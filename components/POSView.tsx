@@ -12,7 +12,7 @@ interface CartItem {
     id: string;
     product: Product;
     quantity: number;
-    selectedOptions: ProductOption[];
+    selectedOptions: any[]; // Usando any[] localmente para acomodar as propriedades estendidas do grupo
     finalPrice: number;
     displayName: string;
 }
@@ -30,7 +30,7 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
 
     const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
     const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-    const [currentOptions, setCurrentOptions] = useState<ProductOption[]>([]);
+    const [currentOptions, setCurrentOptions] = useState<any[]>([]); // Armazena a opção + configs do grupo
 
     const categories = ['Todos', ...Array.from(new Set(products.map(p => p.category)))];
     
@@ -45,6 +45,50 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
     const subtotal = cart.reduce((acc, item) => acc + (item.finalPrice * item.quantity), 0);
     const total = subtotal;
 
+    // --- NOVA LÓGICA CORE DE CÁLCULO POR GRUPO ---
+    const processGroupedOptions = (options: any[]) => {
+        let optionsTotal = 0;
+        let formattedOptions: any[] = [];
+
+        // Agrupa as opções pelo índice do grupo
+        const optionsByGroup = options.reduce((acc, opt) => {
+            const key = opt.groupIndex !== undefined ? opt.groupIndex : 'default';
+            if (!acc[key]) acc[key] = [];
+            acc[key].push(opt);
+            return acc;
+        }, {} as Record<string, any[]>);
+
+        // Calcula o valor de cada grupo separadamente
+        Object.values(optionsByGroup).forEach((groupOptions: any[]) => {
+            // Verifica se este grupo específico tem a regra de dividir preço
+            const isDivided = groupOptions[0]?.dividePrice;
+            const numItems = groupOptions.length;
+
+            if (isDivided && numItems > 0) {
+                // Rachar o valor apenas deste grupo
+                const groupSum = groupOptions.reduce((sum, o) => sum + (o.price || 0), 0);
+                optionsTotal += (groupSum / numItems);
+                
+                const fraction = numItems > 1 ? `1/${numItems}` : '';
+                
+                groupOptions.forEach(o => {
+                    formattedOptions.push({
+                        ...o,
+                        name: `${fraction} ${o.name}`.trim(),
+                        price: (o.price || 0) / numItems
+                    });
+                });
+            } else {
+                // Grupo normal (ex: Borda, Bebida), soma integral
+                const groupSum = groupOptions.reduce((sum, o) => sum + (o.price || 0), 0);
+                optionsTotal += groupSum;
+                groupOptions.forEach(o => formattedOptions.push(o));
+            }
+        });
+
+        return { optionsTotal, formattedOptions };
+    };
+
     const handleProductClick = (product: Product) => {
         if (product.groups && product.groups.length > 0) {
             setSelectedProduct(product);
@@ -54,30 +98,9 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
         }
     };
 
-    const addToCart = (product: Product, options: ProductOption[]) => {
-        const numFlavors = options.length;
-        let optionsTotal = 0;
-        let formattedOptions = [...options];
-
-        // Trava de segurança: Ativa o modo pizzaria se a flag isPizza existir OU se tiver "pizza" no nome/categoria
-        const isPizzaMode = product.isPizza || 
-                            product.name.toLowerCase().includes('pizza') || 
-                            (product.category && product.category.toLowerCase().includes('pizza'));
-
-        if (isPizzaMode && numFlavors > 0) {
-            // Rachar o valor das opções
-            optionsTotal = options.reduce((acc, opt) => acc + (opt.price || 0), 0) / numFlavors;
-            const fraction = numFlavors > 1 ? `1/${numFlavors}` : '';
-            
-            // Injeta a fração no nome da opção para o Kanban e Impressora lerem perfeitamente
-            formattedOptions = options.map(o => ({
-                ...o,
-                name: `${fraction} ${o.name}`.trim(),
-                price: (o.price || 0) / numFlavors // O preço no banco também vai dividido
-            }));
-        } else {
-            optionsTotal = options.reduce((acc, opt) => acc + (opt.price || 0), 0);
-        }
+    const addToCart = (product: Product, options: any[]) => {
+        // Passa as opções para a nova calculadora inteligente
+        const { optionsTotal, formattedOptions } = processGroupedOptions(options);
 
         const finalPrice = product.price + optionsTotal;
 
@@ -85,7 +108,7 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
             id: Date.now().toString(),
             product,
             quantity: 1,
-            selectedOptions: formattedOptions, // Mandando as opções formatadas com "1/2"
+            selectedOptions: formattedOptions, 
             finalPrice,
             displayName: product.name
         };
@@ -129,7 +152,7 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                 productName: item.displayName, 
                 quantity: item.quantity,
                 price: item.finalPrice,
-                options: item.selectedOptions, // Aqui vai salvo o "1/2 Calabresa" pro Kanban ler
+                options: item.selectedOptions,
                 selectedOptions: item.selectedOptions,
                 complements: item.selectedOptions
             })),
@@ -156,14 +179,8 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
 
     const getModalCurrentPrice = () => {
         if (!selectedProduct) return 0;
-        const numFlavors = currentOptions.length;
-        const isPizzaMode = selectedProduct.isPizza || 
-                            selectedProduct.name.toLowerCase().includes('pizza') || 
-                            (selectedProduct.category && selectedProduct.category.toLowerCase().includes('pizza'));
-        
-        const optionsTotal = (isPizzaMode && numFlavors > 0)
-            ? currentOptions.reduce((acc, opt) => acc + (opt.price || 0), 0) / numFlavors
-            : currentOptions.reduce((acc, opt) => acc + (opt.price || 0), 0);
+        // Usa a mesma calculadora para o preview do modal bater centavo por centavo com o carrinho
+        const { optionsTotal } = processGroupedOptions(currentOptions);
         return selectedProduct.price + optionsTotal;
     };
 
@@ -357,7 +374,7 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                                 </div>
                                 {item.selectedOptions.length > 0 && (
                                     <div className="text-[10px] text-gray-500 mb-2 leading-tight">
-                                        {item.selectedOptions.map(o => `+ ${o.name}`).join(', ')}
+                                        {item.selectedOptions.map((o: any) => `+ ${o.name}`).join(', ')}
                                     </div>
                                 )}
                                 <div className="flex justify-between items-center mt-2">
@@ -436,47 +453,45 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-5 bg-gray-50 space-y-5">
-                            {selectedProduct.groups?.map((group, idx) => (
+                            {selectedProduct.groups?.map((group: any, idx) => (
                                 <div key={idx} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
                                     <div className="bg-gray-100 px-4 py-3 border-b border-gray-200">
                                         <h4 className="font-bold text-gray-800 text-sm uppercase">{group.name}</h4>
                                         <p className="text-xs text-gray-500">Escolha até {group.max} opção(ões)</p>
                                     </div>
                                     <div className="divide-y divide-gray-100">
-                                        {group.options.map((opt, oIdx) => {
-                                            const isSelected = currentOptions.some(co => co.name === opt.name && (co as any).groupIndex === idx);
+                                        {group.options.map((opt: any, oIdx: number) => {
+                                            const isSelected = currentOptions.some(co => co.name === opt.name && co.groupIndex === idx);
                                             return (
                                                 <label key={oIdx} className={`flex items-center justify-between p-4 cursor-pointer transition-colors ${isSelected ? 'bg-red-50/50' : 'hover:bg-gray-50'}`}>
                                                     <div className="flex items-center gap-3">
                                                         <input 
-                                                            type="checkbox"
+                                                            type={group.max === 1 ? "radio" : "checkbox"}
                                                             name={`group-${idx}`}
                                                             checked={isSelected}
                                                             onChange={(e) => {
+                                                                // A MÁGICA ACONTECE AQUI: Guardamos se o grupo divide preço junto com a opção
+                                                                const optionToSave = {
+                                                                    name: opt.name, 
+                                                                    optionName: opt.name,
+                                                                    price: opt.price || 0,
+                                                                    groupIndex: idx,
+                                                                    groupName: group.name,
+                                                                    dividePrice: group.dividePrice || false // <--- Lendo do parceiro
+                                                                };
+
                                                                 if (e.target.checked) {
                                                                     if (group.max === 1) {
-                                                                        const filtered = currentOptions.filter(co => (co as any).groupIndex !== idx);
-                                                                        setCurrentOptions([...filtered, {
-                                                                            name: opt.name, 
-                                                                            optionName: opt.name,
-                                                                            price: opt.price || 0,
-                                                                            groupIndex: idx,
-                                                                            groupName: group.name
-                                                                        } as any]);
+                                                                        const filtered = currentOptions.filter(co => co.groupIndex !== idx);
+                                                                        setCurrentOptions([...filtered, optionToSave]);
                                                                     } else {
-                                                                        const currentInGroup = currentOptions.filter(co => (co as any).groupIndex === idx);
+                                                                        const currentInGroup = currentOptions.filter(co => co.groupIndex === idx);
                                                                         if (currentInGroup.length < group.max) {
-                                                                            setCurrentOptions([...currentOptions, {
-                                                                                name: opt.name, 
-                                                                                optionName: opt.name,
-                                                                                price: opt.price || 0,
-                                                                                groupIndex: idx,
-                                                                                groupName: group.name
-                                                                            } as any]);
+                                                                            setCurrentOptions([...currentOptions, optionToSave]);
                                                                         }
                                                                     }
                                                                 } else {
-                                                                    setCurrentOptions(currentOptions.filter(co => !(co.name === opt.name && (co as any).groupIndex === idx)));
+                                                                    setCurrentOptions(currentOptions.filter(co => !(co.name === opt.name && co.groupIndex === idx)));
                                                                 }
                                                             }}
                                                             className={`w-5 h-5 text-red-600 border-gray-300 focus:ring-red-500 ${group.max === 1 ? 'rounded-full' : 'rounded'}`}
