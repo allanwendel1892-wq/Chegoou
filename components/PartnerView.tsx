@@ -1344,7 +1344,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                                           if (divideThisGroup) {
                                                               const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
                                                               return (
-                                                                  <React.Fragment key={oIdx}>
+                                                                  <React.Fragment key={groupIdx}>
                                                                       {opts.map((o, i) => (
                                                                           <div key={i} className="text-[10px] text-gray-600 mt-0.5">
                                                                               <span className="font-bold text-gray-800">+ {fraction}{o}</span>
@@ -1354,7 +1354,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                                               );
                                                           } else {
                                                               return (
-                                                                  <div key={oIdx} className="text-[10px] text-gray-600 mt-0.5">
+                                                                  <div key={groupIdx} className="text-[10px] text-gray-600 mt-0.5">
                                                                       {gName ? <span className="font-bold text-gray-800 uppercase">{gName}: </span> : <span className="font-bold text-gray-800">+ </span>}
                                                                       <span className="font-bold text-gray-800">{opts.join(', ')}</span>
                                                                   </div>
