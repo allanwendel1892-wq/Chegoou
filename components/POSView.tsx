@@ -12,7 +12,7 @@ interface CartItem {
     id: string;
     product: Product;
     quantity: number;
-    selectedOptions: any[]; // Usando any[] localmente para acomodar as propriedades estendidas do grupo
+    selectedOptions: any[];
     finalPrice: number;
     displayName: string;
 }
@@ -30,7 +30,7 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
 
     const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
     const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-    const [currentOptions, setCurrentOptions] = useState<any[]>([]); // Armazena a opção + configs do grupo
+    const [currentOptions, setCurrentOptions] = useState<any[]>([]);
 
     const categories = ['Todos', ...Array.from(new Set(products.map(p => p.category)))];
     
@@ -45,12 +45,10 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
     const subtotal = cart.reduce((acc, item) => acc + (item.finalPrice * item.quantity), 0);
     const total = subtotal;
 
-    // --- NOVA LÓGICA CORE DE CÁLCULO POR GRUPO ---
     const processGroupedOptions = (options: any[]) => {
         let optionsTotal = 0;
         let formattedOptions: any[] = [];
 
-        // Agrupa as opções pelo índice do grupo
         const optionsByGroup = options.reduce((acc, opt) => {
             const key = opt.groupIndex !== undefined ? opt.groupIndex : 'default';
             if (!acc[key]) acc[key] = [];
@@ -58,14 +56,11 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
             return acc;
         }, {} as Record<string, any[]>);
 
-        // Calcula o valor de cada grupo separadamente
         Object.values(optionsByGroup).forEach((groupOptions: any[]) => {
-            // Verifica se este grupo específico tem a regra de dividir preço
             const isDivided = groupOptions[0]?.dividePrice;
             const numItems = groupOptions.length;
 
             if (isDivided && numItems > 0) {
-                // Rachar o valor apenas deste grupo
                 const groupSum = groupOptions.reduce((sum, o) => sum + (o.price || 0), 0);
                 optionsTotal += (groupSum / numItems);
                 
@@ -79,7 +74,6 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                     });
                 });
             } else {
-                // Grupo normal (ex: Borda, Bebida), soma integral
                 const groupSum = groupOptions.reduce((sum, o) => sum + (o.price || 0), 0);
                 optionsTotal += groupSum;
                 groupOptions.forEach(o => formattedOptions.push(o));
@@ -99,9 +93,7 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
     };
 
     const addToCart = (product: Product, options: any[]) => {
-        // Passa as opções para a nova calculadora inteligente
         const { optionsTotal, formattedOptions } = processGroupedOptions(options);
-
         const finalPrice = product.price + optionsTotal;
 
         const newItem: CartItem = {
@@ -133,39 +125,47 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
         if (cart.length === 1) setIsMobileCartOpen(false);
     };
 
-    // --- NOVA LÓGICA DE FORMATAÇÃO DE TELEFONE ---
+    // --- NOVA LÓGICA DE FORMATAÇÃO DE TELEFONE (À PROVA DE QUALQUER DDD E REMOÇÃO DO 9) ---
     const formatPhoneNumber = (phone: string) => {
         if (!phone) return '';
         
-        // Remove tudo que não for dígito
         let cleaned = phone.replace(/\D/g, '');
-        
         if (cleaned.length === 0) return '';
         
-        // Se já está no formato internacional (ex: 5581988887777)
-        if (cleaned.length >= 12 && cleaned.startsWith('55')) {
-            return cleaned;
+        // Se já foi colado com o 55, removemos temporariamente para analisar a base
+        if (cleaned.startsWith('55') && (cleaned.length === 12 || cleaned.length === 13)) {
+            cleaned = cleaned.substring(2);
         }
         
-        // Se tem 11 dígitos (ex: 81988887777) ou 10 dígitos, assume que falta o 55
-        if (cleaned.length === 11 || cleaned.length === 10) {
+        let ddd = '81'; // Padrão
+        let numeroLocal = '';
+
+        if (cleaned.length === 11) {
+            // Tem DDD + 9 + 8 dígitos (Ex: 11 9 73147355)
+            ddd = cleaned.substring(0, 2);
+            numeroLocal = cleaned.substring(3); // Pula o DDD e o 9
+        } else if (cleaned.length === 10) {
+            // Tem DDD + 8 dígitos (Ex: 11 73147355)
+            ddd = cleaned.substring(0, 2);
+            numeroLocal = cleaned.substring(2); // Pula só o DDD
+        } else if (cleaned.length === 9) {
+            // Sem DDD, com 9 + 8 dígitos (Ex: 9 73147355)
+            numeroLocal = cleaned.substring(1); // Pula o 9
+        } else if (cleaned.length === 8) {
+            // Sem DDD, apenas 8 dígitos (Ex: 73147355)
+            numeroLocal = cleaned;
+        } else {
+            // Fallback caso digitem um número bizarro (ex: telefone fixo muito curto ou longo demais)
             return '55' + cleaned;
         }
-        
-        // Se tem 9 ou 8 dígitos (digitou só o número), adiciona 55 + DDD 81
-        if (cleaned.length === 9 || cleaned.length === 8) {
-            return '5581' + cleaned;
-        }
-        
-        return cleaned; // Caso caia em um formato muito atípico, devolve o que foi limpo
+
+        return `55${ddd}${numeroLocal}`;
     };
 
     const handleCheckout = () => {
         if (cart.length === 0) return alert("O carrinho está vazio!");
 
         const finalCustomerName = customerName.trim() !== '' ? customerName.trim() : 'Cliente Balcão';
-        
-        // Aplica a formatação no telefone digitado
         const formattedPhone = formatPhoneNumber(customerPhone);
 
         const newOrder = {
@@ -174,7 +174,7 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
             companyName: company.name,
             customerId: 'pos-local',
             customerName: finalCustomerName,
-            customerPhone: formattedPhone || 'Não informado', // Usa o telefone limpo e formatado
+            customerPhone: formattedPhone || 'Não informado',
             items: cart.map(item => ({
                 id: item.id,
                 productId: item.product.id,
@@ -209,7 +209,6 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
 
     const getModalCurrentPrice = () => {
         if (!selectedProduct) return 0;
-        // Usa a mesma calculadora para o preview do modal bater centavo por centavo com o carrinho
         const { optionsTotal } = processGroupedOptions(currentOptions);
         return selectedProduct.price + optionsTotal;
     };
@@ -217,7 +216,6 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
     return (
         <div className="flex flex-col md:flex-row h-[calc(100vh-4rem)] bg-gray-100 relative overflow-hidden">
             
-            {/* LADO ESQUERDO: PRODUTOS */}
             <div className="flex-1 flex flex-col overflow-hidden">
                 <div className="bg-white p-4 border-b border-gray-200 shadow-sm z-10">
                     <div className="flex flex-col sm:flex-row gap-3">
@@ -273,7 +271,6 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                 </div>
             </div>
 
-            {/* LADO DIREITO: CARRINHO DESKTOP */}
             <div className="hidden md:flex w-96 bg-white border-l border-gray-200 shadow-xl z-20 flex-col h-full">
                 <div className="p-4 border-b border-gray-100 bg-white sticky top-0 z-10 shrink-0">
                     <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
@@ -378,7 +375,6 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                 </div>
             </div>
 
-            {/* BARRA FLUTUANTE CARRINHO (MOBILE) */}
             {cart.length > 0 && (
                 <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.1)] z-30 animate-slide-up">
                     <button onClick={() => setIsMobileCartOpen(true)} className="w-full bg-red-600 text-white rounded-xl p-4 flex justify-between items-center font-bold shadow-lg shadow-red-200 active:scale-95 transition-transform">
@@ -388,7 +384,6 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                 </div>
             )}
 
-            {/* MODAL CARRINHO FULLSCREEN MOBILE */}
             {isMobileCartOpen && (
                 <div className="md:hidden fixed inset-0 z-50 bg-white flex flex-col animate-slide-up">
                     <div className="p-4 bg-gray-900 text-white flex justify-between items-center pb-safe-top pt-safe-top shrink-0">
@@ -465,7 +460,6 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                 </div>
             )}
 
-            {/* MODAL DE COMPLEMENTOS (PRODUTO) */}
             {selectedProduct && (
                 <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
                     <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-slide-up sm:animate-scale-in">
