@@ -133,10 +133,40 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
         if (cart.length === 1) setIsMobileCartOpen(false);
     };
 
+    // --- NOVA LÓGICA DE FORMATAÇÃO DE TELEFONE ---
+    const formatPhoneNumber = (phone: string) => {
+        if (!phone) return '';
+        
+        // Remove tudo que não for dígito
+        let cleaned = phone.replace(/\D/g, '');
+        
+        if (cleaned.length === 0) return '';
+        
+        // Se já está no formato internacional (ex: 5581988887777)
+        if (cleaned.length >= 12 && cleaned.startsWith('55')) {
+            return cleaned;
+        }
+        
+        // Se tem 11 dígitos (ex: 81988887777) ou 10 dígitos, assume que falta o 55
+        if (cleaned.length === 11 || cleaned.length === 10) {
+            return '55' + cleaned;
+        }
+        
+        // Se tem 9 ou 8 dígitos (digitou só o número), adiciona 55 + DDD 81
+        if (cleaned.length === 9 || cleaned.length === 8) {
+            return '5581' + cleaned;
+        }
+        
+        return cleaned; // Caso caia em um formato muito atípico, devolve o que foi limpo
+    };
+
     const handleCheckout = () => {
         if (cart.length === 0) return alert("O carrinho está vazio!");
 
         const finalCustomerName = customerName.trim() !== '' ? customerName.trim() : 'Cliente Balcão';
+        
+        // Aplica a formatação no telefone digitado
+        const formattedPhone = formatPhoneNumber(customerPhone);
 
         const newOrder = {
             id: `ord-${Date.now()}`,
@@ -144,7 +174,7 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
             companyName: company.name,
             customerId: 'pos-local',
             customerName: finalCustomerName,
-            customerPhone: customerPhone || 'Não informado',
+            customerPhone: formattedPhone || 'Não informado', // Usa o telefone limpo e formatado
             items: cart.map(item => ({
                 id: item.id,
                 productId: item.product.id,
@@ -470,14 +500,13 @@ const POSView: React.FC<POSViewProps> = ({ products, company, onPlaceOrder }) =>
                                                             name={`group-${idx}`}
                                                             checked={isSelected}
                                                             onChange={(e) => {
-                                                                // A MÁGICA ACONTECE AQUI: Guardamos se o grupo divide preço junto com a opção
                                                                 const optionToSave = {
                                                                     name: opt.name, 
                                                                     optionName: opt.name,
                                                                     price: opt.price || 0,
                                                                     groupIndex: idx,
                                                                     groupName: group.name,
-                                                                    dividePrice: group.dividePrice || false // <--- Lendo do parceiro
+                                                                    dividePrice: group.dividePrice || false 
                                                                 };
 
                                                                 if (e.target.checked) {
