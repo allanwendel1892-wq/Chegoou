@@ -157,6 +157,41 @@ export const getDeviceLocation = async () => {
 // COMPONENTE PRINCIPAL
 // -----------------------------------------------------------------------------
 
+// >>> MOTOR DE CÁLCULO DE ESTOQUE (FICHA TÉCNICA) <<<
+const processInventoryDeduction = async (orderItems: any[], dbCompositions: any[]) => {
+  const stockDeductions: Record<string, number> = {};
+
+  orderItems.forEach(item => {
+    // 1. Desconta insumos ligados DIRETAMENTE ao produto base
+    const baseCompositions = dbCompositions.filter(c => c.referenceId === item.productId);
+    baseCompositions.forEach(comp => {
+      const totalToDeduct = comp.amount_needed * item.quantity;
+      stockDeductions[comp.inventory_item_id] = (stockDeductions[comp.inventory_item_id] || 0) + totalToDeduct;
+    });
+
+    // 2. Desconta insumos ligados às OPÇÕES/SABORES (ex: Calabresa)
+    if (item.selectedOptions && item.selectedOptions.length > 0) {
+      // Conta quantos sabores a pizza tem para saber se é 1/2, 1/3, etc.
+      const fractions = item.selectedOptions.length;
+      const fractionMultiplier = 1 / fractions; 
+
+      item.selectedOptions.forEach((option: any) => {
+        // Assume que o optionName ou ID da opção é a referência na ficha técnica
+        const referenceToSearch = option.id || option.name || option.optionName;
+        const optionCompositions = dbCompositions.filter(c => c.referenceId === referenceToSearch);
+        
+        optionCompositions.forEach(comp => {
+          const totalToDeduct = (comp.amount_needed * fractionMultiplier) * item.quantity;
+          stockDeductions[comp.inventory_item_id] = (stockDeductions[comp.inventory_item_id] || 0) + totalToDeduct;
+        });
+      });
+    }
+  });
+
+  return stockDeductions;
+};
+// >>> FIM DO MOTOR DE CÁLCULO <<<
+
 const App: React.FC = () => {
   // ESTADOS DE AUTENTICAÇÃO E USUÁRIO
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -994,10 +1029,40 @@ const App: React.FC = () => {
 
     let updateData: Partial<Order> = { status };
     
-    // Libera saldo para empresa se entregue
+    // Libera saldo para empresa se entregue e GATILHO DE ESTOQUE
     if (status === 'delivered') {
         updateData.repasseStatus = 'blocked'; // Fica em carência
         updateData.repasseDate = new Date().toISOString();
+
+        // >>> INÍCIO DA BAIXA DE ESTOQUE AUTOMÁTICA <<<
+        try {
+            const orderToDeduct = orders.find(o => o.id === orderId);
+            if (orderToDeduct && orderToDeduct.items) {
+                // Puxa as fichas técnicas do banco de dados
+                const { data: compositions } = await supabase.from('compositions').select('*');
+                
+                if (compositions) {
+                    // Roda a calculadora de estoque
+                    const deductions = await processInventoryDeduction(orderToDeduct.items, compositions);
+                    
+                    // Vai no banco e desconta o que foi usado
+                    for (const [inventoryId, amountToDeduct] of Object.entries(deductions)) {
+                        const { data: itemData } = await supabase.from('inventory_items')
+                            .select('current_stock').eq('id', inventoryId).single();
+                            
+                        if (itemData) {
+                            const newStock = Math.max(0, Number(itemData.current_stock) - Number(amountToDeduct));
+                            await supabase.from('inventory_items')
+                                .update({ current_stock: newStock }).eq('id', inventoryId);
+                        }
+                    }
+                    console.log("Chegoou: Estoque atualizado com sucesso para o pedido", orderId);
+                }
+            }
+        } catch (e) {
+            console.error("Chegoou: Erro ao abater estoque:", e);
+        }
+        // >>> FIM DA BAIXA DE ESTOQUE AUTOMÁTICA <<<
     }
 
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updateData } : o));
