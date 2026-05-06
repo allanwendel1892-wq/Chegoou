@@ -12,13 +12,13 @@ export interface Address {
 }
 
 export interface CreditCard {
-    id: string;
-    number: string;
-    holderName: string;
-    expiry: string;
-    cvv: string;
-    brand: string;
-    last4?: string;
+  id: string;
+  number: string;
+  holderName: string;
+  expiry: string;
+  cvv: string;
+  brand: string;
+  last4?: string;
 }
 
 export interface User {
@@ -62,6 +62,7 @@ export interface Company {
   openingDays: string[]; // Changed to required array
   address?: Address; // Added address for company
   isSuspended?: boolean; // Block access
+  chatbot?: 'connected' | 'disconnected'; // Added chatbot status based on Sidebar code
   
   // --- NOVOS CAMPOS FINANCEIROS (PIX DO RESTAURANTE) ---
   pixKey?: string;
@@ -75,6 +76,25 @@ export interface Company {
 
   // --- NOVO: SENHA GERENCIAL ---
   adminPin?: string; // Senha numérica para bloquear módulos
+}
+
+// NOVO: Interface para Itens de Estoque/Insumos
+export interface InventoryItem {
+  id: string;
+  name: string;
+  category: string;
+  unit: 'KG' | 'L' | 'UN';
+  currentStock: number;
+  minStock: number;
+  costPrice: number;
+}
+
+// NOVO: Interface para Ficha Técnica / Composições
+export interface Composition {
+  id: string;
+  referenceId: string; // Link to Product ID or ProductOption ID
+  inventoryItemId: string; // Link to InventoryItem ID
+  amountNeeded: number;
 }
 
 export interface ProductOption {
@@ -114,14 +134,15 @@ export interface OrderItem {
   quantity: number;
   price: number;
   observation?: string;
-  selectedOptions?: { groupName: string; optionName: string; price: number }[]; // Track choices
+  selectedOptions?: { groupName: string; optionName: string; price: number; id?: string }[]; // Track choices and IDs for inventory
+  fractions?: number; // Added to support fraction calculations (1/2, 1/3)
 }
 
 export interface Order {
   id: string;
   companyId: string;
   companyName: string;
-  customerId: string; // Made optional in DB, but TS keeps string for now (handled as empty string if needed)
+  customerId?: string; // Made optional to support guest PDV orders
   customerName: string;
   customerPhone: string; // Used for delivery code (last 4 digits)
   courierId?: string;
@@ -135,7 +156,7 @@ export interface Order {
   changeFor?: number; // Needed for cash payments
   timestamp: Date;
   deliveryCode: string; // Secret code for courier
-  deliveryAddress: Address;
+  deliveryAddress?: Address; // Made optional for pickup orders
   pickupAddress: Address; // Address of the company
   deliveryType: 'own' | 'chegoou'; // inherited from company at time of order
   deliveryMethod: 'delivery' | 'pickup' | string; 
@@ -179,14 +200,14 @@ export interface WithdrawalRequest {
 }
 
 export interface Coupon {
-    id: string;
-    companyId: string;
-    code: string; // ex: DEZEMBRO10
-    discountType: 'percentage' | 'fixed';
-    discountValue: number;
-    minOrderValue?: number;
-    isActive: boolean;
-    createdAt: string;
+  id: string;
+  companyId: string;
+  code: string; // ex: DEZEMBRO10
+  discountType: 'percentage' | 'fixed';
+  discountValue: number;
+  minOrderValue?: number;
+  isActive: boolean;
+  createdAt: string;
 }
 
 export interface SalesHistoryItem {
@@ -196,24 +217,25 @@ export interface SalesHistoryItem {
 }
 
 export interface ForecastData {
-    predictedProducts: {
-        productName: string;
-        reasoning: string;
-        confidence: number;
-        estimatedQuantity: number;
-    }[];
-    confidenceScore: number;
-    insight: string;
+  predictedProducts: {
+    productName: string;
+    reasoning: string;
+    confidence: number;
+    estimatedQuantity: number;
+  }[];
+  confidenceScore: number;
+  insight: string;
 }
 
 export enum ViewState {
   DASHBOARD = 'dashboard',
   ORDERS = 'orders', // Kanban
-  MENU = 'menu', // Cardapio (was inventory)
+  MENU = 'menu', // Cardapio
+  INVENTORY = 'inventory', // NOVO: Controle de Estoque / Ficha Técnica
   WHATSAPP = 'whatsapp',
   SETTINGS = 'settings',
   FINANCE = 'finance',
   COUPONS = 'coupons',
-  POS = 'pos', // NOVO: Módulo de Lançamento de Pedido (Balcão/PDV)
-  HISTORY = 'history', // NOVO: Histórico de Pedidos
+  POS = 'pos', // Módulo de Lançamento de Pedido (Balcão/PDV)
+  HISTORY = 'history', // Histórico de Pedidos
 }
