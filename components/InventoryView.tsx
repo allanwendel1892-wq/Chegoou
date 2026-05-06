@@ -42,6 +42,18 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
     const [recipeIngredients, setRecipeIngredients] = useState<{ invId: string, amount: number }[]>([]);
 
     const itemsToBuy = useMemo(() => items.filter(item => item.currentStock <= item.minStock), [items]);
+    const handleGenerateShoppingList = () => {
+        if (itemsToBuy.length === 0) return;
+
+        let text = "🛒 *LISTA DE COMPRAS - REPOSIÇÃO*\n\n";
+        itemsToBuy.forEach(item => {
+            const amountNeeded = item.minStock - item.currentStock + 1;
+            text += `• *${item.name}*: Comprar ${amountNeeded} ${item.unit} (Atual: ${item.currentStock} | Mín: ${item.minStock})\n`;
+        });
+
+        navigator.clipboard.writeText(text);
+        alert('Lista copiada com sucesso! É só colar no WhatsApp do fornecedor.');
+    };
 
     // Buscar as composições ao abrir
     useEffect(() => {
