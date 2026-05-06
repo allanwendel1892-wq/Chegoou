@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { LayoutDashboard, UtensilsCrossed, MessageSquare, ShoppingBag, LogOut, Settings, Wallet, Ticket, MonitorStop, History } from 'lucide-react';
 import { ViewState, Company } from '../types';
 import { supabase } from '../services/supabaseClient'; // Importação do Supabase adicionada
+import { LayoutDashboard, UtensilsCrossed, MessageSquare, ShoppingBag, LogOut, Settings, Wallet, Ticket, MonitorStop, History, Package } from 'lucide-react'; 
 
 interface SidebarProps {
   currentView: ViewState;
@@ -60,6 +61,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: ViewState.ORDERS, label: 'Pedidos (Kanban)', icon: ShoppingBag },
     { id: ViewState.HISTORY, label: 'Histórico de Pedidos', icon: History },
     { id: ViewState.MENU, label: 'Cardápio', icon: UtensilsCrossed },
+    { id: ViewState.INVENTORY, label: 'Estoque / Fichas', icon: Package }, // <-- ADICIONE ESTA LINHA AQUI
     { id: ViewState.FINANCE, label: 'Financeiro', icon: Wallet },
     { id: ViewState.COUPONS, label: 'Cupons', icon: Ticket },
     { id: ViewState.WHATSAPP, label: 'Bot WhatsApp', icon: MessageSquare },
