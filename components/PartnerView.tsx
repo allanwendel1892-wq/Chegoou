@@ -1020,7 +1020,46 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       }
   };
 
-  const handleDragDropOrder = (orderId: string, status: Order['status']) => {
+  const handleDragDropOrder = async (orderId: string, status: Order['status']) => {
+      const order = orders.find(o => o.id === orderId);
+
+      // Gatilho: Se o pedido está sendo movido para Entregue e ainda não era entregue
+      if (order && status === 'delivered' && order.status !== 'delivered') {
+          for (const item of order.items) {
+              const product = products.find(p => p.name === item.productName);
+              if (!product) continue;
+
+              if (item.selectedOptions) {
+                  for (const opt of item.selectedOptions) {
+                      const groupName = (opt as any).groupName;
+                      const optName = opt.optionName || opt.name;
+                      
+                      const group = product.groups?.find(g => g.name === groupName);
+                      const originalOpt = group?.options.find(o => o.name === optName);
+
+                      // Se o sabor/opção tiver uma Ficha Técnica (compositions)
+                      if (originalOpt && (originalOpt as any).compositions) {
+                          for (const comp of (originalOpt as any).compositions) {
+                              // Busca o estoque atual no banco
+                              const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', comp.inventoryItemId).single();
+                              
+                              if (inv) {
+                                  // Se for modo pizzaria (dividir sabor), ele calcula a fração. Ex: Meia calabresa = divide por 2
+                                  const fraction = group?.dividePrice ? (1 / item.selectedOptions.filter(o => (o as any).groupName === groupName).length) : 1;
+                                  
+                                  const totalToDeduct = comp.amount * item.quantity * fraction;
+                                  const newStock = inv.current_stock - totalToDeduct;
+                                  
+                                  // Faz o abate silencioso no banco
+                                  await supabase.from('inventory_items').update({ current_stock: newStock }).eq('id', comp.inventoryItemId);
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+      }
+      
       updateOrderStatus(orderId, status);
   };
 
@@ -1990,9 +2029,31 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                             <button onClick={() => addOptionToGroup(idx)} className="text-xs text-blue-600 font-bold ml-auto">+ Opção</button>
                                         </div>
                                         {group.options.map((opt, oIdx) => (
-                                            <div key={oIdx} className="flex gap-2 mb-1">
-                                                <input className="flex-1 text-xs border rounded px-1" placeholder="Opção" value={opt.name} onChange={e => updateOption(idx, oIdx, 'name', e.target.value)} />
-                                                <input className="w-16 text-xs border rounded px-1" placeholder="R$" type="number" value={opt.price} onChange={e => updateOption(idx, oIdx, 'price', parseFloat(e.target.value))} />
+                                            <div key={oIdx} className="flex flex-col gap-2 mb-2 p-2 bg-gray-50 border border-gray-100 rounded-lg">
+                                                <div className="flex gap-2 items-center">
+                                                    <input className="flex-1 text-xs border rounded px-2 py-1" placeholder="Opção (Ex: Calabresa)" value={opt.name} onChange={e => updateOption(idx, oIdx, 'name', e.target.value)} />
+                                                    <input className="w-16 text-xs border rounded px-2 py-1" placeholder="R$" type="number" value={opt.price} onChange={e => updateOption(idx, oIdx, 'price', parseFloat(e.target.value))} />
+                                                    
+                                                    {/* O BOTÃO QUE ABRE O MODAL DA RECEITA (FICHA TÉCNICA) */}
+                                                    <button 
+                                                        onClick={() => {
+                                                            const compStr = prompt("Ficha Técnica: Digite o ID do insumo e a quantidade, separados por vírgula. \n\nExemplo para vincular 0.5kg de algo: \n0a1b2c3d-4e5f...,0.5");
+                                                            if (compStr) {
+                                                                const [invId, amount] = compStr.split(',');
+                                                                if (invId && amount) {
+                                                                    const g = [...(newProduct.groups || [])];
+                                                                    if (!(g[idx].options[oIdx] as any).compositions) (g[idx].options[oIdx] as any).compositions = [];
+                                                                    (g[idx].options[oIdx] as any).compositions.push({ inventoryItemId: invId.trim(), amount: parseFloat(amount) });
+                                                                    setNewProduct({...newProduct, groups: g});
+                                                                    alert("Insumo atrelado ao sabor com sucesso!");
+                                                                }
+                                                            }
+                                                        }} 
+                                                        className="text-[10px] bg-red-100 text-red-700 px-2 py-1 rounded font-bold hover:bg-red-200"
+                                                    >
+                                                        + Receita {((opt as any).compositions?.length || 0) > 0 ? `(${(opt as any).compositions?.length})` : ''}
+                                                    </button>
+                                                </div>
                                             </div>
                                         ))}
                                     </div>
