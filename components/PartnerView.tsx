@@ -11,6 +11,41 @@ import POSView from './POSView';
 import HistoryView from './HistoryView';
 import InventoryView, { InventoryItem } from './InventoryView';
 
+// Componente isolado para não quebrar o React
+const InventoryModule = () => {
+    const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+    
+    useEffect(() => {
+        const fetchInventory = async () => {
+            const { data } = await supabase.from('inventory_items').select('*').order('name');
+            if (data) setInventoryItems(data as InventoryItem[]);
+        };
+        fetchInventory();
+    }, []);
+
+    return (
+        <InventoryView 
+            items={inventoryItems} 
+            setItems={(newItems) => {
+                setInventoryItems(newItems);
+                if (typeof newItems === 'function') return;
+                
+                newItems.forEach(async (item) => {
+                    await supabase.from('inventory_items').upsert({
+                        id: item.id,
+                        name: item.name,
+                        category: item.category,
+                        unit: item.unit,
+                        current_stock: item.currentStock,
+                        min_stock: item.minStock,
+                        cost_price: item.costPrice
+                    });
+                });
+            }} 
+        />
+    );
+};
+
 interface PartnerViewProps {
   company: Company;
   orders: Order[];
@@ -1806,42 +1841,10 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           
       {view === ViewState.INVENTORY && (
                 <div className="space-y-6">
-                    {(() => {
-                        const [inventoryItems, setInventoryItems] = React.useState<InventoryItem[]>([]);
-                        
-                        React.useEffect(() => {
-                            const fetchInventory = async () => {
-                                const { data } = await supabase.from('inventory_items').select('*').order('name');
-                                if (data) setInventoryItems(data as InventoryItem[]);
-                            };
-                            fetchInventory();
-                        }, []);
-
-                        return (
-                            <InventoryView 
-                                items={inventoryItems} 
-                                setItems={(newItems) => {
-                                    setInventoryItems(newItems);
-                                    if (typeof newItems === 'function') return;
-                                    
-                                    newItems.forEach(async (item) => {
-                                        await supabase.from('inventory_items').upsert({
-                                            id: item.id,
-                                            name: item.name,
-                                            category: item.category,
-                                            unit: item.unit,
-                                            current_stock: item.currentStock,
-                                            min_stock: item.minStock,
-                                            cost_price: item.costPrice
-                                        });
-                                    });
-                                }} 
-                            />
-                        );
-                    })()}
+                    <InventoryModule />
                 </div>
-            )}
-          
+            )}    
+                
           {view === ViewState.MENU && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     <div className="lg:col-span-1 bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-fit sticky top-8">
