@@ -61,7 +61,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: ViewState.ORDERS, label: 'Pedidos (Kanban)', icon: ShoppingBag },
     { id: ViewState.HISTORY, label: 'Histórico de Pedidos', icon: History },
     { id: ViewState.MENU, label: 'Cardápio', icon: UtensilsCrossed },
-    { id: ViewState.INVENTORY, label: 'Estoque / Fichas', icon: Package }, // <-- ADICIONE ESTA LINHA AQUI
+    { id: ViewState.INVENTORY, label: 'Estoque', icon: Package }, // <-- ADICIONE ESTA LINHA AQUI
     { id: ViewState.FINANCE, label: 'Financeiro', icon: Wallet },
     { id: ViewState.COUPONS, label: 'Cupons', icon: Ticket },
     { id: ViewState.WHATSAPP, label: 'Bot WhatsApp', icon: MessageSquare },
