@@ -1023,35 +1023,49 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const handleDragDropOrder = async (orderId: string, status: Order['status']) => {
       const order = orders.find(o => o.id === orderId);
 
-      // Gatilho: Se o pedido está sendo movido para Entregue e ainda não era entregue
+      // GATILHO DE BAIXA NO ESTOQUE: Apenas quando o pedido for Entregue
       if (order && status === 'delivered' && order.status !== 'delivered') {
-          for (const item of order.items) {
-              const product = products.find(p => p.name === item.productName);
-              if (!product) continue;
+          
+          // 1. Traz todas as receitas do banco de dados de uma vez só para ficar rápido
+          const { data: compositions } = await supabase.from('compositions').select('*');
+          
+          if (compositions) {
+              for (const item of order.items) {
+                  // A. Checa se o Produto Principal tem receita (Ex: "Guaraná 1L")
+                  const mainComps = compositions.filter(c => c.reference_id === item.productName);
+                  for (const comp of mainComps) {
+                      const totalToDeduct = comp.amount_needed * item.quantity;
+                      // Busca o estoque, subtrai e atualiza
+                      const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', comp.inventory_item_id).single();
+                      if (inv) {
+                          await supabase.from('inventory_items').update({ current_stock: inv.current_stock - totalToDeduct }).eq('id', comp.inventory_item_id);
+                      }
+                  }
 
-              if (item.selectedOptions) {
-                  for (const opt of item.selectedOptions) {
-                      const groupName = (opt as any).groupName;
-                      const optName = opt.optionName || opt.name;
+                  // B. Checa se as Opções/Sabores têm receita (Ex: "Calabresa", "Mussarela")
+                  if (item.selectedOptions && item.selectedOptions.length > 0) {
+                      const originalProduct = products.find(p => p.name === item.productName);
                       
-                      const group = product.groups?.find(g => g.name === groupName);
-                      const originalOpt = group?.options.find(o => o.name === optName);
-
-                      // Se o sabor/opção tiver uma Ficha Técnica (compositions)
-                      if (originalOpt && (originalOpt as any).compositions) {
-                          for (const comp of (originalOpt as any).compositions) {
-                              // Busca o estoque atual no banco
-                              const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', comp.inventoryItemId).single();
-                              
+                      for (const opt of item.selectedOptions) {
+                          const groupName = (opt as any).groupName;
+                          const optName = opt.optionName || opt.name;
+                          
+                          // A MÁGICA DA FRAÇÃO (Matemática da Pizza Meio a Meio)
+                          const group = originalProduct?.groups?.find(g => g.name === groupName);
+                          // Quantos sabores ele escolheu nesse mesmo grupo?
+                          const selectedInThisGroup = item.selectedOptions.filter(o => (o as any).groupName === groupName).length;
+                          
+                          // Se o grupo é de dividir preço (sabores), divide a quantidade (Ex: 2 sabores = multiplica a receita por 1/2)
+                          const fraction = group?.dividePrice && selectedInThisGroup > 0 ? (1 / selectedInThisGroup) : 1;
+                          
+                          // Busca as receitas cadastradas com este nome exato
+                          const optComps = compositions.filter(c => c.reference_id === optName);
+                          for (const comp of optComps) {
+                              const totalToDeduct = comp.amount_needed * item.quantity * fraction;
+                              // Busca o estoque, subtrai e atualiza
+                              const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', comp.inventory_item_id).single();
                               if (inv) {
-                                  // Se for modo pizzaria (dividir sabor), ele calcula a fração. Ex: Meia calabresa = divide por 2
-                                  const fraction = group?.dividePrice ? (1 / item.selectedOptions.filter(o => (o as any).groupName === groupName).length) : 1;
-                                  
-                                  const totalToDeduct = comp.amount * item.quantity * fraction;
-                                  const newStock = inv.current_stock - totalToDeduct;
-                                  
-                                  // Faz o abate silencioso no banco
-                                  await supabase.from('inventory_items').update({ current_stock: newStock }).eq('id', comp.inventoryItemId);
+                                  await supabase.from('inventory_items').update({ current_stock: inv.current_stock - totalToDeduct }).eq('id', comp.inventory_item_id);
                               }
                           }
                       }
@@ -1060,6 +1074,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           }
       }
       
+      // Atualiza o card visualmente
       updateOrderStatus(orderId, status);
   };
 
