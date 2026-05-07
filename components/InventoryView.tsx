@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { Plus, Search, Edit, Trash2, AlertTriangle, ShoppingCart, CheckCircle, Package, X, BookOpen, ChevronRight, Save } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Plus, Search, Edit, Trash2, AlertTriangle, ShoppingCart, Package, X, Save, Printer } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
 export interface InventoryItem {
@@ -32,8 +32,11 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
     const [itemFormData, setItemFormData] = useState<Partial<InventoryItem>>({
         name: '', category: 'Ingredientes', unit: 'KG', currentStock: 0, minStock: 0, costPrice: 0
     });
+    
+    // NOVO ESTADO: Campo de entrada (soma ao estoque)
+    const [stockEntry, setStockEntry] = useState<string>('');
 
-    // 1. GERAÇÃO DA LISTA DE COMPRAS (Corrigida para usar números)
+    // 1. GERAÇÃO DA LISTA DE COMPRAS
     const shoppingList = useMemo(() => {
         return items.filter(item => Number(item.currentStock) <= Number(item.minStock));
     }, [items]);
@@ -43,14 +46,76 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
         item.category.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
-    // 2. SALVAMENTO BLINDADO (Garante gravação no Supabase)
+    // FUNÇÃO PARA IMPRIMIR/GERAR PDF DA LISTA DE COMPRAS
+    const handlePrintList = () => {
+        const printWindow = window.open('', '', 'width=800,height=600');
+        if (!printWindow) return;
+
+        const htmlContent = `
+            <html>
+                <head>
+                    <title>Lista de Compras</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; padding: 20px; color: #333; }
+                        h1 { color: #dc2626; border-bottom: 2px solid #dc2626; padding-bottom: 10px; }
+                        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+                        th { background-color: #f8f9fa; font-weight: bold; }
+                        .urgent { color: #dc2626; font-weight: bold; }
+                    </style>
+                </head>
+                <body>
+                    <h1>Lista de Compras - Forneria 90</h1>
+                    <p>Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}</p>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Insumo</th>
+                                <th>Estoque Atual</th>
+                                <th>Mínimo Exigido</th>
+                                <th>Comprar Aprox.</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${shoppingList.map(item => {
+                                const toBuy = Math.max(0, item.minStock - item.currentStock);
+                                return `
+                                    <tr>
+                                        <td><strong>${item.name}</strong></td>
+                                        <td>${item.currentStock} ${item.unit}</td>
+                                        <td>${item.minStock} ${item.unit}</td>
+                                        <td class="urgent">${toBuy} ${item.unit}</td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                    <script>
+                        window.onload = () => {
+                            window.print();
+                            window.close();
+                        };
+                    </script>
+                </body>
+            </html>
+        `;
+
+        printWindow.document.write(htmlContent);
+        printWindow.document.close();
+    };
+
+    // 2. SALVAMENTO BLINDADO E SOMA DE ENTRADA
     const handleSaveItem = async () => {
         if (!itemFormData.name) {
             alert('O nome do insumo é obrigatório!');
             return;
         }
 
+        // Lógica de Entrada: Pega o estoque que estava lá + o valor que foi digitado no campo de entrada
         const current_stock = Number(itemFormData.currentStock) || 0;
+        const entry_amount = Number(stockEntry) || 0;
+        const final_stock = current_stock + entry_amount;
+
         const min_stock = Number(itemFormData.minStock) || 0;
         const cost_price = Number(itemFormData.costPrice) || 0;
 
@@ -59,7 +124,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
             name: itemFormData.name,
             category: itemFormData.category || 'Ingredientes',
             unit: itemFormData.unit || 'KG',
-            current_stock: current_stock,
+            current_stock: final_stock, // Salva a soma final no banco
             min_stock: min_stock,
             cost_price: cost_price
         };
@@ -91,6 +156,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
             setIsItemModalOpen(false);
             setEditingItem(null);
             setItemFormData({ name: '', category: 'Ingredientes', unit: 'KG', currentStock: 0, minStock: 0, costPrice: 0 });
+            setStockEntry(''); // Limpa o campo de entrada
             alert("Insumo salvo com sucesso!");
 
         } catch (err) {
@@ -129,7 +195,12 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                         </div>
                     )}
                     <button 
-                        onClick={() => { setEditingItem(null); setItemFormData({ name: '', category: 'Ingredientes', unit: 'KG', currentStock: 0, minStock: 0, costPrice: 0 }); setIsItemModalOpen(true); }}
+                        onClick={() => { 
+                            setEditingItem(null); 
+                            setItemFormData({ name: '', category: 'Ingredientes', unit: 'KG', currentStock: 0, minStock: 0, costPrice: 0 }); 
+                            setStockEntry('');
+                            setIsItemModalOpen(true); 
+                        }}
                         className="bg-red-600 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-red-700 shadow-lg shadow-red-100 transition-all"
                     >
                         <Plus className="w-5 h-5" /> Novo Insumo
@@ -144,6 +215,13 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                         <h2 className="text-red-800 font-black flex items-center gap-2">
                             <ShoppingCart className="w-5 h-5" /> LISTA DE COMPRAS SUGERIDA
                         </h2>
+                        {/* Botão de Imprimir */}
+                        <button 
+                            onClick={handlePrintList}
+                            className="bg-white border border-red-200 text-red-700 px-4 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-red-100 transition-colors shadow-sm"
+                        >
+                            <Printer className="w-4 h-4" /> Imprimir / PDF
+                        </button>
                     </div>
                     <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
                         {shoppingList.map(item => (
@@ -210,7 +288,15 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                                     </td>
                                     <td className="px-6 py-4">
                                         <div className="flex justify-center gap-2">
-                                            <button onClick={() => { setEditingItem(item); setItemFormData(item); setIsItemModalOpen(true); }} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                                            <button 
+                                                onClick={() => { 
+                                                    setEditingItem(item); 
+                                                    setItemFormData(item); 
+                                                    setStockEntry(''); 
+                                                    setIsItemModalOpen(true); 
+                                                }} 
+                                                className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                            >
                                                 <Edit className="w-5 h-5" />
                                             </button>
                                             <button onClick={() => handleDeleteItem(item.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
@@ -228,7 +314,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
             {/* Modal de Insumo */}
             {isItemModalOpen && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
+                    <div className="bg-white rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
                         <div className="p-6 border-b flex justify-between items-center bg-gray-50">
                             <h2 className="text-xl font-black text-gray-900">{editingItem ? 'Editar Insumo' : 'Novo Insumo'}</h2>
                             <button onClick={() => setIsItemModalOpen(false)} className="p-2 hover:bg-gray-200 rounded-full transition-colors"><X className="w-6 h-6"/></button>
@@ -253,16 +339,33 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                                     <input type="number" value={itemFormData.costPrice} onChange={e => setItemFormData({...itemFormData, costPrice: parseFloat(e.target.value)})} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" placeholder="0.00"/>
                                 </div>
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
+                            
+                            {/* Linha de Estoque e Entrada */}
+                            <div className="grid grid-cols-3 gap-4 pt-2">
                                 <div>
                                     <label className="block text-sm font-bold text-gray-700 mb-1">Estoque Atual</label>
-                                    <input type="number" value={itemFormData.currentStock} onChange={e => setItemFormData({...itemFormData, currentStock: parseFloat(e.target.value)})} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none font-bold text-red-600"/>
+                                    <input type="number" value={itemFormData.currentStock} onChange={e => setItemFormData({...itemFormData, currentStock: parseFloat(e.target.value)})} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none font-bold text-gray-600 bg-gray-50"/>
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Estoque Mínimo</label>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Mínimo</label>
                                     <input type="number" value={itemFormData.minStock} onChange={e => setItemFormData({...itemFormData, minStock: parseFloat(e.target.value)})} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none"/>
                                 </div>
+                                <div>
+                                    <label className="block text-sm font-black text-green-700 mb-1">+ Nova Entrada</label>
+                                    <input 
+                                        type="number" 
+                                        value={stockEntry} 
+                                        onChange={e => setStockEntry(e.target.value)} 
+                                        className="w-full px-4 py-3 rounded-xl border-2 border-green-300 bg-green-50 outline-none font-black text-green-700 placeholder-green-400 focus:ring-2 focus:ring-green-500" 
+                                        placeholder="Qtd..."
+                                    />
+                                </div>
                             </div>
+                            {Number(stockEntry) > 0 && (
+                                <p className="text-xs font-bold text-green-600 text-right mt-1">
+                                    O estoque final será: {(Number(itemFormData.currentStock) || 0) + Number(stockEntry)}
+                                </p>
+                            )}
                         </div>
                         <div className="p-6 bg-gray-50 flex gap-3">
                             <button onClick={() => setIsItemModalOpen(false)} className="flex-1 py-3 font-bold text-gray-500 hover:bg-gray-200 rounded-xl transition-colors">Cancelar</button>
