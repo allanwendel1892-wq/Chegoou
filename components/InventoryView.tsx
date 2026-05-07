@@ -78,7 +78,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
         setIsItemModalOpen(true);
     };
 
-    const handleSaveItem = () => {
+    const handleSaveItem = async () => {
         if (!itemFormData.name) { alert('Nome obrigatório!'); return; }
         const newItem: InventoryItem = {
             id: editingItem ? editingItem.id : self.crypto.randomUUID(),
@@ -89,14 +89,38 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
             minStock: Number(itemFormData.minStock) || 0,
             costPrice: Number(itemFormData.costPrice) || 0
         };
+
+        // 1. Salva no Supabase primeiro mapeando para snake_case
+        const { error } = await supabase.from('inventory_items').upsert({
+            id: newItem.id,
+            name: newItem.name,
+            category: newItem.category,
+            unit: newItem.unit,
+            current_stock: newItem.currentStock,
+            min_stock: newItem.minStock,
+            cost_price: newItem.costPrice
+        });
+
+        if (error) {
+            alert('Erro ao salvar no banco de dados: ' + error.message);
+            return;
+        }
+
+        // 2. Se salvou no banco com sucesso, atualiza a tela
         if (editingItem) setItems(items.map(i => i.id === newItem.id ? newItem : i));
         else setItems([...items, newItem]);
         setIsItemModalOpen(false);
     };
 
-    const handleDeleteItem = (id: string) => {
+    const handleDeleteItem = async (id: string) => {
         if (window.confirm('Excluir este insumo? (Pode quebrar receitas atreladas a ele)')) {
-            setItems(items.filter(i => i.id !== id));
+            const { error } = await supabase.from('inventory_items').delete().eq('id', id);
+            
+            if (error) {
+                alert('Erro ao excluir insumo: ' + error.message);
+            } else {
+                setItems(items.filter(i => i.id !== id));
+            }
         }
     };
 
