@@ -72,42 +72,47 @@ const processOrderDeduction = async (orderItems: any[]) => {
 
 // O RADAR: Corre a cada 5 segundos a verificar pedidos recentes
 if (!isPollingActive) {
-    console.log("📡 [STOCK] A ligar o Radar (Fallback para Realtime bloqueado)...");
+    console.log("📡 [ESTOQUE] Ligando o Radar (Fallback para Realtime bloqueado)...");
     isPollingActive = true;
 
     setInterval(async () => {
         try {
-            // Busca os últimos 20 pedidos entregues
+            // Trocamos para select('*') e removemos a ordenação para evitar o Erro 400 de coluna inexistente
             const { data: recentDeliveredOrders, error } = await supabase
                 .from('orders')
-                .select('id, items, status')
+                .select('*')
                 .eq('status', 'delivered')
-                .order('created_at', { ascending: false })
                 .limit(20);
 
-            if (error || !recentDeliveredOrders) return;
+            // Rastreador de erro detalhado
+            if (error) {
+                console.error("❌ [ESTOQUE] O Supabase recusou a busca (Erro 400). Detalhes exatos do banco:", error.message, error.details, error.hint);
+                return;
+            }
 
-            // Puxa da memória local quais pedidos já tiveram o stock abatido
+            if (!recentDeliveredOrders) return;
+
+            // Puxa da memória local quais pedidos já tiveram o estoque abatido
             const processedOrdersCache = JSON.parse(localStorage.getItem('inventory_processed_orders') || '[]');
 
             for (const order of recentDeliveredOrders) {
                 if (!processedOrdersCache.includes(order.id)) {
-                    console.log(`🚚 [STOCK] Novo pedido ENTREGUE detetado pelo Radar: ${order.id}`);
+                    console.log(`🚚 [ESTOQUE] Novo pedido ENTREGUE detectado pelo Radar: ${order.id}`);
                     
                     const orderItems = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
                     await processOrderDeduction(orderItems);
 
-                    // Regista que este pedido foi processado
+                    // Registra que este pedido foi processado para não abater em duplicidade
                     processedOrdersCache.push(order.id);
                     
-                    // Limita a cache para não exceder a memória do navegador
+                    // Limita o cache para não pesar a memória do navegador
                     if (processedOrdersCache.length > 200) processedOrdersCache.shift();
                     
                     localStorage.setItem('inventory_processed_orders', JSON.stringify(processedOrdersCache));
                 }
             }
         } catch (err) {
-            console.error("❌ [STOCK] Erro no Radar:", err);
+            console.error("❌ [ESTOQUE] Erro interno no Radar:", err);
         }
     }, 5000); 
 }
