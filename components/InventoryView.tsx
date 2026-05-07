@@ -8,68 +8,7 @@ import { supabase } from '../services/supabaseClient';
 // ============================================================================
 
 let isPollingActive = false;
-let isFirstRadarScan = true; // ESCUDO ATIVADO: Protege contra varreduras do histórico
-
-const processOrderDeduction = async (orderItems: any[]) => {
-    console.log("🔥 [STOCK] A iniciar processo de baixa. Itens recebidos:", orderItems);
-    try {
-        const { data: compositions, error: compError } = await supabase.from('compositions').select('*');
-        
-        if (compError || !compositions || compositions.length === 0) return;
-
-        const deductions: Record<string, number> = {};
-
-        const addDeduction = (invId: string, amount: number) => {
-            if (!deductions[invId]) deductions[invId] = 0;
-            deductions[invId] += amount;
-            console.log(`➕ [STOCK] A adicionar ${amount} para abater do insumo ID: ${invId}`);
-        };
-
-        for (const item of orderItems) {
-            console.log(`🔎 [STOCK] A analisar item: ${item.productName}`);
-            
-            // Abate Produto Principal
-            const mainComps = compositions.filter(c => c.reference_id === item.productName);
-            for (const comp of mainComps) {
-                addDeduction(comp.inventory_item_id, comp.amount_needed * item.quantity);
-            }
-
-            // Abate Sabores e Lógica de Fração
-            if (item.selectedOptions && item.selectedOptions.length > 0) {
-                for (const opt of item.selectedOptions) {
-                    const optName = opt.optionName || opt.name;
-                    const groupName = opt.groupName;
-                    let fraction = 1;
-
-                    if (opt.dividePrice === true) {
-                        const countInGroup = item.selectedOptions.filter((o: any) => 
-                            o.groupName === groupName && o.dividePrice === true
-                        ).length;
-                        if (countInGroup > 0) fraction = 1 / countInGroup;
-                    }
-
-                    const optComps = compositions.filter(c => c.reference_id === optName);
-                    for (const comp of optComps) {
-                        addDeduction(comp.inventory_item_id, comp.amount_needed * item.quantity * fraction);
-                    }
-                }
-            }
-        }
-
-        for (const [invId, amountToDeduct] of Object.entries(deductions)) {
-            if (amountToDeduct > 0) {
-                const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', invId).single();
-                if (inv) {
-                    const novoEstoque = Number(inv.current_stock) - amountToDeduct;
-                    await supabase.from('inventory_items').update({ current_stock: novoEstoque }).eq('id', invId);
-                    console.log(`✅ [STOCK] Insumo ${invId} atualizado para ${novoEstoque}`);
-                }
-            }
-        }
-    } catch (error) {
-        console.error("❌ [STOCK] Erro fatal no motor de baixa:", error);
-    }
-};
+let isFirstRadarScan = true; // ESCUDO ATIVADO
 
 // O RADAR: Corre a cada 5 segundos a verificar pedidos recentes
 if (!isPollingActive) {
@@ -78,12 +17,13 @@ if (!isPollingActive) {
 
     setInterval(async () => {
         try {
-            // Busca os últimos 20 pedidos entregues
+            // CORREÇÃO MÁXIMA: Pega os mais recentes ordenando pelo ID e caça múltiplos status de finalização!
             const { data: recentDeliveredOrders, error } = await supabase
                 .from('orders')
                 .select('*')
-                .eq('status', 'delivered')
-                .limit(20);
+                .in('status', ['delivered', 'completed', 'concluido', 'entregue']) // Pega se arrastar OU se clicar
+                .order('id', { ascending: false }) // Traz os mais novos sem causar o Erro 400 de data
+                .limit(30);
 
             if (error) {
                 console.error("❌ [STOCK] O Supabase recusou a busca:", error.message);
@@ -92,11 +32,10 @@ if (!isPollingActive) {
 
             if (!recentDeliveredOrders) return;
 
-            // Puxa da memória local quais pedidos já tiveram o stock abatido
             const processedOrdersCache = JSON.parse(localStorage.getItem('inventory_processed_orders') || '[]');
 
             // ==========================================
-            // ESCUDO: Se for a primeira vez que roda após abrir a página
+            // ESCUDO DE INICIALIZAÇÃO
             // ==========================================
             if (isFirstRadarScan) {
                 let memorizedCount = 0;
@@ -110,22 +49,21 @@ if (!isPollingActive) {
                 if (processedOrdersCache.length > 200) processedOrdersCache.splice(0, processedOrdersCache.length - 200);
                 localStorage.setItem('inventory_processed_orders', JSON.stringify(processedOrdersCache));
                 
-                isFirstRadarScan = false; // Desliga o escudo para as próximas varreduras
+                isFirstRadarScan = false;
                 console.log(`🛡️ [STOCK] Primeira varredura concluída. ${memorizedCount} pedidos antigos memorizados sem abater.`);
-                return; // PARA AQUI! Não abate nada do que já passou.
+                return; 
             }
 
             // ==========================================
-            // ROTINA NORMAL: A cada 5s verifica se há pedidos REALMENTE novos
+            // ROTINA DE ABATIMENTO SEGURO
             // ==========================================
             for (const order of recentDeliveredOrders) {
                 if (!processedOrdersCache.includes(order.id)) {
-                    console.log(`🚚 [STOCK] Novo pedido ENTREGUE detetado pelo Radar: ${order.id}`);
+                    console.log(`🚚 [STOCK] Novo pedido ENTREGUE detetado pelo Radar: ${order.id} (Status: ${order.status})`);
                     
                     const orderItems = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
                     await processOrderDeduction(orderItems);
 
-                    // Regista que este pedido foi processado para não voltar a abater
                     processedOrdersCache.push(order.id);
                     if (processedOrdersCache.length > 200) processedOrdersCache.shift();
                     localStorage.setItem('inventory_processed_orders', JSON.stringify(processedOrdersCache));
@@ -136,7 +74,6 @@ if (!isPollingActive) {
         }
     }, 5000); 
 }
-
 // ============================================================================
 // COMPONENTE VISUAL REACT (COM ABAS INTACTAS)
 // ============================================================================
