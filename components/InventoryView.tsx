@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Plus, Search, Edit, Trash2, AlertTriangle, ShoppingCart, Package, X, Save, Printer } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
@@ -33,8 +33,112 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
         name: '', category: 'Ingredientes', unit: 'KG', currentStock: 0, minStock: 0, costPrice: 0
     });
     
-    // NOVO ESTADO: Campo de entrada (soma ao estoque)
+    // Campo de entrada (soma ao estoque)
     const [stockEntry, setStockEntry] = useState<string>('');
+
+    // ============================================================================
+    // MOTOR AUTÔNOMO DE BAIXA DE ESTOQUE (Escuta a tabela 'orders' em tempo real)
+    // ============================================================================
+    useEffect(() => {
+        const processOrderDeduction = async (orderItems: any[]) => {
+            try {
+                // 1. Busca todas as receitas ativas
+                const { data: compositions } = await supabase.from('compositions').select('*');
+                if (!compositions || compositions.length === 0) return;
+
+                // 2. Cria um "carrinho de deduções" para somar tudo antes de gravar no banco
+                const deductions: Record<string, number> = {};
+
+                const addDeduction = (invId: string, amount: number) => {
+                    if (!deductions[invId]) deductions[invId] = 0;
+                    deductions[invId] += amount;
+                };
+
+                // 3. Lê o JSON exato que você me mandou e calcula as quantidades
+                for (const item of orderItems) {
+                    
+                    // A. Abate Produto Inteiro / Principal (Ex: Caixa de Pizza, Bebidas)
+                    const mainComps = compositions.filter(c => c.reference_id === item.productName);
+                    for (const comp of mainComps) {
+                        addDeduction(comp.inventory_item_id, comp.amount_needed * item.quantity);
+                    }
+
+                    // B. Abate Sabores / Opções e Lida com as Frações "1/2"
+                    if (item.selectedOptions && item.selectedOptions.length > 0) {
+                        for (const opt of item.selectedOptions) {
+                            // Extrai o nome limpo (Ex: pega "Calabresa" direto do optionName, ou limpa o "1/2" do nome original)
+                            const optName = opt.optionName || String(opt.name).replace('1/2 ', '').replace('1/3 ', '').trim();
+                            const groupName = opt.groupName;
+
+                            let fraction = 1;
+
+                            // Verifica se é uma opção que divide (pela flag dividePrice ou pelo texto 1/2)
+                            if (opt.dividePrice === true || String(opt.name).includes('1/2') || String(opt.name).includes('meia')) {
+                                // Quantas opções desse mesmo grupo "PIZZA" ele escolheu?
+                                const selectedInGroup = item.selectedOptions.filter((o: any) => 
+                                    o.groupName === groupName && 
+                                    (o.dividePrice === true || String(o.name).includes('1/2') || String(o.name).includes('meia'))
+                                ).length;
+                                
+                                if (selectedInGroup > 0) {
+                                    fraction = 1 / selectedInGroup; // Transforma 2 sabores em 0.5 (1/2), 3 em 0.33, etc.
+                                }
+                            }
+
+                            // Acha a receita correspondente ao sabor limpo e adiciona à dedução proporcional
+                            const optComps = compositions.filter(c => c.reference_id === optName);
+                            for (const comp of optComps) {
+                                addDeduction(comp.inventory_item_id, comp.amount_needed * item.quantity * fraction);
+                            }
+                        }
+                    }
+                }
+
+                // 4. Executa a baixa diretamente no banco de dados
+                for (const [invId, amountToDeduct] of Object.entries(deductions)) {
+                    if (amountToDeduct > 0) {
+                        const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', invId).single();
+                        if (inv) {
+                            const newStock = Number(inv.current_stock) - amountToDeduct;
+                            // Grava no Supabase
+                            await supabase.from('inventory_items').update({ current_stock: newStock }).eq('id', invId);
+                            // Atualiza a tela visualmente na mesma hora
+                            setItems(prev => prev.map(i => i.id === invId ? { ...i, currentStock: newStock } : i));
+                        }
+                    }
+                }
+
+            } catch (error) {
+                console.error("Erro ao processar a baixa de estoque:", error);
+            }
+        };
+
+        // Canal Realtime do Supabase: Fica "ouvindo" atualizações na tabela orders
+        const ordersChannel = supabase.channel('realtime:orders_inventory_sync')
+            .on(
+                'postgres_changes',
+                { event: 'UPDATE', schema: 'public', table: 'orders' },
+                (payload) => {
+                    const newOrder = payload.new;
+                    const oldOrder = payload.old;
+
+                    // Se o status acabou de mudar para 'delivered'
+                    if (newOrder.status === 'delivered' && oldOrder.status !== 'delivered') {
+                        // Converte o JSONB caso ele venha como string
+                        const orderItems = typeof newOrder.items === 'string' ? JSON.parse(newOrder.items) : newOrder.items;
+                        processOrderDeduction(orderItems);
+                    }
+                }
+            )
+            .subscribe();
+
+        // Limpa o listener ao desmontar o componente
+        return () => {
+            supabase.removeChannel(ordersChannel);
+        };
+    }, []); 
+    // ============================================================================
+
 
     // 1. GERAÇÃO DA LISTA DE COMPRAS
     const shoppingList = useMemo(() => {
