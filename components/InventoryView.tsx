@@ -3,11 +3,12 @@ import { Plus, Search, Edit, Trash2, AlertTriangle, ShoppingCart, Package, X, Sa
 import { supabase } from '../services/supabaseClient';
 
 // ============================================================================
-// MOTOR AUTÔNOMO DE BAIXA DE STOCK (PLANO B: RADAR / POLLING)
-// Resolve o problema de bloqueio de WebSocket do Easypanel
+// MOTOR AUTÓNOMO DE BAIXA DE STOCK (PLANO B: RADAR / POLLING COM ESCUDO)
+// Resolve o problema de bloqueio de WebSocket do Easypanel e evita duplicações
 // ============================================================================
 
 let isPollingActive = false;
+let isFirstRadarScan = true; // ESCUDO ATIVADO: Protege contra varreduras do histórico
 
 const processOrderDeduction = async (orderItems: any[]) => {
     console.log("🔥 [STOCK] A iniciar processo de baixa. Itens recebidos:", orderItems);
@@ -72,53 +73,72 @@ const processOrderDeduction = async (orderItems: any[]) => {
 
 // O RADAR: Corre a cada 5 segundos a verificar pedidos recentes
 if (!isPollingActive) {
-    console.log("📡 [ESTOQUE] Ligando o Radar (Fallback para Realtime bloqueado)...");
+    console.log("📡 [STOCK] A ligar o Radar blindado (Fallback para Realtime bloqueado)...");
     isPollingActive = true;
 
     setInterval(async () => {
         try {
-            // Trocamos para select('*') e removemos a ordenação para evitar o Erro 400 de coluna inexistente
+            // Busca os últimos 20 pedidos entregues
             const { data: recentDeliveredOrders, error } = await supabase
                 .from('orders')
                 .select('*')
                 .eq('status', 'delivered')
                 .limit(20);
 
-            // Rastreador de erro detalhado
             if (error) {
-                console.error("❌ [ESTOQUE] O Supabase recusou a busca (Erro 400). Detalhes exatos do banco:", error.message, error.details, error.hint);
+                console.error("❌ [STOCK] O Supabase recusou a busca:", error.message);
                 return;
             }
 
             if (!recentDeliveredOrders) return;
 
-            // Puxa da memória local quais pedidos já tiveram o estoque abatido
+            // Puxa da memória local quais pedidos já tiveram o stock abatido
             const processedOrdersCache = JSON.parse(localStorage.getItem('inventory_processed_orders') || '[]');
 
+            // ==========================================
+            // ESCUDO: Se for a primeira vez que roda após abrir a página
+            // ==========================================
+            if (isFirstRadarScan) {
+                let memorizedCount = 0;
+                for (const order of recentDeliveredOrders) {
+                    if (!processedOrdersCache.includes(order.id)) {
+                        processedOrdersCache.push(order.id);
+                        memorizedCount++;
+                    }
+                }
+                
+                if (processedOrdersCache.length > 200) processedOrdersCache.splice(0, processedOrdersCache.length - 200);
+                localStorage.setItem('inventory_processed_orders', JSON.stringify(processedOrdersCache));
+                
+                isFirstRadarScan = false; // Desliga o escudo para as próximas varreduras
+                console.log(`🛡️ [STOCK] Primeira varredura concluída. ${memorizedCount} pedidos antigos memorizados sem abater.`);
+                return; // PARA AQUI! Não abate nada do que já passou.
+            }
+
+            // ==========================================
+            // ROTINA NORMAL: A cada 5s verifica se há pedidos REALMENTE novos
+            // ==========================================
             for (const order of recentDeliveredOrders) {
                 if (!processedOrdersCache.includes(order.id)) {
-                    console.log(`🚚 [ESTOQUE] Novo pedido ENTREGUE detectado pelo Radar: ${order.id}`);
+                    console.log(`🚚 [STOCK] Novo pedido ENTREGUE detetado pelo Radar: ${order.id}`);
                     
                     const orderItems = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
                     await processOrderDeduction(orderItems);
 
-                    // Registra que este pedido foi processado para não abater em duplicidade
+                    // Regista que este pedido foi processado para não voltar a abater
                     processedOrdersCache.push(order.id);
-                    
-                    // Limita o cache para não pesar a memória do navegador
                     if (processedOrdersCache.length > 200) processedOrdersCache.shift();
-                    
                     localStorage.setItem('inventory_processed_orders', JSON.stringify(processedOrdersCache));
                 }
             }
         } catch (err) {
-            console.error("❌ [ESTOQUE] Erro interno no Radar:", err);
+            console.error("❌ [STOCK] Erro interno no Radar:", err);
         }
     }, 5000); 
 }
 
 // ============================================================================
-// COMPONENTE VISUAL REACT (COM ABAS RESTAURADAS)
+// COMPONENTE VISUAL REACT (COM ABAS INTACTAS)
 // ============================================================================
 
 export interface InventoryItem {
@@ -186,7 +206,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
         };
 
         fetchData();
-        const interval = setInterval(fetchData, 5000); // Polling de atualização da interface
+        const interval = setInterval(fetchData, 5000); // Polling de atualização da interface (a cada 5s)
         return () => clearInterval(interval);
     }, [setItems]);
 
