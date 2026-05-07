@@ -1,38 +1,31 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Plus, Search, Edit, Trash2, AlertTriangle, ShoppingCart, Package, X, Save, Printer, BookOpen, CheckCircle, ChevronRight } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, AlertTriangle, ShoppingCart, Package, X, Save, Printer, BookOpen } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
 // ============================================================================
-// MOTOR AUTÔNOMO DE BAIXA DE ESTOQUE (BACKGROUND)
+// MOTOR AUTÔNOMO DE BAIXA DE STOCK (PLANO B: RADAR / POLLING)
+// Resolve o problema de bloqueio de WebSocket do Easypanel
 // ============================================================================
 
-let isListenerActive = false;
+let isPollingActive = false;
 
 const processOrderDeduction = async (orderItems: any[]) => {
-    console.log("🔥 [ESTOQUE] Iniciando processo de baixa. Itens recebidos:", orderItems);
+    console.log("🔥 [STOCK] A iniciar processo de baixa. Itens recebidos:", orderItems);
     try {
         const { data: compositions, error: compError } = await supabase.from('compositions').select('*');
         
-        if (compError) {
-            console.error("❌ [ESTOQUE] Erro ao buscar receitas:", compError);
-            return;
-        }
-        
-        if (!compositions || compositions.length === 0) {
-            console.warn("⚠️ [ESTOQUE] Nenhuma receita encontrada na tabela 'compositions'.");
-            return;
-        }
+        if (compError || !compositions || compositions.length === 0) return;
 
         const deductions: Record<string, number> = {};
 
         const addDeduction = (invId: string, amount: number) => {
             if (!deductions[invId]) deductions[invId] = 0;
             deductions[invId] += amount;
-            console.log(`➕ [ESTOQUE] Adicionando ${amount} para abater do insumo ID: ${invId}`);
+            console.log(`➕ [STOCK] A adicionar ${amount} para abater do insumo ID: ${invId}`);
         };
 
         for (const item of orderItems) {
-            console.log(`🔎 [ESTOQUE] Analisando item: ${item.productName}`);
+            console.log(`🔎 [STOCK] A analisar item: ${item.productName}`);
             
             // Abate Produto Principal
             const mainComps = compositions.filter(c => c.reference_id === item.productName);
@@ -51,11 +44,7 @@ const processOrderDeduction = async (orderItems: any[]) => {
                         const countInGroup = item.selectedOptions.filter((o: any) => 
                             o.groupName === groupName && o.dividePrice === true
                         ).length;
-                        
-                        if (countInGroup > 0) {
-                            fraction = 1 / countInGroup;
-                            console.log(`➗ [ESTOQUE] Fracionado! Total no grupo: ${countInGroup}. Fração: ${fraction}`);
-                        }
+                        if (countInGroup > 0) fraction = 1 / countInGroup;
                     }
 
                     const optComps = compositions.filter(c => c.reference_id === optName);
@@ -66,56 +55,61 @@ const processOrderDeduction = async (orderItems: any[]) => {
             }
         }
 
-        console.log("🛒 [ESTOQUE] Executando deduções no banco:", deductions);
-
         for (const [invId, amountToDeduct] of Object.entries(deductions)) {
             if (amountToDeduct > 0) {
                 const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', invId).single();
                 if (inv) {
                     const novoEstoque = Number(inv.current_stock) - amountToDeduct;
                     await supabase.from('inventory_items').update({ current_stock: novoEstoque }).eq('id', invId);
-                    console.log(`✅ [ESTOQUE] Insumo ${invId} atualizado para ${novoEstoque}`);
+                    console.log(`✅ [STOCK] Insumo ${invId} atualizado para ${novoEstoque}`);
                 }
             }
         }
     } catch (error) {
-        console.error("❌ [ESTOQUE] Erro fatal no motor de baixa:", error);
+        console.error("❌ [STOCK] Erro fatal no motor de baixa:", error);
     }
 };
 
-if (!isListenerActive) {
-    console.log("📡 [ESTOQUE] Ligando o ouvinte global do Supabase...");
-    isListenerActive = true;
-    supabase.channel('global_inventory_deduction')
-        .on(
-            'postgres_changes',
-            { event: 'UPDATE', schema: 'public', table: 'orders' },
-            async (payload) => {
-                const newOrder = payload.new;
-                const oldOrder = payload.old;
+// O RADAR: Corre a cada 5 segundos a verificar pedidos recentes
+if (!isPollingActive) {
+    console.log("📡 [STOCK] A ligar o Radar (Fallback para Realtime bloqueado)...");
+    isPollingActive = true;
 
-                if (newOrder.status === 'delivered' && oldOrder.status !== 'delivered') {
-                    console.log(`🚚 [ESTOQUE] Pedido ${newOrder.id} ENTREGUE detectado! Buscando itens completos...`);
+    setInterval(async () => {
+        try {
+            // Busca os últimos 20 pedidos entregues
+            const { data: recentDeliveredOrders, error } = await supabase
+                .from('orders')
+                .select('id, items, status')
+                .eq('status', 'delivered')
+                .order('created_at', { ascending: false })
+                .limit(20);
+
+            if (error || !recentDeliveredOrders) return;
+
+            // Puxa da memória local quais pedidos já tiveram o stock abatido
+            const processedOrdersCache = JSON.parse(localStorage.getItem('inventory_processed_orders') || '[]');
+
+            for (const order of recentDeliveredOrders) {
+                if (!processedOrdersCache.includes(order.id)) {
+                    console.log(`🚚 [STOCK] Novo pedido ENTREGUE detetado pelo Radar: ${order.id}`);
                     
-                    const { data: fullOrder, error } = await supabase
-                        .from('orders')
-                        .select('items')
-                        .eq('id', newOrder.id)
-                        .single();
+                    const orderItems = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
+                    await processOrderDeduction(orderItems);
 
-                    if (error || !fullOrder) {
-                        console.error("❌ [ESTOQUE] Falha ao puxar os itens do pedido:", error);
-                        return;
-                    }
-
-                    const orderItems = typeof fullOrder.items === 'string' ? JSON.parse(fullOrder.items) : fullOrder.items;
-                    processOrderDeduction(orderItems);
+                    // Regista que este pedido foi processado
+                    processedOrdersCache.push(order.id);
+                    
+                    // Limita a cache para não exceder a memória do navegador
+                    if (processedOrdersCache.length > 200) processedOrdersCache.shift();
+                    
+                    localStorage.setItem('inventory_processed_orders', JSON.stringify(processedOrdersCache));
                 }
             }
-        )
-        .subscribe((status) => {
-            console.log("📡 [ESTOQUE] Status da conexão Realtime:", status);
-        });
+        } catch (err) {
+            console.error("❌ [STOCK] Erro no Radar:", err);
+        }
+    }, 5000); 
 }
 
 // ============================================================================
@@ -157,7 +151,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
     });
     const [stockEntry, setStockEntry] = useState<string>('');
 
-    // Receitas States (Restaurados)
+    // Receitas States
     const [compositions, setCompositions] = useState<Composition[]>([]);
     const [isRecipeModalOpen, setIsRecipeModalOpen] = useState(false);
     const [editingRecipeName, setEditingRecipeName] = useState('');
@@ -187,7 +181,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
         };
 
         fetchData();
-        const interval = setInterval(fetchData, 5000); // Polling de atualização
+        const interval = setInterval(fetchData, 5000); // Polling de atualização da interface
         return () => clearInterval(interval);
     }, [setItems]);
 
@@ -198,7 +192,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
     const handlePrintList = () => {
         const printWindow = window.open('', '', 'width=800,height=600');
         if (!printWindow) return;
-        const htmlContent = `<html><head><title>Lista de Compras</title><style>body { font-family: Arial, sans-serif; padding: 20px; color: #333; }h1 { color: #dc2626; border-bottom: 2px solid #dc2626; padding-bottom: 10px; }table { width: 100%; border-collapse: collapse; margin-top: 20px; }th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }th { background-color: #f8f9fa; font-weight: bold; }.urgent { color: #dc2626; font-weight: bold; }</style></head><body><h1>Lista de Compras - Forneria 90</h1><p>Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}</p><table><thead><tr><th>Insumo</th><th>Estoque Atual</th><th>Mínimo Exigido</th><th>Comprar Aprox.</th></tr></thead><tbody>${shoppingList.map(item => {const toBuy = Math.max(0, item.minStock - item.currentStock);return `<tr><td><strong>${item.name}</strong></td><td>${item.currentStock} ${item.unit}</td><td>${item.minStock} ${item.unit}</td><td class="urgent">${toBuy} ${item.unit}</td></tr>`;}).join('')}</tbody></table><script>window.onload = () => { window.print(); window.close(); };</script></body></html>`;
+        const htmlContent = `<html><head><title>Lista de Compras</title><style>body { font-family: Arial, sans-serif; padding: 20px; color: #333; }h1 { color: #dc2626; border-bottom: 2px solid #dc2626; padding-bottom: 10px; }table { width: 100%; border-collapse: collapse; margin-top: 20px; }th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }th { background-color: #f8f9fa; font-weight: bold; }.urgent { color: #dc2626; font-weight: bold; }</style></head><body><h1>Lista de Compras - Forneria 90</h1><p>Gerado em: ${new Date().toLocaleDateString('pt-PT')} às ${new Date().toLocaleTimeString('pt-PT')}</p><table><thead><tr><th>Insumo</th><th>Stock Atual</th><th>Mínimo Exigido</th><th>Comprar Aprox.</th></tr></thead><tbody>${shoppingList.map(item => {const toBuy = Math.max(0, item.minStock - item.currentStock);return `<tr><td><strong>${item.name}</strong></td><td>${item.currentStock} ${item.unit}</td><td>${item.minStock} ${item.unit}</td><td class="urgent">${toBuy} ${item.unit}</td></tr>`;}).join('')}</tbody></table><script>window.onload = () => { window.print(); window.close(); };</script></body></html>`;
         printWindow.document.write(htmlContent);
         printWindow.document.close();
     };
@@ -228,18 +222,17 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
             setEditingItem(null);
             setItemFormData({ name: '', category: 'Ingredientes', unit: 'KG', currentStock: 0, minStock: 0, costPrice: 0 });
             setStockEntry('');
-            alert("Insumo salvo!");
-        } catch (err) { alert("Erro ao salvar."); }
+        } catch (err) { alert("Erro ao guardar."); }
     };
 
     const handleDeleteItem = async (id: string) => {
-        if (window.confirm('Excluir este insumo?')) {
+        if (window.confirm('Excluir este insumo permanentemente?')) {
             await supabase.from('inventory_items').delete().eq('id', id);
             setItems(prev => prev.filter(i => i.id !== id));
         }
     };
 
-    // Lógica Receitas (Agrupamento e Salvamento Restaurados)
+    // Lógica Receitas
     const recipesGrouped = useMemo(() => {
         const groups: Record<string, Composition[]> = {};
         compositions.forEach(c => {
@@ -267,7 +260,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                 }));
                 await supabase.from('compositions').insert(newComps);
                 
-                // Atualiza tela localmente
                 const otherComps = compositions.filter(c => c.reference_id !== editingRecipeName);
                 setCompositions([...otherComps, ...newComps]);
             } else {
@@ -277,9 +269,8 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
             setIsRecipeModalOpen(false);
             setEditingRecipeName('');
             setRecipeIngredients([]);
-            alert("Receita salva com sucesso!");
         } catch (err) {
-            alert("Erro ao salvar a receita.");
+            alert("Erro ao guardar a receita.");
         }
     };
 
@@ -305,14 +296,13 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
 
     return (
         <div className="p-6 max-w-7xl mx-auto">
-            {/* Header */}
+            {/* Header e Abas */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
                 <div>
-                    <h1 className="text-3xl font-black text-gray-900 flex items-center gap-3"><Package className="w-8 h-8 text-red-600" /> Controle de Estoque</h1>
-                    <p className="text-gray-500 font-medium">Gerencie insumos e receitas de produção</p>
+                    <h1 className="text-3xl font-black text-gray-900 flex items-center gap-3"><Package className="w-8 h-8 text-red-600" /> Controlo de Stock</h1>
+                    <p className="text-gray-500 font-medium">Faça a gestão de insumos e fichas técnicas</p>
                 </div>
                 
-                {/* Abas Superiores RESTAURADAS */}
                 <div className="flex bg-gray-100 p-1 rounded-xl">
                     <button 
                         onClick={() => setActiveTab('insumos')}
@@ -324,12 +314,12 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                         onClick={() => setActiveTab('receitas')}
                         className={`px-6 py-2.5 rounded-lg font-bold transition-all flex items-center gap-2 ${activeTab === 'receitas' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                     >
-                        <BookOpen className="w-5 h-5"/> Fichas Técnicas (Receitas)
+                        <BookOpen className="w-5 h-5"/> Fichas Técnicas
                     </button>
                 </div>
             </div>
 
-            {/* Ações e Lista de Compras (Apenas na aba Insumos) */}
+            {/* ABA INSUMOS */}
             {activeTab === 'insumos' && (
                 <>
                     <div className="flex justify-end gap-3 mb-6">
@@ -350,7 +340,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                             <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
                                 {shoppingList.map(item => (
                                     <div key={item.id} className="bg-gray-50 p-3 rounded-xl border border-gray-100 flex justify-between items-center">
-                                        <div><p className="font-bold text-gray-800">{item.name}</p><p className="text-xs text-red-600 font-medium">Estoque: {item.currentStock} {item.unit} (Mín: {item.minStock})</p></div>
+                                        <div><p className="font-bold text-gray-800">{item.name}</p><p className="text-xs text-red-600 font-medium">Stock: {item.currentStock} {item.unit} (Mín: {item.minStock})</p></div>
                                         <div className="text-right"><p className="text-xs text-gray-400 uppercase font-bold">Comprar aprox.</p><p className="font-black text-gray-900">{Math.max(0, item.minStock - item.currentStock)} {item.unit}</p></div>
                                     </div>
                                 ))}
@@ -360,12 +350,12 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
 
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                         <div className="p-4 border-b border-gray-50 flex flex-col md:row justify-between gap-4">
-                            <div className="relative flex-1"><Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" /><input type="text" placeholder="Buscar insumos..." className="w-full pl-10 pr-4 py-3 bg-gray-50 rounded-xl border-none focus:ring-2 focus:ring-red-500" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
+                            <div className="relative flex-1"><Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" /><input type="text" placeholder="Procurar insumos..." className="w-full pl-10 pr-4 py-3 bg-gray-50 rounded-xl border-none focus:ring-2 focus:ring-red-500" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
                         </div>
                         <div className="overflow-x-auto">
                             <table className="w-full text-left">
                                 <thead className="bg-gray-50 text-gray-500 text-xs uppercase font-bold">
-                                    <tr><th className="px-6 py-4">Insumo</th><th className="px-6 py-4">Categoria</th><th className="px-6 py-4 text-center">Estoque Atual</th><th className="px-6 py-4 text-center">Mínimo</th><th className="px-6 py-4 text-center">Ações</th></tr>
+                                    <tr><th className="px-6 py-4">Insumo</th><th className="px-6 py-4">Categoria</th><th className="px-6 py-4 text-center">Stock Atual</th><th className="px-6 py-4 text-center">Mínimo</th><th className="px-6 py-4 text-center">Ações</th></tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-50">
                                     {filteredItems.map(item => (
@@ -384,7 +374,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                 </>
             )}
 
-            {/* CONTEÚDO DA ABA RECEITAS (RESTAURADO) */}
+            {/* ABA RECEITAS */}
             {activeTab === 'receitas' && (
                 <div>
                     <div className="flex justify-end gap-3 mb-6">
@@ -420,7 +410,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                 </div>
             )}
 
-            {/* Modal de Insumo */}
+            {/* MODAL DE INSUMO */}
             {isItemModalOpen && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl">
@@ -432,17 +422,17 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                                 <div><label className="block text-sm font-bold text-gray-700 mb-1">Preço de Custo</label><input type="number" value={itemFormData.costPrice} onChange={e => setItemFormData({...itemFormData, costPrice: parseFloat(e.target.value)})} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" /></div>
                             </div>
                             <div className="grid grid-cols-3 gap-4 pt-2">
-                                <div><label className="block text-sm font-bold text-gray-700 mb-1">Estoque Atual</label><input type="number" value={itemFormData.currentStock} onChange={e => setItemFormData({...itemFormData, currentStock: parseFloat(e.target.value)})} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none font-bold text-gray-600 bg-gray-50"/></div>
+                                <div><label className="block text-sm font-bold text-gray-700 mb-1">Stock Atual</label><input type="number" value={itemFormData.currentStock} onChange={e => setItemFormData({...itemFormData, currentStock: parseFloat(e.target.value)})} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none font-bold text-gray-600 bg-gray-50"/></div>
                                 <div><label className="block text-sm font-bold text-gray-700 mb-1">Mínimo</label><input type="number" value={itemFormData.minStock} onChange={e => setItemFormData({...itemFormData, minStock: parseFloat(e.target.value)})} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none"/></div>
                                 <div><label className="block text-sm font-black text-green-700 mb-1">+ Nova Entrada</label><input type="number" value={stockEntry} onChange={e => setStockEntry(e.target.value)} className="w-full px-4 py-3 rounded-xl border-2 border-green-300 bg-green-50 outline-none font-black text-green-700" placeholder="Qtd..."/></div>
                             </div>
                         </div>
-                        <div className="p-6 bg-gray-50 flex gap-3"><button onClick={() => setIsItemModalOpen(false)} className="flex-1 py-3 font-bold text-gray-500 hover:bg-gray-200 rounded-xl">Cancelar</button><button onClick={handleSaveItem} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 flex items-center justify-center gap-2"><Save className="w-5 h-5"/> Salvar Agora</button></div>
+                        <div className="p-6 bg-gray-50 flex gap-3"><button onClick={() => setIsItemModalOpen(false)} className="flex-1 py-3 font-bold text-gray-500 hover:bg-gray-200 rounded-xl">Cancelar</button><button onClick={handleSaveItem} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 flex items-center justify-center gap-2"><Save className="w-5 h-5"/> Guardar</button></div>
                     </div>
                 </div>
             )}
 
-            {/* MODAL DE RECEITAS (RESTAURADO) */}
+            {/* MODAL DE RECEITA */}
             {isRecipeModalOpen && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl">
@@ -459,7 +449,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                                     onChange={e => setEditingRecipeName(e.target.value)} 
                                     className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-red-500 outline-none" 
                                     placeholder="Ex: Calabresa, Guaraná 1L"
-                                    disabled={!!editingRecipeName && recipesGrouped[editingRecipeName] !== undefined} // Desabilita se estiver editando
+                                    disabled={!!editingRecipeName && recipesGrouped[editingRecipeName] !== undefined}
                                 />
                                 <p className="text-xs text-gray-500 mt-1">Este nome deve ser exatamente igual ao que sai no pedido.</p>
                             </div>
@@ -504,7 +494,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                         </div>
                         <div className="p-6 bg-gray-50 flex gap-3">
                             <button onClick={() => setIsRecipeModalOpen(false)} className="flex-1 py-3 font-bold text-gray-500 hover:bg-gray-200 rounded-xl">Cancelar</button>
-                            <button onClick={handleSaveRecipe} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 flex items-center justify-center gap-2"><Save className="w-5 h-5"/> Salvar Receita</button>
+                            <button onClick={handleSaveRecipe} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 flex items-center justify-center gap-2"><Save className="w-5 h-5"/> Guardar Ficha</button>
                         </div>
                     </div>
                 </div>
