@@ -2,6 +2,108 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Plus, Search, Edit, Trash2, AlertTriangle, ShoppingCart, Package, X, Save, Printer } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
+// ============================================================================
+// MOTOR AUTÔNOMO DE BAIXA DE ESTOQUE (BACKGROUND SERVICE)
+// Fica fora do componente React para não "morrer" quando você troca de aba
+// ============================================================================
+
+let isListenerActive = false;
+
+const processOrderDeduction = async (orderItems: any[]) => {
+    try {
+        // 1. Busca todas as receitas ativas de uma vez
+        const { data: compositions } = await supabase.from('compositions').select('*');
+        if (!compositions || compositions.length === 0) return;
+
+        // 2. Carrinho de deduções (soma tudo antes de abater para evitar múltiplas idas ao banco)
+        const deductions: Record<string, number> = {};
+
+        const addDeduction = (invId: string, amount: number) => {
+            if (!deductions[invId]) deductions[invId] = 0;
+            deductions[invId] += amount;
+        };
+
+        // 3. Lê o JSON do pedido
+        for (const item of orderItems) {
+            
+            // A. Abate Produto Inteiro (Ex: Guaraná, Caixa de Pizza)
+            const mainComps = compositions.filter(c => c.reference_id === item.productName);
+            for (const comp of mainComps) {
+                addDeduction(comp.inventory_item_id, comp.amount_needed * item.quantity);
+            }
+
+            // B. Abate Sabores e Adicionais (Baseado no seu JSON)
+            if (item.selectedOptions && item.selectedOptions.length > 0) {
+                for (const opt of item.selectedOptions) {
+                    // Pega o nome exato (Ex: "Calabresa") e ignora o "1/2" do nome de exibição
+                    const optName = opt.optionName || opt.name;
+                    const groupName = opt.groupName;
+
+                    let fraction = 1;
+
+                    // Se a opção tiver dividePrice = true (como no seu JSON)
+                    if (opt.dividePrice === true) {
+                        // Quantos sabores daquele mesmo grupo dividem o preço?
+                        const countInGroup = item.selectedOptions.filter((o: any) => 
+                            o.groupName === groupName && o.dividePrice === true
+                        ).length;
+                        
+                        if (countInGroup > 0) {
+                            fraction = 1 / countInGroup; // Ex: 2 sabores = 0.5 de dedução
+                        }
+                    }
+
+                    // Busca a receita pelo nome exato ("Calabresa", "Portuguesa", "Sem Borda")
+                    const optComps = compositions.filter(c => c.reference_id === optName);
+                    for (const comp of optComps) {
+                        addDeduction(comp.inventory_item_id, comp.amount_needed * item.quantity * fraction);
+                    }
+                }
+            }
+        }
+
+        // 4. Executa a baixa no banco de dados
+        for (const [invId, amountToDeduct] of Object.entries(deductions)) {
+            if (amountToDeduct > 0) {
+                const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', invId).single();
+                if (inv) {
+                    await supabase.from('inventory_items').update({ 
+                        current_stock: Number(inv.current_stock) - amountToDeduct 
+                    }).eq('id', invId);
+                }
+            }
+        }
+    } catch (error) {
+        console.error("Erro no motor de baixa de estoque:", error);
+    }
+};
+
+// Inicia a escuta global
+if (!isListenerActive) {
+    isListenerActive = true;
+    supabase.channel('global_inventory_deduction')
+        .on(
+            'postgres_changes',
+            { event: 'UPDATE', schema: 'public', table: 'orders' },
+            (payload) => {
+                const newOrder = payload.new;
+                const oldOrder = payload.old;
+
+                // GATILHO: Somente quando mudar para 'delivered'
+                if (newOrder.status === 'delivered' && oldOrder.status !== 'delivered') {
+                    // Previne erro de parse se o JSON vier como string
+                    const orderItems = typeof newOrder.items === 'string' ? JSON.parse(newOrder.items) : newOrder.items;
+                    processOrderDeduction(orderItems);
+                }
+            }
+        )
+        .subscribe();
+}
+
+// ============================================================================
+// COMPONENTE VISUAL REACT
+// ============================================================================
+
 export interface InventoryItem {
     id: string;
     name: string;
@@ -33,114 +135,29 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
         name: '', category: 'Ingredientes', unit: 'KG', currentStock: 0, minStock: 0, costPrice: 0
     });
     
-    // Campo de entrada (soma ao estoque)
     const [stockEntry, setStockEntry] = useState<string>('');
 
-    // ============================================================================
-    // MOTOR AUTÔNOMO DE BAIXA DE ESTOQUE (Escuta a tabela 'orders' em tempo real)
-    // ============================================================================
+    // Busca os dados atualizados sempre que a tela for aberta,
+    // garantindo que as baixas do background apareçam na tela.
     useEffect(() => {
-        const processOrderDeduction = async (orderItems: any[]) => {
-            try {
-                // 1. Busca todas as receitas ativas
-                const { data: compositions } = await supabase.from('compositions').select('*');
-                if (!compositions || compositions.length === 0) return;
-
-                // 2. Cria um "carrinho de deduções" para somar tudo antes de gravar no banco
-                const deductions: Record<string, number> = {};
-
-                const addDeduction = (invId: string, amount: number) => {
-                    if (!deductions[invId]) deductions[invId] = 0;
-                    deductions[invId] += amount;
-                };
-
-                // 3. Lê o JSON exato que você me mandou e calcula as quantidades
-                for (const item of orderItems) {
-                    
-                    // A. Abate Produto Inteiro / Principal (Ex: Caixa de Pizza, Bebidas)
-                    const mainComps = compositions.filter(c => c.reference_id === item.productName);
-                    for (const comp of mainComps) {
-                        addDeduction(comp.inventory_item_id, comp.amount_needed * item.quantity);
-                    }
-
-                    // B. Abate Sabores / Opções e Lida com as Frações "1/2"
-                    if (item.selectedOptions && item.selectedOptions.length > 0) {
-                        for (const opt of item.selectedOptions) {
-                            // Extrai o nome limpo (Ex: pega "Calabresa" direto do optionName, ou limpa o "1/2" do nome original)
-                            const optName = opt.optionName || String(opt.name).replace('1/2 ', '').replace('1/3 ', '').trim();
-                            const groupName = opt.groupName;
-
-                            let fraction = 1;
-
-                            // Verifica se é uma opção que divide (pela flag dividePrice ou pelo texto 1/2)
-                            if (opt.dividePrice === true || String(opt.name).includes('1/2') || String(opt.name).includes('meia')) {
-                                // Quantas opções desse mesmo grupo "PIZZA" ele escolheu?
-                                const selectedInGroup = item.selectedOptions.filter((o: any) => 
-                                    o.groupName === groupName && 
-                                    (o.dividePrice === true || String(o.name).includes('1/2') || String(o.name).includes('meia'))
-                                ).length;
-                                
-                                if (selectedInGroup > 0) {
-                                    fraction = 1 / selectedInGroup; // Transforma 2 sabores em 0.5 (1/2), 3 em 0.33, etc.
-                                }
-                            }
-
-                            // Acha a receita correspondente ao sabor limpo e adiciona à dedução proporcional
-                            const optComps = compositions.filter(c => c.reference_id === optName);
-                            for (const comp of optComps) {
-                                addDeduction(comp.inventory_item_id, comp.amount_needed * item.quantity * fraction);
-                            }
-                        }
-                    }
-                }
-
-                // 4. Executa a baixa diretamente no banco de dados
-                for (const [invId, amountToDeduct] of Object.entries(deductions)) {
-                    if (amountToDeduct > 0) {
-                        const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', invId).single();
-                        if (inv) {
-                            const newStock = Number(inv.current_stock) - amountToDeduct;
-                            // Grava no Supabase
-                            await supabase.from('inventory_items').update({ current_stock: newStock }).eq('id', invId);
-                            // Atualiza a tela visualmente na mesma hora
-                            setItems(prev => prev.map(i => i.id === invId ? { ...i, currentStock: newStock } : i));
-                        }
-                    }
-                }
-
-            } catch (error) {
-                console.error("Erro ao processar a baixa de estoque:", error);
+        const fetchCurrentInventory = async () => {
+            const { data } = await supabase.from('inventory_items').select('*').order('name');
+            if (data) {
+                const mappedData = data.map((item: any) => ({
+                    id: item.id,
+                    name: item.name,
+                    category: item.category,
+                    unit: item.unit,
+                    currentStock: Number(item.current_stock) || 0,
+                    minStock: Number(item.min_stock) || 0,
+                    costPrice: Number(item.cost_price) || 0
+                }));
+                setItems(mappedData);
             }
         };
+        fetchCurrentInventory();
+    }, []);
 
-        // Canal Realtime do Supabase: Fica "ouvindo" atualizações na tabela orders
-        const ordersChannel = supabase.channel('realtime:orders_inventory_sync')
-            .on(
-                'postgres_changes',
-                { event: 'UPDATE', schema: 'public', table: 'orders' },
-                (payload) => {
-                    const newOrder = payload.new;
-                    const oldOrder = payload.old;
-
-                    // Se o status acabou de mudar para 'delivered'
-                    if (newOrder.status === 'delivered' && oldOrder.status !== 'delivered') {
-                        // Converte o JSONB caso ele venha como string
-                        const orderItems = typeof newOrder.items === 'string' ? JSON.parse(newOrder.items) : newOrder.items;
-                        processOrderDeduction(orderItems);
-                    }
-                }
-            )
-            .subscribe();
-
-        // Limpa o listener ao desmontar o componente
-        return () => {
-            supabase.removeChannel(ordersChannel);
-        };
-    }, []); 
-    // ============================================================================
-
-
-    // 1. GERAÇÃO DA LISTA DE COMPRAS
     const shoppingList = useMemo(() => {
         return items.filter(item => Number(item.currentStock) <= Number(item.minStock));
     }, [items]);
@@ -150,7 +167,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
         item.category.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
-    // FUNÇÃO PARA IMPRIMIR/GERAR PDF DA LISTA DE COMPRAS
     const handlePrintList = () => {
         const printWindow = window.open('', '', 'width=800,height=600');
         if (!printWindow) return;
@@ -208,14 +224,12 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
         printWindow.document.close();
     };
 
-    // 2. SALVAMENTO BLINDADO E SOMA DE ENTRADA
     const handleSaveItem = async () => {
         if (!itemFormData.name) {
             alert('O nome do insumo é obrigatório!');
             return;
         }
 
-        // Lógica de Entrada: Pega o estoque que estava lá + o valor que foi digitado no campo de entrada
         const current_stock = Number(itemFormData.currentStock) || 0;
         const entry_amount = Number(stockEntry) || 0;
         const final_stock = current_stock + entry_amount;
@@ -228,7 +242,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
             name: itemFormData.name,
             category: itemFormData.category || 'Ingredientes',
             unit: itemFormData.unit || 'KG',
-            current_stock: final_stock, // Salva a soma final no banco
+            current_stock: final_stock,
             min_stock: min_stock,
             cost_price: cost_price
         };
@@ -260,7 +274,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
             setIsItemModalOpen(false);
             setEditingItem(null);
             setItemFormData({ name: '', category: 'Ingredientes', unit: 'KG', currentStock: 0, minStock: 0, costPrice: 0 });
-            setStockEntry(''); // Limpa o campo de entrada
+            setStockEntry('');
             alert("Insumo salvo com sucesso!");
 
         } catch (err) {
@@ -444,7 +458,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                                 </div>
                             </div>
                             
-                            {/* Linha de Estoque e Entrada */}
                             <div className="grid grid-cols-3 gap-4 pt-2">
                                 <div>
                                     <label className="block text-sm font-bold text-gray-700 mb-1">Estoque Atual</label>
