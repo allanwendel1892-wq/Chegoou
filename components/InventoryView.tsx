@@ -3,79 +3,131 @@ import { Plus, Search, Edit, Trash2, AlertTriangle, ShoppingCart, Package, X, Sa
 import { supabase } from '../services/supabaseClient';
 
 // ============================================================================
-// MOTOR AUTÓNOMO DE BAIXA DE STOCK (PLANO B: RADAR / POLLING COM ESCUDO)
-// Resolve o problema de bloqueio de WebSocket do Easypanel e evita duplicações
+// MOTOR AUTÔNOMO DE BAIXA DE ESTOQUE (RADAR DEFINITIVO)
+// Sem limite de busca. Memória infinita para não duplicar nem esquecer nada.
 // ============================================================================
 
 let isPollingActive = false;
-let isFirstRadarScan = true; // ESCUDO ATIVADO
+let isFirstRadarScan = true;
+let memCache = new Set<string>(); // Usa um Set para buscas super rápidas e memória infinita
 
-// O RADAR: Corre a cada 5 segundos a verificar pedidos recentes
+const processOrderDeduction = async (orderItems: any[]) => {
+    console.log("🔥 [ESTOQUE] Iniciando processo de baixa. Itens recebidos:", orderItems);
+    try {
+        const { data: compositions, error: compError } = await supabase.from('compositions').select('*');
+        
+        if (compError || !compositions || compositions.length === 0) return;
+
+        const deductions: Record<string, number> = {};
+
+        const addDeduction = (invId: string, amount: number) => {
+            if (!deductions[invId]) deductions[invId] = 0;
+            deductions[invId] += amount;
+        };
+
+        for (const item of orderItems) {
+            // Abate Produto Principal
+            const mainComps = compositions.filter(c => c.reference_id === item.productName);
+            for (const comp of mainComps) {
+                addDeduction(comp.inventory_item_id, comp.amount_needed * item.quantity);
+            }
+
+            // Abate Sabores e Lógica de Fração
+            if (item.selectedOptions && item.selectedOptions.length > 0) {
+                for (const opt of item.selectedOptions) {
+                    const optName = opt.optionName || opt.name;
+                    const groupName = opt.groupName;
+                    let fraction = 1;
+
+                    if (opt.dividePrice === true) {
+                        const countInGroup = item.selectedOptions.filter((o: any) => 
+                            o.groupName === groupName && o.dividePrice === true
+                        ).length;
+                        if (countInGroup > 0) fraction = 1 / countInGroup;
+                    }
+
+                    const optComps = compositions.filter(c => c.reference_id === optName);
+                    for (const comp of optComps) {
+                        addDeduction(comp.inventory_item_id, comp.amount_needed * item.quantity * fraction);
+                    }
+                }
+            }
+        }
+
+        for (const [invId, amountToDeduct] of Object.entries(deductions)) {
+            if (amountToDeduct > 0) {
+                const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', invId).single();
+                if (inv) {
+                    const novoEstoque = Number(inv.current_stock) - amountToDeduct;
+                    await supabase.from('inventory_items').update({ current_stock: novoEstoque }).eq('id', invId);
+                    console.log(`✅ [ESTOQUE] Insumo ${invId} atualizado para ${novoEstoque}`);
+                }
+            }
+        }
+    } catch (error) {
+        console.error("❌ [ESTOQUE] Erro fatal no motor de baixa:", error);
+    }
+};
+
+// O RADAR: Roda a cada 5 segundos
 if (!isPollingActive) {
-    console.log("📡 [STOCK] A ligar o Radar blindado (Fallback para Realtime bloqueado)...");
+    console.log("📡 [ESTOQUE] Ligando o Radar Definitivo...");
     isPollingActive = true;
+
+    // Carrega a memória do que já foi abatido em sessões passadas
+    try {
+        const savedCache = localStorage.getItem('inventory_processed_orders');
+        if (savedCache) {
+            memCache = new Set(JSON.parse(savedCache));
+        }
+    } catch (e) {}
 
     setInterval(async () => {
         try {
-            // CORREÇÃO MÁXIMA: Pega os mais recentes ordenando pelo ID e caça múltiplos status de finalização!
-            const { data: recentDeliveredOrders, error } = await supabase
+            // BUSCA ABSOLUTA: Pega TODOS os pedidos que estejam finalizados, sem limite.
+            // Ignora maiúsculas/minúsculas colocando todas as variações possíveis.
+            const { data: completedOrders, error } = await supabase
                 .from('orders')
-                .select('*')
-                .in('status', ['delivered', 'completed', 'concluido', 'entregue']) // Pega se arrastar OU se clicar
-                .order('id', { ascending: false }) // Traz os mais novos sem causar o Erro 400 de data
-                .limit(30);
+                .select('id, items, status')
+                .in('status', ['delivered', 'completed', 'concluido', 'entregue', 'Concluído', 'Entregue', 'concluído', 'Delivered']);
 
-            if (error) {
-                console.error("❌ [STOCK] O Supabase recusou a busca:", error.message);
-                return;
-            }
-
-            if (!recentDeliveredOrders) return;
-
-            const processedOrdersCache = JSON.parse(localStorage.getItem('inventory_processed_orders') || '[]');
+            if (error || !completedOrders) return;
 
             // ==========================================
             // ESCUDO DE INICIALIZAÇÃO
             // ==========================================
             if (isFirstRadarScan) {
-                let memorizedCount = 0;
-                for (const order of recentDeliveredOrders) {
-                    if (!processedOrdersCache.includes(order.id)) {
-                        processedOrdersCache.push(order.id);
-                        memorizedCount++;
-                    }
-                }
-                
-                if (processedOrdersCache.length > 200) processedOrdersCache.splice(0, processedOrdersCache.length - 200);
-                localStorage.setItem('inventory_processed_orders', JSON.stringify(processedOrdersCache));
-                
+                completedOrders.forEach(order => memCache.add(order.id));
+                localStorage.setItem('inventory_processed_orders', JSON.stringify(Array.from(memCache)));
                 isFirstRadarScan = false;
-                console.log(`🛡️ [STOCK] Primeira varredura concluída. ${memorizedCount} pedidos antigos memorizados sem abater.`);
-                return; 
+                console.log(`🛡️ [ESTOQUE] Escudo ativado! ${memCache.size} pedidos do histórico isolados.`);
+                return; // Para aqui. Não abate nada.
             }
 
             // ==========================================
-            // ROTINA DE ABATIMENTO SEGURO
+            // ROTINA DE ABATIMENTO (Apenas o que é Novo)
             // ==========================================
-            for (const order of recentDeliveredOrders) {
-                if (!processedOrdersCache.includes(order.id)) {
-                    console.log(`🚚 [STOCK] Novo pedido ENTREGUE detetado pelo Radar: ${order.id} (Status: ${order.status})`);
+            for (const order of completedOrders) {
+                // Se o ID do pedido NÃO está na nossa memória, é porque acabou de ser entregue!
+                if (!memCache.has(order.id)) {
+                    console.log(`🚚 [ESTOQUE] NOVO PEDIDO ENTREGUE DETECTADO: ${order.id}`);
                     
                     const orderItems = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
                     await processOrderDeduction(orderItems);
 
-                    processedOrdersCache.push(order.id);
-                    if (processedOrdersCache.length > 200) processedOrdersCache.shift();
-                    localStorage.setItem('inventory_processed_orders', JSON.stringify(processedOrdersCache));
+                    // Adiciona na memória e salva no navegador para não abater em duplicidade
+                    memCache.add(order.id);
+                    localStorage.setItem('inventory_processed_orders', JSON.stringify(Array.from(memCache)));
                 }
             }
         } catch (err) {
-            console.error("❌ [STOCK] Erro interno no Radar:", err);
+            console.error("❌ [ESTOQUE] Erro interno no Radar:", err);
         }
     }, 5000); 
 }
+
 // ============================================================================
-// COMPONENTE VISUAL REACT (COM ABAS INTACTAS)
+// COMPONENTE VISUAL REACT
 // ============================================================================
 
 export interface InventoryItem {
@@ -101,7 +153,6 @@ interface InventoryViewProps {
 }
 
 const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
-    // Abas
     const [activeTab, setActiveTab] = useState<'insumos' | 'receitas'>('insumos');
     const [searchTerm, setSearchTerm] = useState('');
     
@@ -121,7 +172,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
 
     useEffect(() => {
         const fetchData = async () => {
-            // Busca Insumos
             const { data: invData } = await supabase.from('inventory_items').select('*').order('name');
             if (invData) {
                 const mappedData = invData.map((item: any) => ({
@@ -135,7 +185,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                 }));
                 setItems(mappedData);
             }
-            // Busca Receitas
             const { data: compData } = await supabase.from('compositions').select('*');
             if (compData) {
                 setCompositions(compData);
@@ -143,7 +192,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
         };
 
         fetchData();
-        const interval = setInterval(fetchData, 5000); // Polling de atualização da interface (a cada 5s)
+        const interval = setInterval(fetchData, 5000); // Polling visual a cada 5s
         return () => clearInterval(interval);
     }, [setItems]);
 
@@ -154,7 +203,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
     const handlePrintList = () => {
         const printWindow = window.open('', '', 'width=800,height=600');
         if (!printWindow) return;
-        const htmlContent = `<html><head><title>Lista de Compras</title><style>body { font-family: Arial, sans-serif; padding: 20px; color: #333; }h1 { color: #dc2626; border-bottom: 2px solid #dc2626; padding-bottom: 10px; }table { width: 100%; border-collapse: collapse; margin-top: 20px; }th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }th { background-color: #f8f9fa; font-weight: bold; }.urgent { color: #dc2626; font-weight: bold; }</style></head><body><h1>Lista de Compras - Forneria 90</h1><p>Gerado em: ${new Date().toLocaleDateString('pt-PT')} às ${new Date().toLocaleTimeString('pt-PT')}</p><table><thead><tr><th>Insumo</th><th>Stock Atual</th><th>Mínimo Exigido</th><th>Comprar Aprox.</th></tr></thead><tbody>${shoppingList.map(item => {const toBuy = Math.max(0, item.minStock - item.currentStock);return `<tr><td><strong>${item.name}</strong></td><td>${item.currentStock} ${item.unit}</td><td>${item.minStock} ${item.unit}</td><td class="urgent">${toBuy} ${item.unit}</td></tr>`;}).join('')}</tbody></table><script>window.onload = () => { window.print(); window.close(); };</script></body></html>`;
+        const htmlContent = `<html><head><title>Lista de Compras</title><style>body { font-family: Arial, sans-serif; padding: 20px; color: #333; }h1 { color: #dc2626; border-bottom: 2px solid #dc2626; padding-bottom: 10px; }table { width: 100%; border-collapse: collapse; margin-top: 20px; }th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }th { background-color: #f8f9fa; font-weight: bold; }.urgent { color: #dc2626; font-weight: bold; }</style></head><body><h1>Lista de Compras - Forneria 90</h1><p>Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}</p><table><thead><tr><th>Insumo</th><th>Estoque Atual</th><th>Mínimo Exigido</th><th>Comprar Aprox.</th></tr></thead><tbody>${shoppingList.map(item => {const toBuy = Math.max(0, item.minStock - item.currentStock);return `<tr><td><strong>${item.name}</strong></td><td>${item.currentStock} ${item.unit}</td><td>${item.minStock} ${item.unit}</td><td class="urgent">${toBuy} ${item.unit}</td></tr>`;}).join('')}</tbody></table><script>window.onload = () => { window.print(); window.close(); };</script></body></html>`;
         printWindow.document.write(htmlContent);
         printWindow.document.close();
     };
@@ -184,7 +233,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
             setEditingItem(null);
             setItemFormData({ name: '', category: 'Ingredientes', unit: 'KG', currentStock: 0, minStock: 0, costPrice: 0 });
             setStockEntry('');
-        } catch (err) { alert("Erro ao guardar."); }
+        } catch (err) { alert("Erro ao salvar."); }
     };
 
     const handleDeleteItem = async (id: string) => {
@@ -208,10 +257,8 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
         if (!editingRecipeName) { alert('O Nome da Receita (Ex: Calabresa) é obrigatório!'); return; }
         
         try {
-            // Apaga a receita antiga
             await supabase.from('compositions').delete().eq('reference_id', editingRecipeName);
             
-            // Insere a nova
             const validIngredients = recipeIngredients.filter(r => r.invId && r.amount > 0);
             if (validIngredients.length > 0) {
                 const newComps = validIngredients.map(r => ({
@@ -232,7 +279,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
             setEditingRecipeName('');
             setRecipeIngredients([]);
         } catch (err) {
-            alert("Erro ao guardar a receita.");
+            alert("Erro ao salvar a receita.");
         }
     };
 
@@ -258,11 +305,10 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
 
     return (
         <div className="p-6 max-w-7xl mx-auto">
-            {/* Header e Abas */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
                 <div>
-                    <h1 className="text-3xl font-black text-gray-900 flex items-center gap-3"><Package className="w-8 h-8 text-red-600" /> Controlo de Stock</h1>
-                    <p className="text-gray-500 font-medium">Faça a gestão de insumos e fichas técnicas</p>
+                    <h1 className="text-3xl font-black text-gray-900 flex items-center gap-3"><Package className="w-8 h-8 text-red-600" /> Controle de Estoque</h1>
+                    <p className="text-gray-500 font-medium">Gerencie insumos e fichas técnicas</p>
                 </div>
                 
                 <div className="flex bg-gray-100 p-1 rounded-xl">
@@ -302,7 +348,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                             <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
                                 {shoppingList.map(item => (
                                     <div key={item.id} className="bg-gray-50 p-3 rounded-xl border border-gray-100 flex justify-between items-center">
-                                        <div><p className="font-bold text-gray-800">{item.name}</p><p className="text-xs text-red-600 font-medium">Stock: {item.currentStock} {item.unit} (Mín: {item.minStock})</p></div>
+                                        <div><p className="font-bold text-gray-800">{item.name}</p><p className="text-xs text-red-600 font-medium">Estoque: {item.currentStock} {item.unit} (Mín: {item.minStock})</p></div>
                                         <div className="text-right"><p className="text-xs text-gray-400 uppercase font-bold">Comprar aprox.</p><p className="font-black text-gray-900">{Math.max(0, item.minStock - item.currentStock)} {item.unit}</p></div>
                                     </div>
                                 ))}
@@ -312,12 +358,12 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
 
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                         <div className="p-4 border-b border-gray-50 flex flex-col md:row justify-between gap-4">
-                            <div className="relative flex-1"><Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" /><input type="text" placeholder="Procurar insumos..." className="w-full pl-10 pr-4 py-3 bg-gray-50 rounded-xl border-none focus:ring-2 focus:ring-red-500" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
+                            <div className="relative flex-1"><Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" /><input type="text" placeholder="Buscar insumos..." className="w-full pl-10 pr-4 py-3 bg-gray-50 rounded-xl border-none focus:ring-2 focus:ring-red-500" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} /></div>
                         </div>
                         <div className="overflow-x-auto">
                             <table className="w-full text-left">
                                 <thead className="bg-gray-50 text-gray-500 text-xs uppercase font-bold">
-                                    <tr><th className="px-6 py-4">Insumo</th><th className="px-6 py-4">Categoria</th><th className="px-6 py-4 text-center">Stock Atual</th><th className="px-6 py-4 text-center">Mínimo</th><th className="px-6 py-4 text-center">Ações</th></tr>
+                                    <tr><th className="px-6 py-4">Insumo</th><th className="px-6 py-4">Categoria</th><th className="px-6 py-4 text-center">Estoque Atual</th><th className="px-6 py-4 text-center">Mínimo</th><th className="px-6 py-4 text-center">Ações</th></tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-50">
                                     {filteredItems.map(item => (
@@ -384,12 +430,12 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                                 <div><label className="block text-sm font-bold text-gray-700 mb-1">Preço de Custo</label><input type="number" value={itemFormData.costPrice} onChange={e => setItemFormData({...itemFormData, costPrice: parseFloat(e.target.value)})} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none" /></div>
                             </div>
                             <div className="grid grid-cols-3 gap-4 pt-2">
-                                <div><label className="block text-sm font-bold text-gray-700 mb-1">Stock Atual</label><input type="number" value={itemFormData.currentStock} onChange={e => setItemFormData({...itemFormData, currentStock: parseFloat(e.target.value)})} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none font-bold text-gray-600 bg-gray-50"/></div>
+                                <div><label className="block text-sm font-bold text-gray-700 mb-1">Estoque Atual</label><input type="number" value={itemFormData.currentStock} onChange={e => setItemFormData({...itemFormData, currentStock: parseFloat(e.target.value)})} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none font-bold text-gray-600 bg-gray-50"/></div>
                                 <div><label className="block text-sm font-bold text-gray-700 mb-1">Mínimo</label><input type="number" value={itemFormData.minStock} onChange={e => setItemFormData({...itemFormData, minStock: parseFloat(e.target.value)})} className="w-full px-4 py-3 rounded-xl border border-gray-200 outline-none"/></div>
                                 <div><label className="block text-sm font-black text-green-700 mb-1">+ Nova Entrada</label><input type="number" value={stockEntry} onChange={e => setStockEntry(e.target.value)} className="w-full px-4 py-3 rounded-xl border-2 border-green-300 bg-green-50 outline-none font-black text-green-700" placeholder="Qtd..."/></div>
                             </div>
                         </div>
-                        <div className="p-6 bg-gray-50 flex gap-3"><button onClick={() => setIsItemModalOpen(false)} className="flex-1 py-3 font-bold text-gray-500 hover:bg-gray-200 rounded-xl">Cancelar</button><button onClick={handleSaveItem} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 flex items-center justify-center gap-2"><Save className="w-5 h-5"/> Guardar</button></div>
+                        <div className="p-6 bg-gray-50 flex gap-3"><button onClick={() => setIsItemModalOpen(false)} className="flex-1 py-3 font-bold text-gray-500 hover:bg-gray-200 rounded-xl">Cancelar</button><button onClick={handleSaveItem} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 flex items-center justify-center gap-2"><Save className="w-5 h-5"/> Salvar</button></div>
                     </div>
                 </div>
             )}
@@ -456,7 +502,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                         </div>
                         <div className="p-6 bg-gray-50 flex gap-3">
                             <button onClick={() => setIsRecipeModalOpen(false)} className="flex-1 py-3 font-bold text-gray-500 hover:bg-gray-200 rounded-xl">Cancelar</button>
-                            <button onClick={handleSaveRecipe} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 flex items-center justify-center gap-2"><Save className="w-5 h-5"/> Guardar Ficha</button>
+                            <button onClick={handleSaveRecipe} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 flex items-center justify-center gap-2"><Save className="w-5 h-5"/> Salvar Ficha</button>
                         </div>
                     </div>
                 </div>
