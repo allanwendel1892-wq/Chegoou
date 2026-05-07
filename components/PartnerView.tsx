@@ -1073,6 +1073,9 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                           }
                       }
                   }
+              } // <--- ESTA CHAVE ESTAVA FALTANDO (Fecha o for do item)
+          } // <--- ESTA CHAVE ESTAVA FALTANDO (Fecha o if compositions)
+      } // <--- ESTA CHAVE ESTAVA FALTANDO (Fecha o if do delivered)
       
       // Atualiza o card visualmente
       updateOrderStatus(orderId, status);
