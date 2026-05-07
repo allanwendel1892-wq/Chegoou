@@ -18,30 +18,28 @@ const InventoryModule = () => {
     useEffect(() => {
         const fetchInventory = async () => {
             const { data } = await supabase.from('inventory_items').select('*').order('name');
-            if (data) setInventoryItems(data as InventoryItem[]);
+            if (data) {
+                // TRADUÇÃO CRÍTICA: Mapeando os dados do banco (snake_case) para a UI (camelCase)
+                const mappedData: InventoryItem[] = data.map((item: any) => ({
+                    id: item.id,
+                    name: item.name,
+                    category: item.category,
+                    unit: item.unit,
+                    currentStock: item.current_stock || 0,
+                    minStock: item.min_stock || 0,
+                    costPrice: item.cost_price || 0
+                }));
+                setInventoryItems(mappedData);
+            }
         };
         fetchInventory();
     }, []);
 
+    // O setItems agora só atualiza a tela local. O salvamento no DB ocorre no próprio InventoryView.
     return (
         <InventoryView 
             items={inventoryItems} 
-            setItems={(newItems) => {
-                setInventoryItems(newItems);
-                if (typeof newItems === 'function') return;
-                
-                newItems.forEach(async (item) => {
-                    await supabase.from('inventory_items').upsert({
-                        id: item.id,
-                        name: item.name,
-                        category: item.category,
-                        unit: item.unit,
-                        current_stock: item.currentStock,
-                        min_stock: item.minStock,
-                        cost_price: item.costPrice
-                    });
-                });
-            }} 
+            setItems={setInventoryItems} 
         />
     );
 };
@@ -1047,16 +1045,21 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                       const originalProduct = products.find(p => p.name === item.productName);
                       
                       for (const opt of item.selectedOptions) {
-                          const groupName = (opt as any).groupName;
+                          const groupName = (opt as any).groupName || '';
                           const optName = opt.optionName || opt.name;
                           
                           // A MÁGICA DA FRAÇÃO (Matemática da Pizza Meio a Meio)
-                          const group = originalProduct?.groups?.find(g => g.name === groupName);
+                          const originalGroup = originalProduct?.groups?.find(g => g.name === groupName || g.name.toUpperCase() === groupName);
+                          const isPizza = (item as any).pricingMode === 'pizza' || originalProduct?.pricingMode === 'pizza';
+                          
+                          // Aplica a mesma regra visual: Divide se a flag estiver ativa OU se for modo pizza e o grupo for de sabores
+                          const divideThisGroup = originalGroup?.dividePrice || (isPizza && groupName.toLowerCase().includes('sabor'));
+                          
                           // Quantos sabores ele escolheu nesse mesmo grupo?
                           const selectedInThisGroup = item.selectedOptions.filter(o => (o as any).groupName === groupName).length;
                           
-                          // Se o grupo é de dividir preço (sabores), divide a quantidade (Ex: 2 sabores = multiplica a receita por 1/2)
-                          const fraction = group?.dividePrice && selectedInThisGroup > 0 ? (1 / selectedInThisGroup) : 1;
+                          // Aplica a fração correta
+                          const fraction = divideThisGroup && selectedInThisGroup > 0 ? (1 / selectedInThisGroup) : 1;
                           
                           // Busca as receitas cadastradas com este nome exato
                           const optComps = compositions.filter(c => c.reference_id === optName);
@@ -1070,9 +1073,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                           }
                       }
                   }
-              }
-          }
-      }
       
       // Atualiza o card visualmente
       updateOrderStatus(orderId, status);
