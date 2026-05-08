@@ -3,18 +3,19 @@ import { Plus, Search, Edit, Trash2, AlertTriangle, ShoppingCart, Package, X, Sa
 import { supabase } from '../services/supabaseClient';
 
 // ============================================================================
-// MOTOR AUTÔNOMO DE BAIXA DE ESTOQUE (RADAR DEFINITIVO + DETETOR DE FRAÇÕES)
+// MOTOR AUTÔNOMO DE BAIXA DE ESTOQUE (BLINDADO CONTRA MULTI-ABAS E FRAÇÕES)
 // ============================================================================
 
 let isPollingActive = false;
 let isFirstRadarScan = true;
 let memCache = new Set<string>(); 
 
+const normalize = (str: any) => String(str || '').trim().toLowerCase();
+
 const processOrderDeduction = async (orderItems: any[]) => {
     console.log("🔥 [ESTOQUE] Iniciando processo de baixa. Itens recebidos:", orderItems);
     try {
         const { data: compositions, error: compError } = await supabase.from('compositions').select('*');
-        
         if (compError || !compositions || compositions.length === 0) return;
 
         const deductions: Record<string, number> = {};
@@ -26,67 +27,61 @@ const processOrderDeduction = async (orderItems: any[]) => {
 
         for (const item of orderItems) {
             // 1. Abate Produto Principal (A Massa, a Caixa de Pizza, etc)
-            const mainComps = compositions.filter(c => c.reference_id === item.productName);
+            const mainComps = compositions.filter(c => normalize(c.reference_id) === normalize(item.productName));
             for (const comp of mainComps) {
-                addDeduction(comp.inventory_item_id, comp.amount_needed * item.quantity);
+                addDeduction(comp.inventory_item_id, Number(comp.amount_needed) * Number(item.quantity));
             }
 
-            // 2. Abate Sabores e Lógica de Fração (Onde mora o segredo)
+            // 2. Abate Sabores e Lógica de Fração Rigorosa
             const optsArray = item.selectedOptions?.length ? item.selectedOptions : (item.options || []);
             
             if (optsArray.length > 0) {
                 for (const opt of optsArray) {
-                    const optName = opt.optionName || opt.name;
                     let fraction = 1;
-
-                    // O NOME CRU: Transforma tudo em minúsculas para facilitar a busca (ex: "1/2 calabresa")
-                    const rawName = String(opt.name || '').toLowerCase();
+                    const rawName = normalize(opt.name);
+                    const optName = normalize(opt.optionName);
                     
                     // =================================================================
-                    // ESTRATÉGIA 1 (BLINDADA): Deteção explícita de texto no nome
-                    // Se estiver escrito 1/2 ou meia, é 50% e ponto final.
+                    // CÁLCULO DE FRAÇÃO
                     // =================================================================
-                    if (rawName.includes("1/2") || rawName.includes("meia")) {
-                        fraction = 0.5;
-                    } else if (rawName.includes("1/3")) {
-                        fraction = 1 / 3;
-                    } else if (rawName.includes("1/4")) {
-                        fraction = 0.25;
-                    } 
-                    // =================================================================
-                    // ESTRATÉGIA 2 (FALLBACK): Matemática do JSON (dividePrice)
-                    // =================================================================
+                    if (rawName.includes("1/2") || rawName.includes("meia")) fraction = 0.5;
+                    else if (rawName.includes("1/3")) fraction = 1 / 3;
+                    else if (rawName.includes("1/4")) fraction = 0.25;
                     else if (opt.dividePrice === true || String(opt.dividePrice) === 'true') {
                         const countInGroup = optsArray.filter((o: any) => 
                             (o.groupName === opt.groupName || o.groupIndex === opt.groupIndex) && 
                             (o.dividePrice === true || String(o.dividePrice) === 'true')
                         ).length;
-                        
-                        if (countInGroup > 0) {
-                            fraction = 1 / countInGroup;
-                        }
+                        if (countInGroup > 0) fraction = 1 / countInGroup;
                     }
 
-                    console.log(`🍕 [ESTOQUE] Sabor: ${optName} | Fração calculada: ${fraction}`);
+                    // =================================================================
+                    // MATCH DE RECEITA À PROVA DE DUPLICAÇÕES
+                    // =================================================================
+                    let matchedRecipes = compositions.filter(c => normalize(c.reference_id) === rawName);
+                    
+                    // Se não achou por "1/2 calabresa", busca pelo nome base "calabresa"
+                    if (matchedRecipes.length === 0 && optName) {
+                        matchedRecipes = compositions.filter(c => normalize(c.reference_id) === optName);
+                    }
 
-                    // Busca a receita (tanto se estiver salva como "Calabresa" ou "1/2 Calabresa")
-                    const optComps = compositions.filter(c => c.reference_id === optName || c.reference_id === opt.name);
-                    for (const comp of optComps) {
-                        // Multiplica a quantidade necessária x quantidade de pizzas x a fração (0.5)
-                        addDeduction(comp.inventory_item_id, comp.amount_needed * item.quantity * fraction);
+                    for (const comp of matchedRecipes) {
+                        const deductionValue = Number(comp.amount_needed) * Number(item.quantity) * Number(fraction);
+                        console.log(`🍕 Sabor Encontrado: ${opt.name} | Receita Aplicada: ${comp.reference_id} | Abatimento Matemático: ${comp.amount_needed} * ${item.quantity} * ${fraction} = ${deductionValue}`);
+                        addDeduction(comp.inventory_item_id, deductionValue);
                     }
                 }
             }
         }
 
-        // Executa todas as deduções consolidadas no banco de dados
+        // Executa todas as deduções no banco de dados com valores precisos
         for (const [invId, amountToDeduct] of Object.entries(deductions)) {
             if (amountToDeduct > 0) {
                 const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', invId).single();
                 if (inv) {
                     const novoEstoque = Number(inv.current_stock) - amountToDeduct;
                     await supabase.from('inventory_items').update({ current_stock: novoEstoque }).eq('id', invId);
-                    console.log(`✅ [ESTOQUE] Insumo ${invId} abatido em ${amountToDeduct}. Novo Saldo: ${novoEstoque}`);
+                    console.log(`✅ [ESTOQUE] Insumo atualizado! Abatido: ${amountToDeduct}. Novo Saldo: ${novoEstoque}`);
                 }
             }
         }
@@ -102,9 +97,7 @@ if (!isPollingActive) {
 
     try {
         const savedCache = localStorage.getItem('inventory_processed_orders');
-        if (savedCache) {
-            memCache = new Set(JSON.parse(savedCache));
-        }
+        if (savedCache) memCache = new Set(JSON.parse(savedCache));
     } catch (e) {}
 
     setInterval(async () => {
@@ -117,22 +110,34 @@ if (!isPollingActive) {
             if (error || !completedOrders) return;
 
             if (isFirstRadarScan) {
-                completedOrders.forEach(order => memCache.add(order.id));
-                localStorage.setItem('inventory_processed_orders', JSON.stringify(Array.from(memCache)));
+                const liveCache = JSON.parse(localStorage.getItem('inventory_processed_orders') || '[]');
+                completedOrders.forEach(order => {
+                    memCache.add(order.id);
+                    if (!liveCache.includes(order.id)) liveCache.push(order.id);
+                });
+                localStorage.setItem('inventory_processed_orders', JSON.stringify(liveCache));
                 isFirstRadarScan = false;
-                console.log(`🛡️ [ESTOQUE] Escudo ativado! ${memCache.size} pedidos do histórico isolados.`);
+                console.log(`🛡️ [ESTOQUE] Escudo ativado! ${memCache.size} pedidos antigos protegidos.`);
                 return;
             }
 
             for (const order of completedOrders) {
                 if (!memCache.has(order.id)) {
-                    console.log(`🚚 [ESTOQUE] NOVO PEDIDO ENTREGUE DETECTADO: ${order.id}`);
-                    
+                    // CADEADO CONTRA MÚLTIPLAS ABAS/DISPOSITIVOS (Lê o momento exato do clique)
+                    const liveCache = JSON.parse(localStorage.getItem('inventory_processed_orders') || '[]');
+                    if (liveCache.includes(order.id)) {
+                        memCache.add(order.id); // Outra aba já resolveu. Apenas atualiza a memória local.
+                        continue; 
+                    }
+
+                    // TRANCANDO A PORTA: Salva imediatamente antes de calcular para bloquear as outras abas
+                    liveCache.push(order.id);
+                    localStorage.setItem('inventory_processed_orders', JSON.stringify(liveCache));
+                    memCache.add(order.id);
+
+                    console.log(`🚚 [ESTOQUE] NOVO PEDIDO EXCLUSIVO CAPTURADO: ${order.id}`);
                     const orderItems = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
                     await processOrderDeduction(orderItems);
-
-                    memCache.add(order.id);
-                    localStorage.setItem('inventory_processed_orders', JSON.stringify(Array.from(memCache)));
                 }
             }
         } catch (err) {
@@ -211,7 +216,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
         return () => clearInterval(interval);
     }, [setItems]);
 
-    // Lógica Insumos
     const shoppingList = useMemo(() => items.filter(item => Number(item.currentStock) <= Number(item.minStock)), [items]);
     const filteredItems = items.filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase()) || item.category.toLowerCase().includes(searchTerm.toLowerCase()));
 
@@ -258,7 +262,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
         }
     };
 
-    // Lógica Receitas
     const recipesGrouped = useMemo(() => {
         const groups: Record<string, Composition[]> = {};
         compositions.forEach(c => {
@@ -323,7 +326,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
                 <div>
                     <h1 className="text-3xl font-black text-gray-900 flex items-center gap-3"><Package className="w-8 h-8 text-red-600" /> Controle de Estoque</h1>
-                    <p className="text-gray-500 font-medium">Gerencie insumos e fichas técnicas</p>
+                    <p className="text-gray-500 font-medium">Gerencie insumos e fichas técnicas da Forneria 90</p>
                 </div>
                 
                 <div className="flex bg-gray-100 p-1 rounded-xl">
@@ -474,7 +477,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                                     placeholder="Ex: Calabresa, Guaraná 1L"
                                     disabled={!!editingRecipeName && recipesGrouped[editingRecipeName] !== undefined}
                                 />
-                                <p className="text-xs text-gray-500 mt-1">Este nome deve ser exatamente igual ao que sai no pedido.</p>
+                                <p className="text-xs text-gray-500 mt-1">Este nome deve ser exatamente igual ao que sai no pedido (Apenas o nome base, ex: Calabresa).</p>
                             </div>
 
                             <div className="pt-4 border-t border-gray-100">
