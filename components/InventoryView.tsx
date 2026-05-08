@@ -3,13 +3,12 @@ import { Plus, Search, Edit, Trash2, AlertTriangle, ShoppingCart, Package, X, Sa
 import { supabase } from '../services/supabaseClient';
 
 // ============================================================================
-// MOTOR AUTÔNOMO DE BAIXA DE ESTOQUE (RADAR DEFINITIVO)
-// Sem limite de busca. Memória infinita para não duplicar nem esquecer nada.
+// MOTOR AUTÔNOMO DE BAIXA DE ESTOQUE (RADAR DEFINITIVO + DETETOR DE FRAÇÕES)
 // ============================================================================
 
 let isPollingActive = false;
 let isFirstRadarScan = true;
-let memCache = new Set<string>(); // Usa um Set para buscas super rápidas e memória infinita
+let memCache = new Set<string>(); 
 
 const processOrderDeduction = async (orderItems: any[]) => {
     console.log("🔥 [ESTOQUE] Iniciando processo de baixa. Itens recebidos:", orderItems);
@@ -26,41 +25,68 @@ const processOrderDeduction = async (orderItems: any[]) => {
         };
 
         for (const item of orderItems) {
-            // Abate Produto Principal
+            // 1. Abate Produto Principal (A Massa, a Caixa de Pizza, etc)
             const mainComps = compositions.filter(c => c.reference_id === item.productName);
             for (const comp of mainComps) {
                 addDeduction(comp.inventory_item_id, comp.amount_needed * item.quantity);
             }
 
-            // Abate Sabores e Lógica de Fração
-            if (item.selectedOptions && item.selectedOptions.length > 0) {
-                for (const opt of item.selectedOptions) {
+            // 2. Abate Sabores e Lógica de Fração (Onde mora o segredo)
+            const optsArray = item.selectedOptions?.length ? item.selectedOptions : (item.options || []);
+            
+            if (optsArray.length > 0) {
+                for (const opt of optsArray) {
                     const optName = opt.optionName || opt.name;
-                    const groupName = opt.groupName;
                     let fraction = 1;
 
-                    if (opt.dividePrice === true) {
-                        const countInGroup = item.selectedOptions.filter((o: any) => 
-                            o.groupName === groupName && o.dividePrice === true
+                    // O NOME CRU: Transforma tudo em minúsculas para facilitar a busca (ex: "1/2 calabresa")
+                    const rawName = String(opt.name || '').toLowerCase();
+                    
+                    // =================================================================
+                    // ESTRATÉGIA 1 (BLINDADA): Deteção explícita de texto no nome
+                    // Se estiver escrito 1/2 ou meia, é 50% e ponto final.
+                    // =================================================================
+                    if (rawName.includes("1/2") || rawName.includes("meia")) {
+                        fraction = 0.5;
+                    } else if (rawName.includes("1/3")) {
+                        fraction = 1 / 3;
+                    } else if (rawName.includes("1/4")) {
+                        fraction = 0.25;
+                    } 
+                    // =================================================================
+                    // ESTRATÉGIA 2 (FALLBACK): Matemática do JSON (dividePrice)
+                    // =================================================================
+                    else if (opt.dividePrice === true || String(opt.dividePrice) === 'true') {
+                        const countInGroup = optsArray.filter((o: any) => 
+                            (o.groupName === opt.groupName || o.groupIndex === opt.groupIndex) && 
+                            (o.dividePrice === true || String(o.dividePrice) === 'true')
                         ).length;
-                        if (countInGroup > 0) fraction = 1 / countInGroup;
+                        
+                        if (countInGroup > 0) {
+                            fraction = 1 / countInGroup;
+                        }
                     }
 
-                    const optComps = compositions.filter(c => c.reference_id === optName);
+                    console.log(`🍕 [ESTOQUE] Sabor: ${optName} | Fração calculada: ${fraction}`);
+
+                    // Busca a receita (tanto se estiver salva como "Calabresa" ou "1/2 Calabresa")
+                    const optComps = compositions.filter(c => c.reference_id === optName || c.reference_id === opt.name);
                     for (const comp of optComps) {
+                        // Multiplica a quantidade necessária x quantidade de pizzas x a fração (0.5)
                         addDeduction(comp.inventory_item_id, comp.amount_needed * item.quantity * fraction);
                     }
                 }
             }
         }
 
+        // Executa todas as deduções consolidadas no banco de dados
         for (const [invId, amountToDeduct] of Object.entries(deductions)) {
             if (amountToDeduct > 0) {
                 const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', invId).single();
                 if (inv) {
                     const novoEstoque = Number(inv.current_stock) - amountToDeduct;
                     await supabase.from('inventory_items').update({ current_stock: novoEstoque }).eq('id', invId);
-                    console.log(`✅ [ESTOQUE] Insumo ${invId} atualizado para ${novoEstoque}`);
+                    console.log(`✅ [ESTOQUE] Insumo ${invId} abatido em ${amountToDeduct}. Novo Saldo: ${novoEstoque}`);
                 }
             }
         }
@@ -74,7 +100,6 @@ if (!isPollingActive) {
     console.log("📡 [ESTOQUE] Ligando o Radar Definitivo...");
     isPollingActive = true;
 
-    // Carrega a memória do que já foi abatido em sessões passadas
     try {
         const savedCache = localStorage.getItem('inventory_processed_orders');
         if (savedCache) {
@@ -84,8 +109,6 @@ if (!isPollingActive) {
 
     setInterval(async () => {
         try {
-            // BUSCA ABSOLUTA: Pega TODOS os pedidos que estejam finalizados, sem limite.
-            // Ignora maiúsculas/minúsculas colocando todas as variações possíveis.
             const { data: completedOrders, error } = await supabase
                 .from('orders')
                 .select('id, items, status')
@@ -93,29 +116,21 @@ if (!isPollingActive) {
 
             if (error || !completedOrders) return;
 
-            // ==========================================
-            // ESCUDO DE INICIALIZAÇÃO
-            // ==========================================
             if (isFirstRadarScan) {
                 completedOrders.forEach(order => memCache.add(order.id));
                 localStorage.setItem('inventory_processed_orders', JSON.stringify(Array.from(memCache)));
                 isFirstRadarScan = false;
                 console.log(`🛡️ [ESTOQUE] Escudo ativado! ${memCache.size} pedidos do histórico isolados.`);
-                return; // Para aqui. Não abate nada.
+                return;
             }
 
-            // ==========================================
-            // ROTINA DE ABATIMENTO (Apenas o que é Novo)
-            // ==========================================
             for (const order of completedOrders) {
-                // Se o ID do pedido NÃO está na nossa memória, é porque acabou de ser entregue!
                 if (!memCache.has(order.id)) {
                     console.log(`🚚 [ESTOQUE] NOVO PEDIDO ENTREGUE DETECTADO: ${order.id}`);
                     
                     const orderItems = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
                     await processOrderDeduction(orderItems);
 
-                    // Adiciona na memória e salva no navegador para não abater em duplicidade
                     memCache.add(order.id);
                     localStorage.setItem('inventory_processed_orders', JSON.stringify(Array.from(memCache)));
                 }
@@ -192,7 +207,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
         };
 
         fetchData();
-        const interval = setInterval(fetchData, 5000); // Polling visual a cada 5s
+        const interval = setInterval(fetchData, 5000); 
         return () => clearInterval(interval);
     }, [setItems]);
 
