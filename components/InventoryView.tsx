@@ -3,12 +3,10 @@ import { Plus, Search, Edit, Trash2, AlertTriangle, ShoppingCart, Package, X, Sa
 import { supabase } from '../services/supabaseClient';
 
 // ============================================================================
-// MOTOR AUTÔNOMO DE BAIXA DE ESTOQUE (BLINDADO CONTRA MULTI-ABAS E FRAÇÕES)
+// MOTOR AUTÔNOMO DE BAIXA DE ESTOQUE (LOCK ATÔMICO NO SUPABASE)
 // ============================================================================
 
 let isPollingActive = false;
-let isFirstRadarScan = true;
-let memCache = new Set<string>(); 
 
 const normalize = (str: any) => String(str || '').trim().toLowerCase();
 
@@ -26,7 +24,7 @@ const processOrderDeduction = async (orderItems: any[]) => {
         };
 
         for (const item of orderItems) {
-            // 1. Abate Produto Principal (A Massa, a Caixa de Pizza, etc)
+            // 1. Abate Produto Principal
             const mainComps = compositions.filter(c => normalize(c.reference_id) === normalize(item.productName));
             for (const comp of mainComps) {
                 addDeduction(comp.inventory_item_id, Number(comp.amount_needed) * Number(item.quantity));
@@ -41,9 +39,6 @@ const processOrderDeduction = async (orderItems: any[]) => {
                     const rawName = normalize(opt.name);
                     const optName = normalize(opt.optionName);
                     
-                    // =================================================================
-                    // CÁLCULO DE FRAÇÃO
-                    // =================================================================
                     if (rawName.includes("1/2") || rawName.includes("meia")) fraction = 0.5;
                     else if (rawName.includes("1/3")) fraction = 1 / 3;
                     else if (rawName.includes("1/4")) fraction = 0.25;
@@ -55,12 +50,7 @@ const processOrderDeduction = async (orderItems: any[]) => {
                         if (countInGroup > 0) fraction = 1 / countInGroup;
                     }
 
-                    // =================================================================
-                    // MATCH DE RECEITA À PROVA DE DUPLICAÇÕES
-                    // =================================================================
                     let matchedRecipes = compositions.filter(c => normalize(c.reference_id) === rawName);
-                    
-                    // Se não achou por "1/2 calabresa", busca pelo nome base "calabresa"
                     if (matchedRecipes.length === 0 && optName) {
                         matchedRecipes = compositions.filter(c => normalize(c.reference_id) === optName);
                     }
@@ -74,7 +64,7 @@ const processOrderDeduction = async (orderItems: any[]) => {
             }
         }
 
-        // Executa todas as deduções no banco de dados com valores precisos
+        // Executa todas as deduções consolidadas no banco
         for (const [invId, amountToDeduct] of Object.entries(deductions)) {
             if (amountToDeduct > 0) {
                 const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', invId).single();
@@ -90,55 +80,39 @@ const processOrderDeduction = async (orderItems: any[]) => {
     }
 };
 
-// O RADAR: Roda a cada 5 segundos
+// O RADAR: Roda a cada 5 segundos buscando apenas o que o Postgres disser que é novo
 if (!isPollingActive) {
-    console.log("📡 [ESTOQUE] Ligando o Radar Definitivo...");
+    console.log("📡 [ESTOQUE] Ligando o Radar com Lock Atômico no Postgres...");
     isPollingActive = true;
-
-    try {
-        const savedCache = localStorage.getItem('inventory_processed_orders');
-        if (savedCache) memCache = new Set(JSON.parse(savedCache));
-    } catch (e) {}
 
     setInterval(async () => {
         try {
-            const { data: completedOrders, error } = await supabase
+            const { data: pendingStockOrders, error } = await supabase
                 .from('orders')
                 .select('id, items, status')
-                .in('status', ['delivered', 'completed', 'concluido', 'entregue', 'Concluído', 'Entregue', 'concluído', 'Delivered']);
+                .in('status', ['delivered', 'completed', 'concluido', 'entregue', 'Concluído', 'Entregue', 'concluído', 'Delivered'])
+                .eq('stock_processed', false)
+                .limit(10);
 
-            if (error || !completedOrders) return;
+            if (error || !pendingStockOrders || pendingStockOrders.length === 0) return;
 
-            if (isFirstRadarScan) {
-                const liveCache = JSON.parse(localStorage.getItem('inventory_processed_orders') || '[]');
-                completedOrders.forEach(order => {
-                    memCache.add(order.id);
-                    if (!liveCache.includes(order.id)) liveCache.push(order.id);
-                });
-                localStorage.setItem('inventory_processed_orders', JSON.stringify(liveCache));
-                isFirstRadarScan = false;
-                console.log(`🛡️ [ESTOQUE] Escudo ativado! ${memCache.size} pedidos antigos protegidos.`);
-                return;
-            }
-
-            for (const order of completedOrders) {
-                if (!memCache.has(order.id)) {
-                    // CADEADO CONTRA MÚLTIPLAS ABAS/DISPOSITIVOS (Lê o momento exato do clique)
-                    const liveCache = JSON.parse(localStorage.getItem('inventory_processed_orders') || '[]');
-                    if (liveCache.includes(order.id)) {
-                        memCache.add(order.id); // Outra aba já resolveu. Apenas atualiza a memória local.
-                        continue; 
-                    }
-
-                    // TRANCANDO A PORTA: Salva imediatamente antes de calcular para bloquear as outras abas
-                    liveCache.push(order.id);
-                    localStorage.setItem('inventory_processed_orders', JSON.stringify(liveCache));
-                    memCache.add(order.id);
-
-                    console.log(`🚚 [ESTOQUE] NOVO PEDIDO EXCLUSIVO CAPTURADO: ${order.id}`);
-                    const orderItems = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
-                    await processOrderDeduction(orderItems);
+            for (const order of pendingStockOrders) {
+                // LOCK ATÔMICO: Apenas 1 dispositivo conseguirá fazer este update e receber a linha de volta
+                const { data: lockData, error: lockError } = await supabase
+                    .from('orders')
+                    .update({ stock_processed: true })
+                    .eq('id', order.id)
+                    .eq('stock_processed', false)
+                    .select('id');
+                
+                if (lockError || !lockData || lockData.length === 0) {
+                    console.log(`🔒 [ESTOQUE] Pedido ${order.id} abortado. Outro aparelho já fez a baixa no banco.`);
+                    continue; 
                 }
+
+                console.log(`🚚 [ESTOQUE] NOVO PEDIDO EXCLUSIVO CAPTURADO: ${order.id}`);
+                const orderItems = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
+                await processOrderDeduction(orderItems);
             }
         } catch (err) {
             console.error("❌ [ESTOQUE] Erro interno no Radar:", err);
@@ -176,7 +150,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
     const [activeTab, setActiveTab] = useState<'insumos' | 'receitas'>('insumos');
     const [searchTerm, setSearchTerm] = useState('');
     
-    // Insumos States
     const [isItemModalOpen, setIsItemModalOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
     const [itemFormData, setItemFormData] = useState<Partial<InventoryItem>>({
@@ -184,7 +157,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
     });
     const [stockEntry, setStockEntry] = useState<string>('');
 
-    // Receitas States
     const [compositions, setCompositions] = useState<Composition[]>([]);
     const [isRecipeModalOpen, setIsRecipeModalOpen] = useState(false);
     const [editingRecipeName, setEditingRecipeName] = useState('');
@@ -326,7 +298,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
                 <div>
                     <h1 className="text-3xl font-black text-gray-900 flex items-center gap-3"><Package className="w-8 h-8 text-red-600" /> Controle de Estoque</h1>
-                    <p className="text-gray-500 font-medium">Gerencie insumos e fichas técnicas da Forneria 90</p>
+                    <p className="text-gray-500 font-medium">Gerencie insumos e fichas técnicas</p>
                 </div>
                 
                 <div className="flex bg-gray-100 p-1 rounded-xl">
