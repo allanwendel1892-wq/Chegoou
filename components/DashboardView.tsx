@@ -33,7 +33,7 @@ interface DashboardViewProps {
   inventoryItems: InventoryItem[]; 
 }
 
-const MARGEM_SEGURANCA = 1.20; 
+const MARGEM_SEGURANCA = 1.20; // 20% de margem
 
 const StatCard = ({ title, value, icon: Icon, trend, trendValue, trendDesc, colorClass }: any) => {
   const isPositive = trend === 'up';
@@ -62,39 +62,55 @@ const StatCard = ({ title, value, icon: Icon, trend, trendValue, trendDesc, colo
 const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = [], compositions = [], inventoryItems = [] }) => {
   const [timeRange, setTimeRange] = useState('7days');
 
-  // FILTRO CENTRAL DE DATAS (Com extração robusta de timestamps)
-  const { filteredOrders, filteredSales } = useMemo(() => {
+  // FILTRO CENTRAL E CONTAGEM DE DIAS PARA MÉDIA
+  const { filteredOrders, filteredSales, diasNoFiltro } = useMemo(() => {
     const now = new Date();
-    let dataLimite = new Date(0); // Para 'all', limite é 1970 (pega tudo)
+    let dataLimite = new Date(0); 
+    let dias = 7;
 
     if (timeRange === '7days') {
       dataLimite = new Date();
       dataLimite.setDate(now.getDate() - 7);
       dataLimite.setHours(0, 0, 0, 0);
+      dias = 7;
     } else if (timeRange === '15days') {
       dataLimite = new Date();
       dataLimite.setDate(now.getDate() - 15);
       dataLimite.setHours(0, 0, 0, 0);
+      dias = 15;
     } else if (timeRange === 'month') {
       dataLimite = new Date(now.getFullYear(), now.getMonth(), 1); 
+      // Conta exatamente quantos dias se passaram neste mês até hoje para não distorcer a média
+      dias = Math.max(1, Math.ceil((now.getTime() - dataLimite.getTime()) / (1000 * 60 * 60 * 24)));
+    } else if (timeRange === 'all') {
+      dataLimite = new Date(0);
+      dias = 30; // Evita divisão por zero. A lógica abaixo corrige se houver pedidos.
     }
 
-    // Função à prova de balas para achar a data do pedido
+    // Leitura BLINDADA de datas
     const getSafeDate = (item: any) => {
-      if (item.created_at) return new Date(item.created_at);
-      if (item.date) return new Date(item.date);
-      // Fallback: Tenta extrair a data do formato do ID (ex: ord-1777179244109)
+      const rawDate = item.created_at || item.createdAt || item.date;
+      if (rawDate) {
+        const parsed = new Date(rawDate);
+        if (!isNaN(parsed.getTime())) return parsed;
+      }
       if (item.id && typeof item.id === 'string' && item.id.includes('-')) {
         const tsMatch = item.id.match(/\d{13}/);
         if (tsMatch) return new Date(parseInt(tsMatch[0]));
       }
-      return new Date(); 
+      return new Date(0); // Retorna 1970 em vez de "Hoje" para não poluir os filtros curtos
     };
 
     const filteredOrd = orders.filter(order => getSafeDate(order) >= dataLimite);
     const filteredSD = salesData.filter(sale => getSafeDate(sale) >= dataLimite);
 
-    return { filteredOrders: filteredOrd, filteredSales: filteredSD };
+    // Se for 'all', calcula a quantidade de dias entre o pedido mais antigo e hoje
+    if (timeRange === 'all' && filteredOrd.length > 0) {
+      const oldestDate = Math.min(...filteredOrd.map(o => getSafeDate(o).getTime()));
+      dias = Math.max(1, Math.ceil((now.getTime() - oldestDate) / (1000 * 60 * 60 * 24)));
+    }
+
+    return { filteredOrders: filteredOrd, filteredSales: filteredSD, diasNoFiltro: dias };
   }, [orders, salesData, timeRange]);
 
   // 1. Cálculos de Visão Geral
@@ -102,13 +118,13 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = 
     const totalRevenue = filteredSales.reduce((acc, curr) => acc + curr.revenue, 0);
     const totalOrders = filteredSales.reduce((acc, curr) => acc + curr.ordersCount, 0);
     const aiSalesCount = filteredOrders.filter(o => o.id && o.id.startsWith('ord-ia')).length;
-    const manualSalesCount = totalOrders - aiSalesCount;
+    const manualSalesCount = filteredOrders.length - aiSalesCount; // Usando length do array filtrado para maior precisão
     const avgTicket = totalOrders > 0 ? (totalRevenue / totalOrders) : 0;
 
     return { totalRevenue, totalOrders, aiSalesCount, manualSalesCount, avgTicket };
   }, [filteredSales, filteredOrders]);
 
-  // 2. MOTOR DINÂMICO DE ESTOQUE
+  // 2. MOTOR DINÂMICO DE ESTOQUE (Corrigido para Média Diária -> Projeção de 7 Dias)
   const previsaoInsumos = useMemo(() => {
     const demandaSabores: Record<string, number> = {};
 
@@ -142,13 +158,21 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = 
     const listaFinal = [];
     let custoTotalInvestimento = 0;
 
-    Object.entries(consumoInsumosBase).forEach(([inventoryId, consumo]) => {
+    Object.entries(consumoInsumosBase).forEach(([inventoryId, consumoTotalNoFiltro]) => {
       const itemEstoque = inventoryItems.find(i => i.id === inventoryId);
       if (!itemEstoque) return; 
 
-      const metaSemanal = consumo * MARGEM_SEGURANCA;
+      // A MATEMÁTICA CORRETA AQUI:
+      // 1. Descobre a média de consumo por dia
+      const consumoDiario = consumoTotalNoFiltro / diasNoFiltro;
       
-      const faltaComprar = Math.max(0, metaSemanal - itemEstoque.current_stock);
+      // 2. Projeta quanto vai precisar para 7 dias corridos (Meta padrão de reposição)
+      const projecao7Dias = consumoDiario * 7;
+      
+      // 3. Adiciona a margem de segurança de 20%
+      const metaConsumoSemanal = projecao7Dias * MARGEM_SEGURANCA;
+      
+      const faltaComprar = Math.max(0, metaConsumoSemanal - itemEstoque.current_stock);
       const custoEstimado = faltaComprar * Number(itemEstoque.cost_price);
 
       custoTotalInvestimento += custoEstimado;
@@ -158,8 +182,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = 
         nome: itemEstoque.name,
         unidade: itemEstoque.unit,
         estoqueAtual: Number(itemEstoque.current_stock),
-        consumoBase: consumo,
-        metaConsumo: metaSemanal,
+        consumoDiario: consumoDiario,
+        metaConsumo: metaConsumoSemanal,
         faltaComprar: faltaComprar,
         custoEstimado: custoEstimado
       });
@@ -170,7 +194,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = 
       custoTotalInvestimento
     };
 
-  }, [filteredOrders, compositions, inventoryItems]);
+  }, [filteredOrders, compositions, inventoryItems, diasNoFiltro]);
 
   return (
     <div className="space-y-6">
@@ -214,7 +238,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = 
               Inteligência de Reposição
             </h3>
             <p className="text-sm text-gray-500 mt-1">
-              Cruzamento dinâmico: Consumo projetado (+20%) vs. Estoque Físico Atual.
+              Meta baseada na média diária do período filtrado projetada para 1 semana (+20%).
             </p>
           </div>
           
@@ -238,7 +262,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = 
               <tr className="bg-gray-50 border-b border-gray-200">
                 <th className="py-3 px-4 text-sm font-semibold text-gray-600">Insumo</th>
                 <th className="py-3 px-4 text-sm font-semibold text-gray-600">Estoque Atual</th>
-                <th className="py-3 px-4 text-sm font-semibold text-gray-600">Previsão (Base+20%)</th>
+                <th className="py-3 px-4 text-sm font-semibold text-gray-600">Meta (7 Dias+20%)</th>
                 <th className="py-3 px-4 text-sm font-semibold text-red-600 bg-red-50/50">Falta Comprar</th>
                 <th className="py-3 px-4 text-sm font-semibold text-gray-600">Custo (R$)</th>
               </tr>
@@ -248,6 +272,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = 
                 <tr key={idx} className="hover:bg-gray-50 transition-colors">
                   <td className="py-3 px-4 text-sm font-medium text-gray-800">
                     {item.nome}
+                    <div className="text-xs text-gray-400 font-normal mt-0.5">Média/dia: {item.consumoDiario.toFixed(2)} {item.unidade}</div>
                   </td>
                   <td className={`py-3 px-4 text-sm font-medium ${item.estoqueAtual <= 0 ? 'text-red-600' : 'text-gray-600'}`}>
                     {item.estoqueAtual.toFixed(2)} <span className="text-gray-400 text-xs">{item.unidade}</span>
