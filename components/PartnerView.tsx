@@ -214,7 +214,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                                                           
                                                           // Fallback: se o produto era modo pizza e o grupo chama sabor, a gente mantém fracionado para não quebrar pedidos antigos
                                                           const divideThisGroup = originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
-                                                      
+                                                          
                                                           if (divideThisGroup) {
                                                               const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
                                                               return (
@@ -403,6 +403,23 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const [withdrawHistory, setWithdrawHistory] = useState<WithdrawalRequest[]>([]);
   const [isLoadingFinance, setIsLoadingFinance] = useState(false);
   const [coupons, setCoupons] = useState<Coupon[]>([]);
+
+  // --- MÁGICA ADICIONADA AQUI: Buscando dados pro Dashboard ---
+  const [compositions, setCompositions] = useState<any[]>([]);
+  const [dashboardInventoryItems, setDashboardInventoryItems] = useState<any[]>([]);
+
+  useEffect(() => {
+      const fetchDashboardData = async () => {
+          const [compRes, invRes] = await Promise.all([
+              supabase.from('compositions').select('*'),
+              supabase.from('inventory_items').select('*')
+          ]);
+          if (compRes.data) setCompositions(compRes.data);
+          if (invRes.data) setDashboardInventoryItems(invRes.data);
+      };
+      fetchDashboardData();
+  }, []);
+  // -------------------------------------------------------------
   
   useEffect(() => { setLocalCompany(company); }, [company]);
 
@@ -1442,7 +1459,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                                           
                                                           // Fallback: se o produto era modo pizza e o grupo chama sabor, a gente mantém fracionado para não quebrar pedidos antigos
                                                           const divideThisGroup = originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
-                                                      
+                                                          
                                                           if (divideThisGroup) {
                                                               const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
                                                               return (
@@ -1611,7 +1628,12 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             
             {view === ViewState.DASHBOARD && (
                 <div className="space-y-8">
-                    <DashboardView salesData={calculatedSalesHistory} orders={orders} />
+                    <DashboardView 
+                        salesData={calculatedSalesHistory} 
+                        orders={orders} 
+                        compositions={compositions}
+                        inventoryItems={dashboardInventoryItems}
+                    />
                     
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                         <div className="flex justify-between items-center mb-6">
