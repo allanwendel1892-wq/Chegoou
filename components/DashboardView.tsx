@@ -9,10 +9,9 @@ import {
 } from 'lucide-react';
 import { SalesHistoryItem, Order } from '../types';
 
-// Novas interfaces baseadas nas tabelas do seu Supabase
 export interface Composition {
   id: string;
-  reference_id: string; // Ex: "Portuguesa", "Frango", "Borda Chocolate"
+  reference_id: string; 
   inventory_item_id: string;
   amount_needed: number;
 }
@@ -30,11 +29,11 @@ export interface InventoryItem {
 interface DashboardViewProps {
   salesData: SalesHistoryItem[];
   orders: Order[];
-  compositions: Composition[];     // Tabela de receitas
-  inventoryItems: InventoryItem[]; // Tabela de estoque físico
+  compositions: Composition[];     
+  inventoryItems: InventoryItem[]; 
 }
 
-const MARGEM_SEGURANCA = 1.20; // 20% de folga
+const MARGEM_SEGURANCA = 1.20; 
 
 const StatCard = ({ title, value, icon: Icon, trend, trendValue, trendDesc, colorClass }: any) => {
   const isPositive = trend === 'up';
@@ -63,36 +62,42 @@ const StatCard = ({ title, value, icon: Icon, trend, trendValue, trendDesc, colo
 const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = [], compositions = [], inventoryItems = [] }) => {
   const [timeRange, setTimeRange] = useState('7days');
 
-  // FILTRO CENTRAL DE DATAS
-  // Intercepta e filtra os dados brutos com base no período selecionado
+  // FILTRO CENTRAL DE DATAS (Com extração robusta de timestamps)
   const { filteredOrders, filteredSales } = useMemo(() => {
     const now = new Date();
-    let dataLimite = new Date();
+    let dataLimite = new Date(0); // Para 'all', limite é 1970 (pega tudo)
 
     if (timeRange === '7days') {
+      dataLimite = new Date();
       dataLimite.setDate(now.getDate() - 7);
-      dataLimite.setHours(0, 0, 0, 0); // Começa do início do dia
+      dataLimite.setHours(0, 0, 0, 0);
+    } else if (timeRange === '15days') {
+      dataLimite = new Date();
+      dataLimite.setDate(now.getDate() - 15);
+      dataLimite.setHours(0, 0, 0, 0);
     } else if (timeRange === 'month') {
-      dataLimite = new Date(now.getFullYear(), now.getMonth(), 1); // Dia 1º do mês atual
+      dataLimite = new Date(now.getFullYear(), now.getMonth(), 1); 
     }
 
-    const filteredOrd = orders.filter(order => {
-      // Assumindo que a coluna de data no seu banco se chama 'created_at' ou 'date'
-      const dataString = (order as any).created_at || (order as any).date;
-      if (!dataString) return true; // Fallback caso o dado venha sem data
-      return new Date(dataString) >= dataLimite;
-    });
+    // Função à prova de balas para achar a data do pedido
+    const getSafeDate = (item: any) => {
+      if (item.created_at) return new Date(item.created_at);
+      if (item.date) return new Date(item.date);
+      // Fallback: Tenta extrair a data do formato do ID (ex: ord-1777179244109)
+      if (item.id && typeof item.id === 'string' && item.id.includes('-')) {
+        const tsMatch = item.id.match(/\d{13}/);
+        if (tsMatch) return new Date(parseInt(tsMatch[0]));
+      }
+      return new Date(); 
+    };
 
-    const filteredSD = salesData.filter(sale => {
-      const dataString = (sale as any).date || (sale as any).created_at;
-      if (!dataString) return true;
-      return new Date(dataString) >= dataLimite;
-    });
+    const filteredOrd = orders.filter(order => getSafeDate(order) >= dataLimite);
+    const filteredSD = salesData.filter(sale => getSafeDate(sale) >= dataLimite);
 
     return { filteredOrders: filteredOrd, filteredSales: filteredSD };
   }, [orders, salesData, timeRange]);
 
-  // 1. Cálculos de Visão Geral (Agora consome os dados filtrados)
+  // 1. Cálculos de Visão Geral
   const stats = useMemo(() => {
     const totalRevenue = filteredSales.reduce((acc, curr) => acc + curr.revenue, 0);
     const totalOrders = filteredSales.reduce((acc, curr) => acc + curr.ordersCount, 0);
@@ -103,9 +108,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = 
     return { totalRevenue, totalOrders, aiSalesCount, manualSalesCount, avgTicket };
   }, [filteredSales, filteredOrders]);
 
-  // 2. MOTOR DINÂMICO DE ESTOQUE (Agora consome os pedidos filtrados)
+  // 2. MOTOR DINÂMICO DE ESTOQUE
   const previsaoInsumos = useMemo(() => {
-    // Passo A: Contar quantas pizzas/frações de cada sabor saíram
     const demandaSabores: Record<string, number> = {};
 
     filteredOrders.forEach(pedido => {
@@ -115,9 +119,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = 
       items.forEach((item: any) => {
         if (!item.options) return;
         item.options.forEach((opt: any) => {
-          // Pega o sabor da pizza ou o sabor da borda
           if (opt.groupName === 'PIZZA' || opt.groupName === 'Sabor' || opt.groupName === 'Borda') {
-            const referenciaSabor = opt.optionName; // Tem que bater com o reference_id no banco
+            const referenciaSabor = opt.optionName; 
             const fracao = opt.name.includes('1/2') ? 0.5 : 1.0;
             demandaSabores[referenciaSabor] = (demandaSabores[referenciaSabor] || 0) + (item.quantity * fracao);
           }
@@ -125,11 +128,9 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = 
       });
     });
 
-    // Passo B: Transformar sabores vendidos em insumos consumidos usando a tabela "compositions"
     const consumoInsumosBase: Record<string, number> = {};
 
     Object.entries(demandaSabores).forEach(([saborId, qtdVendida]) => {
-      // Busca a receita (todos os ingredientes) vinculada a este sabor
       const receita = compositions.filter(c => c.reference_id === saborId);
       
       receita.forEach(ingrediente => {
@@ -138,17 +139,15 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = 
       });
     });
 
-    // Passo C: Cruzar com o Estoque Físico ("inventory_items") para calcular custos e déficits
     const listaFinal = [];
     let custoTotalInvestimento = 0;
 
     Object.entries(consumoInsumosBase).forEach(([inventoryId, consumo]) => {
       const itemEstoque = inventoryItems.find(i => i.id === inventoryId);
-      if (!itemEstoque) return; // Se o insumo foi deletado do banco, ignora.
+      if (!itemEstoque) return; 
 
       const metaSemanal = consumo * MARGEM_SEGURANCA;
       
-      // A grande sacada: se você tem saldo negativo (ex: Mussarela -5.71), a matemática soma a dívida automaticamente
       const faltaComprar = Math.max(0, metaSemanal - itemEstoque.current_stock);
       const custoEstimado = faltaComprar * Number(itemEstoque.cost_price);
 
@@ -166,7 +165,6 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = 
       });
     });
 
-    // Ordenar itens pelo impacto financeiro (maior custo de reposição no topo)
     return {
       lista: listaFinal.sort((a, b) => b.custoEstimado - a.custoEstimado),
       custoTotalInvestimento
@@ -191,8 +189,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = 
             onChange={(e) => setTimeRange(e.target.value)}
             className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-sm text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-red-500 cursor-pointer"
           >
-            <option value="7days">Últimos 7 dias</option>
+            <option value="all">Geral</option>
             <option value="month">Este Mês</option>
+            <option value="15days">Últimos 15 dias</option>
+            <option value="7days">Últimos 7 dias</option>
           </select>
         </div>
       </div>
@@ -269,7 +269,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = 
               )) : (
                 <tr>
                   <td colSpan={5} className="py-8 text-center text-gray-500 text-sm">
-                    Aguardando sincronização de pedidos e inventário...
+                    Nenhuma movimentação de insumos no período selecionado.
                   </td>
                 </tr>
               )}
