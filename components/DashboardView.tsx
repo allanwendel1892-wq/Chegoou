@@ -60,26 +60,55 @@ const StatCard = ({ title, value, icon: Icon, trend, trendValue, trendDesc, colo
   );
 };
 
-const DashboardView: React.FC<DashboardViewProps> = ({ salesData, orders, compositions = [], inventoryItems = [] }) => {
+const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = [], compositions = [], inventoryItems = [] }) => {
   const [timeRange, setTimeRange] = useState('7days');
 
-  // 1. Cálculos de Visão Geral
+  // FILTRO CENTRAL DE DATAS
+  // Intercepta e filtra os dados brutos com base no período selecionado
+  const { filteredOrders, filteredSales } = useMemo(() => {
+    const now = new Date();
+    let dataLimite = new Date();
+
+    if (timeRange === '7days') {
+      dataLimite.setDate(now.getDate() - 7);
+      dataLimite.setHours(0, 0, 0, 0); // Começa do início do dia
+    } else if (timeRange === 'month') {
+      dataLimite = new Date(now.getFullYear(), now.getMonth(), 1); // Dia 1º do mês atual
+    }
+
+    const filteredOrd = orders.filter(order => {
+      // Assumindo que a coluna de data no seu banco se chama 'created_at' ou 'date'
+      const dataString = (order as any).created_at || (order as any).date;
+      if (!dataString) return true; // Fallback caso o dado venha sem data
+      return new Date(dataString) >= dataLimite;
+    });
+
+    const filteredSD = salesData.filter(sale => {
+      const dataString = (sale as any).date || (sale as any).created_at;
+      if (!dataString) return true;
+      return new Date(dataString) >= dataLimite;
+    });
+
+    return { filteredOrders: filteredOrd, filteredSales: filteredSD };
+  }, [orders, salesData, timeRange]);
+
+  // 1. Cálculos de Visão Geral (Agora consome os dados filtrados)
   const stats = useMemo(() => {
-    const totalRevenue = salesData.reduce((acc, curr) => acc + curr.revenue, 0);
-    const totalOrders = salesData.reduce((acc, curr) => acc + curr.ordersCount, 0);
-    const aiSalesCount = orders.filter(o => o.id && o.id.startsWith('ord-ia')).length;
+    const totalRevenue = filteredSales.reduce((acc, curr) => acc + curr.revenue, 0);
+    const totalOrders = filteredSales.reduce((acc, curr) => acc + curr.ordersCount, 0);
+    const aiSalesCount = filteredOrders.filter(o => o.id && o.id.startsWith('ord-ia')).length;
     const manualSalesCount = totalOrders - aiSalesCount;
     const avgTicket = totalOrders > 0 ? (totalRevenue / totalOrders) : 0;
 
     return { totalRevenue, totalOrders, aiSalesCount, manualSalesCount, avgTicket };
-  }, [salesData, orders]);
+  }, [filteredSales, filteredOrders]);
 
-  // 2. MOTOR DINÂMICO DE ESTOQUE (Conectado ao Banco)
+  // 2. MOTOR DINÂMICO DE ESTOQUE (Agora consome os pedidos filtrados)
   const previsaoInsumos = useMemo(() => {
     // Passo A: Contar quantas pizzas/frações de cada sabor saíram
     const demandaSabores: Record<string, number> = {};
 
-    orders.forEach(pedido => {
+    filteredOrders.forEach(pedido => {
       const items = typeof pedido.items === 'string' ? JSON.parse(pedido.items) : pedido.items;
       if (!items) return;
 
@@ -143,11 +172,11 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData, orders, compos
       custoTotalInvestimento
     };
 
-  }, [orders, compositions, inventoryItems]);
+  }, [filteredOrders, compositions, inventoryItems]);
 
   return (
     <div className="space-y-6">
-      {/* Header (Mantido) */}
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-red-50 rounded-lg">
@@ -168,7 +197,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData, orders, compos
         </div>
       </div>
 
-      {/* Stats Cards (Mantido) */}
+      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard title="Receita Total" value={`R$ ${stats.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} icon={DollarSign} trend="up" trendValue="+12.5%" trendDesc="vs. anterior" colorClass="bg-green-50 text-green-600" />
         <StatCard title="Pedidos Fechados" value={stats.totalOrders} icon={ShoppingBag} trend="up" trendValue="+8.2%" trendDesc="vs. anterior" colorClass="bg-blue-50 text-blue-600" />
@@ -176,7 +205,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData, orders, compos
         <StatCard title="Vendas por IA" value={stats.aiSalesCount} icon={Sparkles} trend="up" trendValue={`${stats.totalOrders > 0 ? Math.round((stats.aiSalesCount / stats.totalOrders) * 100) : 0}%`} trendDesc="do total" colorClass="bg-indigo-50 text-indigo-600" />
       </div>
 
-      {/* NOVA SEÇÃO: INTELIGÊNCIA DE ESTOQUE INTEGRADA AO BANCO */}
+      {/* SEÇÃO: INTELIGÊNCIA DE ESTOQUE INTEGRADA AO BANCO */}
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
