@@ -216,17 +216,20 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                                                                 const originalGroup = originalProduct?.groups?.find(g => g.name === gName || g.name.toUpperCase() === gName);
                                                                 
                                                                 // 3. Define a regra final (priorizando o JSON do pedido)
-                                                                const divideThisGroup = snapshotDivide || originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
-                                                              return (
-                                                                  <React.Fragment key={groupIdx}>
-                                                                      {opts.map((o, i) => (
-                                                                          <div key={i} className="text-[10px] text-gray-600 leading-tight mt-0.5">
-                                                                              <span className="font-bold text-gray-800">+ {fraction}{o}</span>
-                                                                          </div>
-                                                                      ))}
-                                                                  </React.Fragment>
-                                                              );
-                                                          } else {
+const divideThisGroup = snapshotDivide || originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
+
+if (divideThisGroup) {
+    const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
+    return (
+        <React.Fragment key={groupIdx}>
+            {opts.map((o, i) => (
+                <div key={i} className="text-[10px] text-gray-600 leading-tight mt-0.5">
+                    <span className="font-bold text-gray-800">+ {fraction}{o}</span>
+                </div>
+            ))}
+        </React.Fragment>
+    );
+} else {
                                                               return (
                                                                   <div key={groupIdx} className="text-[10px] text-gray-600 leading-tight mt-0.5">
                                                                       {gName ? <span className="font-bold text-gray-800 uppercase">{gName}: </span> : <span className="font-bold text-gray-800">+ </span>}
