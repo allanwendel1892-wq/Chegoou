@@ -209,14 +209,14 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
                                                       });
                                                       
                                                       return Object.entries(groups).map(([gName, opts], groupIdx) => {
-                                                          // Busca a regra específica deste grupo no produto original
-                                                          const originalGroup = originalProduct?.groups?.find(g => g.name === gName || g.name.toUpperCase() === gName);
-                                                          
-                                                          // Fallback: se o produto era modo pizza e o grupo chama sabor, a gente mantém fracionado para não quebrar pedidos antigos
-                                                          const divideThisGroup = originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
-                                                          
-                                                          if (divideThisGroup) {
-                                                              const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
+                                                                // 1. Lê a flag dividePrice direto do JSON salvo no banco
+                                                                const snapshotDivide = item.selectedOptions.some(opt => (opt as any).groupName === gName && (opt as any).dividePrice === true);
+                                                                
+                                                                // 2. Fallback caso seja um pedido muito antigo e não tenha a flag no JSON
+                                                                const originalGroup = originalProduct?.groups?.find(g => g.name === gName || g.name.toUpperCase() === gName);
+                                                                
+                                                                // 3. Define a regra final (priorizando o JSON do pedido)
+                                                                const divideThisGroup = snapshotDivide || originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
                                                               return (
                                                                   <React.Fragment key={groupIdx}>
                                                                       {opts.map((o, i) => (
@@ -492,9 +492,14 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                   // Verifica se a opção salva no pedido já dizia que era para dividir
                 const optionInSnapshot = item.selectedOptions.find(opt => (opt as any).groupName === gName);
                 const snapshotDivide = optionInSnapshot ? (optionInSnapshot as any).dividePrice : false;
+                                
+                                // 1. Lê a flag dividePrice direto do JSON salvo no banco
+                const snapshotDivide = item.selectedOptions.some(opt => (opt as any).groupName === gName && (opt as any).dividePrice === true);
                 
-                // Mantém o resto como fallback
+                // 2. Fallback caso seja um pedido muito antigo e não tenha a flag no JSON
                 const originalGroup = originalProduct?.groups?.find(g => g.name === gName || g.name.toUpperCase() === gName);
+                
+                // 3. Define a regra final (priorizando o JSON do pedido)
                 const divideThisGroup = snapshotDivide || originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
               
                   if (divideThisGroup) {
@@ -1459,11 +1464,14 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                                       });
 
                                                       return Object.entries(groups).map(([gName, opts], groupIdx) => {
-                                                          // Busca a regra específica deste grupo no produto original
-                                                          const originalGroup = originalProduct?.groups?.find(g => g.name === gName || g.name.toUpperCase() === gName);
-                                                          
-                                                          // Fallback: se o produto era modo pizza e o grupo chama sabor, a gente mantém fracionado para não quebrar pedidos antigos
-                                                          const divideThisGroup = originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
+                                                         // 1. Lê a flag dividePrice direto do JSON salvo no banco
+                                                        const snapshotDivide = item.selectedOptions.some(opt => (opt as any).groupName === gName && (opt as any).dividePrice === true);
+                                                        
+                                                        // 2. Fallback caso seja um pedido muito antigo e não tenha a flag no JSON
+                                                        const originalGroup = originalProduct?.groups?.find(g => g.name === gName || g.name.toUpperCase() === gName);
+                                                        
+                                                        // 3. Define a regra final (priorizando o JSON do pedido)
+                                                        const divideThisGroup = snapshotDivide || originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
                                                           
                                                           if (divideThisGroup) {
                                                               const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
