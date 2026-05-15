@@ -489,8 +489,13 @@ const PartnerView: React.FC<PartnerViewProps> = ({
               
               optionsHtml = `<div style="font-size: 11px; margin-left: 10px; margin-bottom: 5px;">
               ${Object.entries(groups).map(([gName, opts]) => {
-                  const originalGroup = originalProduct?.groups?.find(g => g.name === gName || g.name.toUpperCase() === gName);
-                  const divideThisGroup = originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
+                                  // Verifica se a opção salva no pedido já dizia que era para dividir
+                const optionInSnapshot = item.selectedOptions.find(opt => (opt as any).groupName === gName);
+                const snapshotDivide = optionInSnapshot ? (optionInSnapshot as any).dividePrice : false;
+                
+                // Mantém o resto como fallback
+                const originalGroup = originalProduct?.groups?.find(g => g.name === gName || g.name.toUpperCase() === gName);
+                const divideThisGroup = snapshotDivide || originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
               
                   if (divideThisGroup) {
                       const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
