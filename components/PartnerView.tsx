@@ -1045,60 +1045,24 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   };
 
   const handleDragDropOrder = async (orderId: string, status: Order['status']) => {
+      // 1. ATUALIZAÇÃO OTIMISTA IMEDIATA: Atualiza a tela antes do banco!
+      updateOrderStatus(orderId, status);
+
       const order = orders.find(o => o.id === orderId);
 
-      // GATILHO: Só abate do estoque quando o pedido muda para ENTREGUE
+      // 2. PROCESSAMENTO EM SEGUNDO PLANO (Fire and Forget)
+      // A função abaixo roda de forma invisível sem travar o arrastar do Kanban
       if (order && status === 'delivered' && order.status !== 'delivered') {
-          
-          // 1. Busca TODAS as receitas/composições cadastradas no banco de uma vez só
-          const { data: compositions, error: compError } = await supabase.from('compositions').select('*');
-          
-          if (!compError && compositions && compositions.length > 0) {
-              
-              // 2. Percorre todos os itens ("Pizza Forneria 90", "Coca Cola", etc) que estão no pedido
-              for (const item of order.items) {
+          (async () => {
+              try {
+                  const { data: compositions, error: compError } = await supabase.from('compositions').select('*');
                   
-                  // --- A. ABATE DO PRODUTO PRINCIPAL (Ex: Massa, Caixa de Pizza) ---
-                  const mainComps = compositions.filter(c => c.reference_id === item.productName);
-                  for (const comp of mainComps) {
-                      const amountToDeduct = comp.amount_needed * item.quantity;
-                      
-                      const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', comp.inventory_item_id).single();
-                      if (inv) {
-                          await supabase.from('inventory_items').update({ 
-                              current_stock: inv.current_stock - amountToDeduct 
-                          }).eq('id', comp.inventory_item_id);
-                      }
-                  }
-
-                  // --- B. ABATE DOS SABORES E ADICIONAIS (Lendo seu JSON) ---
-                  if (item.selectedOptions && item.selectedOptions.length > 0) {
-                      for (const opt of item.selectedOptions) {
-                          // Pega o nome exato que está no seu banco (Ex: "Calabresa" e não "1/2 Calabresa")
-                          const optName = (opt as any).optionName || opt.name;
-                          const groupName = (opt as any).groupName;
-                          
-                          // A MÁGICA DA FRAÇÃO LENDO SEU JSON:
-                          let fraction = 1;
-                          if ((opt as any).dividePrice === true) {
-                              // Conta quantos sabores foram escolhidos dentro do mesmo grupo "PIZZA"
-                              const selectedInGroup = item.selectedOptions.filter(o => 
-                                  (o as any).groupName === groupName && 
-                                  (o as any).dividePrice === true
-                              ).length;
-                              
-                              if (selectedInGroup > 0) {
-                                  fraction = 1 / selectedInGroup; // Ex: 2 sabores vira 1/2, 3 vira 1/3
-                              }
-                          }
-
-                          // Procura as receitas atreladas a esse sabor exato (Ex: receita da "Calabresa")
-                          const optComps = compositions.filter(c => c.reference_id === optName);
-                          
-                          for (const comp of optComps) {
-                              // Multiplica a quantidade do pedido X quanto a receita pede X a fração (1/2, etc)
-                              const amountToDeduct = comp.amount_needed * item.quantity * fraction;
-                              
+                  if (!compError && compositions && compositions.length > 0) {
+                      for (const item of order.items) {
+                          // A. ABATE DO PRODUTO PRINCIPAL
+                          const mainComps = compositions.filter(c => c.reference_id === item.productName);
+                          for (const comp of mainComps) {
+                              const amountToDeduct = comp.amount_needed * item.quantity;
                               const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', comp.inventory_item_id).single();
                               if (inv) {
                                   await supabase.from('inventory_items').update({ 
@@ -1106,14 +1070,44 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                   }).eq('id', comp.inventory_item_id);
                               }
                           }
+
+                          // B. ABATE DOS SABORES E ADICIONAIS
+                          if (item.selectedOptions && item.selectedOptions.length > 0) {
+                              for (const opt of item.selectedOptions) {
+                                  const optName = (opt as any).optionName || opt.name;
+                                  const groupName = (opt as any).groupName;
+                                  
+                                  let fraction = 1;
+                                  if ((opt as any).dividePrice === true) {
+                                      const selectedInGroup = item.selectedOptions.filter(o => 
+                                          (o as any).groupName === groupName && 
+                                          (o as any).dividePrice === true
+                                      ).length;
+                                      
+                                      if (selectedInGroup > 0) {
+                                          fraction = 1 / selectedInGroup; 
+                                      }
+                                  }
+
+                                  const optComps = compositions.filter(c => c.reference_id === optName);
+                                  for (const comp of optComps) {
+                                      const amountToDeduct = comp.amount_needed * item.quantity * fraction;
+                                      const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', comp.inventory_item_id).single();
+                                      if (inv) {
+                                          await supabase.from('inventory_items').update({ 
+                                              current_stock: inv.current_stock - amountToDeduct 
+                                      }).eq('id', comp.inventory_item_id);
+                                      }
+                                  }
+                              }
+                          }
                       }
                   }
+              } catch (e) {
+                  console.error("Erro silencioso ao abater estoque:", e);
               }
-          }
+          })(); // <- Isso faz a função executar instantaneamente sem bloquear o React
       }
-
-      // Atualiza o card visualmente para a nova coluna
-      updateOrderStatus(orderId, status);
   };
 
   const addGroup = () => {
