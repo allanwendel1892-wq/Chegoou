@@ -5,7 +5,9 @@
  */
 
 import React, { 
-    useState, 
+    useState,
+    lazy,
+    Suspense,
     useEffect, 
     useRef 
 } from 'react';
@@ -25,11 +27,11 @@ import {
 } from './types';
 
 // --- COMPONENTES DE VISUALIZAÇÃO ---
-import AuthView from './components/AuthView';
-import AdminView from './components/AdminView';
-import PartnerView from './components/PartnerView';
-import CourierView from './components/CourierView';
-import ClientView from './components/ClientView';
+const AuthView = lazy(() => import('./components/AuthView'));
+const AdminView = lazy(() => import('./components/AdminView'));
+const PartnerView = lazy(() => import('./components/PartnerView'));
+const CourierView = lazy(() => import('./components/CourierView'));
+const ClientView = lazy(() => import('./components/ClientView'));
 
 // --- SERVIÇOS E UTILITÁRIOS ---
 import { supabase } from './services/supabaseClient';
@@ -45,8 +47,10 @@ import {
 // >>> MOTOR DO PWA (Registro do Service Worker) <<<
 import { registerSW } from 'virtual:pwa-register';
 
-// Registro imediato do Service Worker para suporte offline e instalação
-registerSW({ immediate: true });
+// O PWA só vai tentar baixar o cache offline DEPOIS que o app abrir
+window.addEventListener('load', () => {
+    registerSW({ immediate: true });
+});
 
 // >>> RECURSOS DE ÁUDIO PARA NOTIFICAÇÕES <<<
 import somMensagem from './somMensagem.mp3';
@@ -1388,15 +1392,22 @@ const App: React.FC = () => {
   }
 
   // COMPOSIÇÃO FINAL DA UI
+  // COMPOSIÇÃO FINAL DA UI
   return (
       <div className="antialiased font-sans select-none">
         {NotificationToast}
         {InstallPWAButton}
         <main className="min-h-screen bg-white relative overflow-x-hidden">
-            {ViewToRender}
+            <Suspense fallback={
+                <div className="flex flex-col h-screen w-full items-center justify-center bg-white gap-4">
+                    <Loader2 className="w-12 h-12 text-red-600 animate-spin" />
+                    <p className="text-gray-500 font-medium">Iniciando Chegoou...</p>
+                </div>
+            }>
+                {ViewToRender}
+            </Suspense>
         </main>
       </div>
   );
-};
 
 export default App;
