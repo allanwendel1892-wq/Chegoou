@@ -1052,9 +1052,26 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
       // 2. PROCESSAMENTO EM SEGUNDO PLANO (Fire and Forget)
       // A função abaixo roda de forma invisível sem travar o arrastar do Kanban
-      if (order && status === 'delivered' && order.status !== 'delivered') {
-          (async () => {
-              try {
+      (async () => {
+          try {
+              // --- CORREÇÃO AQUI: Salvar o novo status no banco de dados ---
+              let updateData: any = { status: status };
+              
+              if (status === 'delivered') {
+                  updateData.repasseStatus = 'blocked'; 
+                  updateData.repasseDate = new Date().toISOString();
+              }
+
+              const { error: updateError } = await supabase.from('orders').update(updateData).eq('id', orderId);
+              
+              if (updateError) {
+                  console.error("Erro ao atualizar status no banco:", updateError);
+                  // Se quiser, pode implementar um rollback aqui (ex: voltar o status visual se der erro no banco)
+              }
+              // --------------------------------------------------------------
+
+              // GATILHO: Só abate do estoque quando o pedido muda para ENTREGUE
+              if (order && status === 'delivered' && order.status !== 'delivered') {
                   const { data: compositions, error: compError } = await supabase.from('compositions').select('*');
                   
                   if (!compError && compositions && compositions.length > 0) {
@@ -1103,11 +1120,11 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                           }
                       }
                   }
-              } catch (e) {
-                  console.error("Erro silencioso ao abater estoque:", e);
               }
-          })(); // <- Isso faz a função executar instantaneamente sem bloquear o React
-      }
+          } catch (e) {
+              console.error("Erro silencioso ao processar em segundo plano:", e);
+          }
+      })(); 
   };
 
   const addGroup = () => {
