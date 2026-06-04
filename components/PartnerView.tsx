@@ -1045,86 +1045,9 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   };
 
   const handleDragDropOrder = async (orderId: string, status: Order['status']) => {
-      // 1. ATUALIZAÇÃO OTIMISTA IMEDIATA: Atualiza a tela antes do banco!
+      // Chama a função central do App.tsx que já faz a atualização otimista visual 
+      // e envia o novo status para o Supabase de forma segura.
       updateOrderStatus(orderId, status);
-
-      const order = orders.find(o => o.id === orderId);
-
-      // 2. PROCESSAMENTO EM SEGUNDO PLANO (Fire and Forget)
-      // A função abaixo roda de forma invisível sem travar o arrastar do Kanban
-      (async () => {
-          try {
-              // --- CORREÇÃO AQUI: Salvar o novo status no banco de dados ---
-              let updateData: any = { status: status };
-              
-              if (status === 'delivered') {
-                  updateData.repasseStatus = 'blocked'; 
-                  updateData.repasseDate = new Date().toISOString();
-              }
-
-              const { error: updateError } = await supabase.from('orders').update(updateData).eq('id', orderId);
-              
-              if (updateError) {
-                  console.error("Erro ao atualizar status no banco:", updateError);
-                  // Se quiser, pode implementar um rollback aqui (ex: voltar o status visual se der erro no banco)
-              }
-              // --------------------------------------------------------------
-
-              // GATILHO: Só abate do estoque quando o pedido muda para ENTREGUE
-              if (order && status === 'delivered' && order.status !== 'delivered') {
-                  const { data: compositions, error: compError } = await supabase.from('compositions').select('*');
-                  
-                  if (!compError && compositions && compositions.length > 0) {
-                      for (const item of order.items) {
-                          // A. ABATE DO PRODUTO PRINCIPAL
-                          const mainComps = compositions.filter(c => c.reference_id === item.productName);
-                          for (const comp of mainComps) {
-                              const amountToDeduct = comp.amount_needed * item.quantity;
-                              const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', comp.inventory_item_id).single();
-                              if (inv) {
-                                  await supabase.from('inventory_items').update({ 
-                                      current_stock: inv.current_stock - amountToDeduct 
-                                  }).eq('id', comp.inventory_item_id);
-                              }
-                          }
-
-                          // B. ABATE DOS SABORES E ADICIONAIS
-                          if (item.selectedOptions && item.selectedOptions.length > 0) {
-                              for (const opt of item.selectedOptions) {
-                                  const optName = (opt as any).optionName || opt.name;
-                                  const groupName = (opt as any).groupName;
-                                  
-                                  let fraction = 1;
-                                  if ((opt as any).dividePrice === true) {
-                                      const selectedInGroup = item.selectedOptions.filter(o => 
-                                          (o as any).groupName === groupName && 
-                                          (o as any).dividePrice === true
-                                      ).length;
-                                      
-                                      if (selectedInGroup > 0) {
-                                          fraction = 1 / selectedInGroup; 
-                                      }
-                                  }
-
-                                  const optComps = compositions.filter(c => c.reference_id === optName);
-                                  for (const comp of optComps) {
-                                      const amountToDeduct = comp.amount_needed * item.quantity * fraction;
-                                      const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', comp.inventory_item_id).single();
-                                      if (inv) {
-                                          await supabase.from('inventory_items').update({ 
-                                              current_stock: inv.current_stock - amountToDeduct 
-                                      }).eq('id', comp.inventory_item_id);
-                                      }
-                                  }
-                              }
-                          }
-                      }
-                  }
-              }
-          } catch (e) {
-              console.error("Erro silencioso ao processar em segundo plano:", e);
-          }
-      })(); 
   };
 
   const addGroup = () => {
