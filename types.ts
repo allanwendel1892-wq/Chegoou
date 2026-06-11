@@ -239,3 +239,8 @@ export enum ViewState {
   POS = 'pos', // Módulo de Lançamento de Pedido (Balcão/PDV)
   HISTORY = 'history', // Histórico de Pedidos
 }
+
+export interface Order {
+  // ... suas propriedades existentes
+  mapLink?: string;
+}
