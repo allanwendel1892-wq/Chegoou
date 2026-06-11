@@ -1943,6 +1943,12 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                 }}
                             />
                             <KanbanColumn 
+                                title="Confirmando entrega" 
+                                status="waiting_courier" 
+                                items={orders.filter(o => o.status === 'waiting_courier')} 
+                                color="border-yellow-300"
+                            />
+                            <KanbanColumn 
                                  title="Em Entrega" 
                                 status="delivering" 
                                 items={orders.filter(o => o.status === 'delivering')} 
