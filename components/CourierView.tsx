@@ -392,7 +392,7 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
                             Código de Confirmação
                         </label>
                         <input 
-                            type="text" maxLength
+                            type="text" maxLength={4}
                             className="w-full text-center text-3xl tracking-[0.5em] font-mono p-3 border rounded-xl focus:ring-2 focus:ring-orange-500 outline-none"
                             placeholder="0000"
                             value={deliveryCodeInput}
