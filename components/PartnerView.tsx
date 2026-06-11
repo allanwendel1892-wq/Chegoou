@@ -965,7 +965,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                       });
                   }
               }
-          } catch (e) {} finaly { setLoadingCep(false); }
+          } catch (e) {} finally { setLoadingCep(false); } // <-- CORREÇÃO APLICADA AQUI
       }
   };
 
