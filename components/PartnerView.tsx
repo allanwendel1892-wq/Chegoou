@@ -1223,17 +1223,16 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         </button>
                         <button 
     onClick={() => {
-        // 1. Correção do Status: Se não escolheu entregador, libera pra todos (esperando motoboy)
         const novoStatus = selectedCourierId ? 'delivering' : 'waiting_courier';
         
         const updated: any = {
             ...dispatchingOrder,
             status: novoStatus,
-            courierId: selectedCourierId || null, // null é muito mais seguro pro Supabase que undefined
-            deliveryFee: Number(deliveryFee)
+            courierId: selectedCourierId || null, 
+            deliveryFee: Number(deliveryFee),
+            deliveryType: 'chegoou' // <--- ESTA É A LINHA QUE TIRA O PEDIDO DO LIMBO
         };
 
-        // 2. Correção do mapLink: Injetando dentro do deliveryAddress (JSONB) para não dar erro no Supabase
         if (dispatchingOrder.deliveryAddress) {
             updated.deliveryAddress = {
                 ...dispatchingOrder.deliveryAddress,
@@ -1248,7 +1247,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             };
         }
 
-        // 3. Previne o erro do Supabase garantindo que a coluna raiz inexistente não vá na requisição
         delete updated.mapLink;
 
         onUpdateFullOrder(updated);
