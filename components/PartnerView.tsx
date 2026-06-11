@@ -1052,7 +1052,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           setDispatchingOrder(order);
           setSelectedCourierId(order.courierId || '');
           setDeliveryAddressStr(order.deliveryAddress ? `${order.deliveryAddress.street}, ${order.deliveryAddress.number || ''} - ${order.deliveryAddress.neighborhood || ''}`.trim() : '');
-          setMapLink((order as any).mapLink || '');
+          setMapLink((order.deliveryAddress as any)?.mapLink || '');
           setDeliveryFee(order.deliveryFee || 0);
           return;
       }
@@ -1222,33 +1222,45 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                             Cancelar
                         </button>
                         <button 
-                            onClick={() => {
-                                const updated: Order = {
-                                    ...dispatchingOrder,
-                                    status: 'delivering',
-                                    courierId: selectedCourierId || undefined,
-                                    deliveryFee: Number(deliveryFee),
-                                    mapLink: mapLink
-                                };
-                                if (dispatchingOrder.deliveryAddress) {
-                                    updated.deliveryAddress = {
-                                        ...dispatchingOrder.deliveryAddress,
-                                        street: deliveryAddressStr
-                                    };
-                                } else {
-                                    updated.deliveryAddress = {
-                                        street: deliveryAddressStr,
-                                        number: '', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0
-                                    };
-                                }
-                                onUpdateFullOrder(updated);
-                                setDispatchingOrder(null);
-                                alert("Pedido despachado e atualizado na rota com sucesso!");
-                            }} 
-                            className="flex-1 py-3 rounded-xl bg-gray-900 font-bold text-white hover:bg-black transition-colors shadow-lg"
-                        >
-                            Confirmar Rota
-                        </button>
+    onClick={() => {
+        // 1. Correção do Status: Se não escolheu entregador, libera pra todos (esperando motoboy)
+        const novoStatus = selectedCourierId ? 'delivering' : 'waiting_courier';
+        
+        const updated: any = {
+            ...dispatchingOrder,
+            status: novoStatus,
+            courierId: selectedCourierId || null, // null é muito mais seguro pro Supabase que undefined
+            deliveryFee: Number(deliveryFee)
+        };
+
+        // 2. Correção do mapLink: Injetando dentro do deliveryAddress (JSONB) para não dar erro no Supabase
+        if (dispatchingOrder.deliveryAddress) {
+            updated.deliveryAddress = {
+                ...dispatchingOrder.deliveryAddress,
+                street: deliveryAddressStr,
+                mapLink: mapLink 
+            };
+        } else {
+            updated.deliveryAddress = {
+                street: deliveryAddressStr,
+                number: '', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0,
+                mapLink: mapLink
+            };
+        }
+
+        // 3. Previne o erro do Supabase garantindo que a coluna raiz inexistente não vá na requisição
+        delete updated.mapLink;
+
+        onUpdateFullOrder(updated);
+        setDispatchingOrder(null);
+        alert(selectedCourierId 
+            ? "Pedido despachado diretamente para o entregador!" 
+            : "Pedido liberado! Entregadores já podem aceitar a corrida.");
+    }} 
+    className="flex-1 py-3 rounded-xl bg-gray-900 font-bold text-white hover:bg-black transition-colors shadow-lg"
+>
+    Confirmar Rota
+</button>
                     </div>
                 </div>
             </div>
