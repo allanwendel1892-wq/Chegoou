@@ -1043,21 +1043,21 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       }
   };
 
-  // Lógica Modificada de Drag & Drop para Interceptação de Entregadores
   const handleDragDropOrder = async (orderId: string, targetStatus: Order['status']) => {
     const order = orders.find(o => o.id === orderId);
     if (!order) return;
 
-    // 1. Identifica se é entrega (não é retirada)
+    // 1. Identifica se é um pedido de entrega (ignora retirada)
     const isDelivery = !(order.deliveryMethod?.toLowerCase().includes('pickup') || 
-                       order.deliveryMethod?.toLowerCase().includes('retirada'));
+                         order.deliveryMethod?.toLowerCase().includes('retirada'));
 
-    // 2. LÓGICA DE INTERCEPTAÇÃO:
-    // Se o usuário arrastar para a coluna "Aguardando Aceite" (waiting_courier)
-    // OU se tentar arrastar para "Em Entrega" (delivering), redirecionamos o fluxo:
+    // 2. Lógica de Interceptação:
+    // Se for entrega e o usuário tentou arrastar para a coluna "Aguardando Aceite" (waiting_courier)
+    // ou para "Em Entrega" (delivering), nós interceptamos o fluxo.
     if (isDelivery && (targetStatus === 'waiting_courier' || targetStatus === 'delivering')) {
         
-        // Abre o modal de despacho para definir entregador e taxa
+        // Apenas carregamos os dados no estado, NÃO mudamos o status do pedido ainda.
+        // Isso evita que o pedido "pule" etapas antes de você confirmar no modal.
         setDispatchingOrder(order);
         setSelectedCourierId(order.courierId || '');
         setDeliveryAddressStr(order.deliveryAddress 
@@ -1067,22 +1067,16 @@ const PartnerView: React.FC<PartnerViewProps> = ({
         setMapLink((order as any).mapLink || '');
         setDeliveryFee(order.deliveryFee || 0);
         
-        // Retornamos vazio para o fluxo não continuar e não atualizar o status sozinho
-        return;
+        // O "return" aqui é vital: ele impede que o updateOrderStatus seja chamado.
+        // O pedido permanece na coluna original até o modal confirmar.
+        return; 
     }
 
-    // 3. Comportamento padrão para outros status (Preparando, Pronto, Cancelado, etc)
+    // 3. Execução Normal:
+    // Para outros status (Ex: Arrastar para "Pronto", "Cancelado" ou "Preparando")
+    // usamos o updateOrderStatus normal.
     updateOrderStatus(orderId, targetStatus);
 };
-  const addGroup = () => {
-      const newGroup: ProductGroup = {
-          id: Date.now().toString(),
-          name: 'Novo Grupo',
-          min: 1, max: 1, options: []
-      };
-      setNewProduct(prev => ({ ...prev, groups: [...(prev.groups || []), newGroup] }));
-      setActiveGroupIndex((newProduct.groups?.length || 0));
-  };
 
   const removeGroup = (index: number) => {
       const groups = [...(newProduct.groups || [])];
