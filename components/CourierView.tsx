@@ -344,9 +344,9 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
                         <p className="text-xs text-gray-500 mb-2">{activeOrder.deliveryAddress.street}, {activeOrder.deliveryAddress.number}</p>
                         
                         {/* INSERIDO AQUI - Link do mapa na rota ativa */}
-                        {(activeOrder as any).mapLink && (
+                        {(activeOrder.deliveryAddress as any)?.mapLink && (
                             <a 
-                                href={(activeOrder as any).mapLink} 
+                                href={(activeOrder.deliveryAddress as any).mapLink}
                                 target="_blank" 
                                 rel="noopener noreferrer" 
                                 className="mb-3 text-blue-600 font-bold text-xs flex items-center gap-1 bg-blue-50 px-3 py-2 rounded-lg w-fit hover:bg-blue-100 transition"
@@ -451,9 +451,9 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
                                  </p>
                                  
                                  {/* INSERIDO AQUI - Link do mapa na lista de pedidos */}
-                                 {(order as any).mapLink && (
-                                     <a 
-                                         href={(order as any).mapLink} 
+                                 {(order.deliveryAddress as any)?.mapLink && (
+                                    <a 
+                                        href={(order.deliveryAddress as any).mapLink}
                                          target="_blank" 
                                          rel="noopener noreferrer" 
                                          className="mt-2 text-blue-600 font-bold text-xs flex items-center gap-1 bg-blue-50 px-3 py-2 rounded-lg w-fit hover:bg-blue-100 transition inline-flex"
