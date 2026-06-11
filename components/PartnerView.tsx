@@ -1223,28 +1223,43 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         </button>
                         <button 
                             onClick={() => {
-                                const updated: Order = {
-                                    ...dispatchingOrder,
-                                    status: 'delivering',
-                                    courierId: selectedCourierId || undefined,
-                                    deliveryFee: Number(deliveryFee),
-                                    mapLink: mapLink
-                                };
-                                if (dispatchingOrder.deliveryAddress) {
-                                    updated.deliveryAddress = {
-                                        ...dispatchingOrder.deliveryAddress,
-                                        street: deliveryAddressStr
-                                    };
-                                } else {
-                                    updated.deliveryAddress = {
-                                        street: deliveryAddressStr,
-                                        number: '', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0
-                                    };
-                                }
-                                onUpdateFullOrder(updated);
-                                setDispatchingOrder(null);
-                                alert("Pedido despachado e atualizado na rota com sucesso!");
-                            }} 
+
+    if (!selectedCourierId) {
+        alert("Selecione um entregador.");
+        return;
+    }
+
+    const updated: Order = {
+        ...dispatchingOrder,
+        status: 'waiting_courier',
+        deliveryType: 'chegoou',
+        courierId: selectedCourierId,
+        deliveryFee: Number(deliveryFee) || 0,
+        mapLink: mapLink || ''
+    };
+
+    if (dispatchingOrder.deliveryAddress) {
+        updated.deliveryAddress = {
+            ...dispatchingOrder.deliveryAddress,
+            street: deliveryAddressStr
+        };
+    } else {
+        updated.deliveryAddress = {
+            street: deliveryAddressStr,
+            number: '',
+            neighborhood: '',
+            city: '',
+            zipCode: '',
+            lat: 0,
+            lng: 0
+        };
+    }
+
+    onUpdateFullOrder(updated);
+    setDispatchingOrder(null);
+
+    alert("Pedido enviado para o entregador!");
+}} 
                             className="flex-1 py-3 rounded-xl bg-gray-900 font-bold text-white hover:bg-black transition-colors shadow-lg"
                         >
                             Confirmar Rota
