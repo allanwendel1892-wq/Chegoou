@@ -1224,46 +1224,30 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         <button 
                             onClick={() => {
 
+    console.log("selectedCourierId =", selectedCourierId);
+    console.log("couriers =", couriers);
+
     if (!selectedCourierId) {
-        alert("Selecione um entregador.");
+        alert("ERRO: Nenhum entregador selecionado.");
         return;
     }
 
     const updated: Order = {
         ...dispatchingOrder,
-        status: 'waiting_courier',
-        deliveryType: 'chegoou',
+        status: 'delivering',
         courierId: selectedCourierId,
-        deliveryFee: Number(deliveryFee) || 0,
-        mapLink: mapLink || ''
+        deliveryFee: Number(deliveryFee),
+        mapLink: mapLink
     };
 
-    if (dispatchingOrder.deliveryAddress) {
-        updated.deliveryAddress = {
-            ...dispatchingOrder.deliveryAddress,
-            street: deliveryAddressStr
-        };
-    } else {
-        updated.deliveryAddress = {
-            street: deliveryAddressStr,
-            number: '',
-            neighborhood: '',
-            city: '',
-            zipCode: '',
-            lat: 0,
-            lng: 0
-        };
-    }
+    console.log("Pedido atualizado =", updated);
 
     onUpdateFullOrder(updated);
+
     setDispatchingOrder(null);
 
     alert("Pedido enviado para o entregador!");
-}} 
-                            className="flex-1 py-3 rounded-xl bg-gray-900 font-bold text-white hover:bg-black transition-colors shadow-lg"
-                        >
-                            Confirmar Rota
-                        </button>
+}}
                     </div>
                 </div>
             </div>
