@@ -1223,31 +1223,32 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         </button>
                         <button 
                             onClick={() => {
-
-    console.log("selectedCourierId =", selectedCourierId);
-    console.log("couriers =", couriers);
-
-    if (!selectedCourierId) {
-        alert("ERRO: Nenhum entregador selecionado.");
-        return;
-    }
-
-    const updated: Order = {
-        ...dispatchingOrder,
-        status: 'delivering',
-        courierId: selectedCourierId,
-        deliveryFee: Number(deliveryFee),
-        mapLink: mapLink
-    };
-
-    console.log("Pedido atualizado =", updated);
-
-    onUpdateFullOrder(updated);
-
-    setDispatchingOrder(null);
-
-    alert("Pedido enviado para o entregador!");
-}}
+                                const updated: Order = {
+                                    ...dispatchingOrder,
+                                    status: 'delivering',
+                                    courierId: selectedCourierId || undefined,
+                                    deliveryFee: Number(deliveryFee),
+                                    mapLink: mapLink
+                                };
+                                if (dispatchingOrder.deliveryAddress) {
+                                    updated.deliveryAddress = {
+                                        ...dispatchingOrder.deliveryAddress,
+                                        street: deliveryAddressStr
+                                    };
+                                } else {
+                                    updated.deliveryAddress = {
+                                        street: deliveryAddressStr,
+                                        number: '', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0
+                                    };
+                                }
+                                onUpdateFullOrder(updated);
+                                setDispatchingOrder(null);
+                                alert("Pedido despachado e atualizado na rota com sucesso!");
+                            }} 
+                            className="flex-1 py-3 rounded-xl bg-gray-900 font-bold text-white hover:bg-black transition-colors shadow-lg"
+                        >
+                            Confirmar Rota
+                        </button>
                     </div>
                 </div>
             </div>
