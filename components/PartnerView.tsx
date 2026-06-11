@@ -1043,42 +1043,119 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       }
   };
 
-  // Substitua todo o trecho da função handleDragDropOrder até o fechamento do Modal de Despacho
-const handleDragDropOrder = async (orderId: string, targetStatus: Order['status']) => {
-    // Verificação de segurança para evitar erros de undefined
-    if (!Array.isArray(orders)) return;
-    
-    const order = orders.find(o => o.id === orderId);
-    if (!order) return;
+  // Lógica Modificada de Drag & Drop para Interceptação de Entregadores
+  const handleDragDropOrder = async (orderId: string, status: Order['status']) => {
+      const order = orders.find(o => o.id === orderId);
+      const isDelivery = order && !(order.deliveryMethod?.toLowerCase().includes('pickup') || order.deliveryMethod?.toLowerCase().includes('retirada'));
+      
+      if (status === 'delivering' && isDelivery) {
+          setDispatchingOrder(order);
+          setSelectedCourierId(order.courierId || '');
+          setDeliveryAddressStr(order.deliveryAddress ? `${order.deliveryAddress.street}, ${order.deliveryAddress.number || ''} - ${order.deliveryAddress.neighborhood || ''}`.trim() : '');
+          setMapLink((order as any).mapLink || '');
+          setDeliveryFee(order.deliveryFee || 0);
+          return;
+      }
+      updateOrderStatus(orderId, status);
+  };
 
-    // 1. Identifica se é pedido de entrega
-    const isDelivery = !(order.deliveryMethod?.toLowerCase().includes('pickup') || 
-                         order.deliveryMethod?.toLowerCase().includes('retirada'));
+  const addGroup = () => {
+      const newGroup: ProductGroup = {
+          id: Date.now().toString(),
+          name: 'Novo Grupo',
+          min: 1, max: 1, options: []
+      };
+      setNewProduct(prev => ({ ...prev, groups: [...(prev.groups || []), newGroup] }));
+      setActiveGroupIndex((newProduct.groups?.length || 0));
+  };
 
-    // 2. Interceptação: Bloqueia arrasto direto para status de despacho
-    // Forçamos a parada no modal para preenchimento de dados
-    if (isDelivery && (targetStatus === 'waiting_courier' || targetStatus === 'delivering')) {
-        setDispatchingOrder(order);
-        setSelectedCourierId(order.courierId || '');
-        setDeliveryAddressStr(order.deliveryAddress 
-            ? `${order.deliveryAddress.street}, ${order.deliveryAddress.number || ''} - ${order.deliveryAddress.neighborhood || ''}`.trim() 
-            : ''
-        );
-        setMapLink((order as any).mapLink || '');
-        setDeliveryFee(order.deliveryFee || 0);
-        return; 
-    }
+  const removeGroup = (index: number) => {
+      const groups = [...(newProduct.groups || [])];
+      groups.splice(index, 1);
+      setNewProduct(prev => ({ ...prev, groups }));
+      setActiveGroupIndex(null);
+  };
+  const addOptionToGroup = (groupIndex: number) => {
+      const groups = [...(newProduct.groups || [])];
+      groups[groupIndex].options.push({id: Date.now().toString(), name: '', price: 0, isAvailable: true});
+      setNewProduct(prev => ({ ...prev, groups }));
+  };
 
-    // 3. Execução Normal apenas para status que não exigem despacho
-    updateOrderStatus(orderId, targetStatus);
-};
+  const updateOption = (groupIndex: number, optionIndex: number, field: keyof ProductOption, value: any) => {
+      const groups = [...(newProduct.groups || [])];
+      groups[groupIndex].options[optionIndex] = { ...groups[groupIndex].options[optionIndex], [field]: value };
+      setNewProduct(prev => ({ ...prev, groups }));
+  };
 
-// ... [Manter suas funções de produto: removeGroup, addOptionToGroup, etc]
+  const handleEditProduct = (product: Product) => {
+      setNewProduct(product);
+      setProductImagePreview(product.image);
+      setEditingProductId(product.id);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
-return (
+  const handleRequestDeleteProduct = (productId: string) => {
+      setProductToDelete(productId);
+  };
+
+  const handleConfirmDeleteProduct = () => {
+      if (productToDelete) {
+          onDeleteProduct(productToDelete);
+          if (editingProductId === productToDelete) {
+              handleCancelEdit();
+          }
+          setProductToDelete(null); 
+      }
+  };
+
+  const handleCancelEdit = () => {
+      setNewProduct({ isAvailable: true, price: 0, pricingMode: 'default', groups: [] });
+      setProductImagePreview('');
+      setEditingProductId(null);
+  };
+
+  const handleSaveProduct = () => {
+      if (!newProduct.name || !newProduct.category) { alert("Preencha nome e categoria.");
+      return; }
+      
+      const productData: Product = {
+          id: editingProductId || Date.now().toString(),
+          companyId: company.id,
+          name: newProduct.name!,
+          description: newProduct.description || '',
+          category: newProduct.category!,
+          price: Number(newProduct.price),
+          image: productImagePreview || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c',
+          isAvailable: true,
+          pricingMode: newProduct.pricingMode || 'default',
+          groups: newProduct.groups || []
+      };
+      if (editingProductId) {
+          onUpdateProduct(productData);
+          alert("Produto updated!");
+      } else {
+          onAddProduct(productData);
+          alert("Produto criado!");
+      }
+      
+      handleCancelEdit();
+  };
+
+  const handleSaveSettings = () => {
+    updateCompany(localCompany);
+    alert('Configurações salvas com sucesso!');
+  };
+
+  const editingOrderPaymentMethod = editingOrder?.paymentMethod?.toLowerCase() || '';
+  const editingOrderOrigin = editingOrder?.origin?.toLowerCase() || '';
+
+  const currentBankFee = calculateBankFee(financialSummary.available, localCompany.serviceFeePercentage || 0);
+  const currentNet = Math.max(0, financialSummary.available - currentBankFee);
+
+  return (
     <div className="flex h-screen bg-gray-50 relative">
         
-        {/* Modal de Despacho Corrigido */}
+        {/* Modal de Despacho Customizado Interceptado (Entrega) */}
         {dispatchingOrder && (
             <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
                 <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-scale-in">
@@ -1086,7 +1163,7 @@ return (
                         <Truck className="w-6 h-6 text-red-600" />
                     </div>
                     <h3 className="text-xl font-bold text-gray-900 text-center mb-2">Despachar Pedido #{dispatchingOrder.id.slice(-4)}</h3>
-                    <p className="text-gray-500 text-sm text-center mb-6">Defina o entregador. O pedido ficará disponível para aceite.</p>
+                    <p className="text-gray-500 text-sm text-center mb-6">Defina os detalhes operacionais da rota e repasse da entrega.</p>
                     
                     <div className="space-y-4 text-left">
                         <div>
@@ -1094,10 +1171,10 @@ return (
                             <select 
                                 value={selectedCourierId}
                                 onChange={e => setSelectedCourierId(e.target.value)}
-                                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 mt-1 bg-white font-medium outline-none"
+                                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 mt-1 bg-white font-medium outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100"
                             >
                                 <option value="">Nenhum / Escolha na Lista</option>
-                                {couriers && couriers.map(c => (
+                                {couriers.map(c => (
                                     <option key={c.id} value={c.id}>{c.name}</option>
                                 ))}
                             </select>
@@ -1109,43 +1186,66 @@ return (
                                 type="text"
                                 value={deliveryAddressStr}
                                 onChange={e => setDeliveryAddressStr(e.target.value)}
-                                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 mt-1"
+                                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 mt-1 font-medium outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100"
+                                placeholder="Rua, número, bairro..."
                             />
                         </div>
                         
                         <div>
-                            <label className="text-xs font-bold text-gray-400 uppercase">Valor de Taxa</label>
+                            <label className="text-xs font-bold text-gray-400 uppercase">Link do Mapa (Rota GPS / WhatsApp)</label>
+                            <input 
+                                type="text"
+                                value={mapLink}
+                                onChange={e => setMapLink(e.target.value)}
+                                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 mt-1 font-medium outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100"
+                                placeholder="https://maps.google.com/..."
+                            />
+                        </div>
+                        
+                        <div>
+                            <label className="text-xs font-bold text-gray-400 uppercase">Valor de Taxa (Vai para Carteira do Entregador)</label>
                             <input 
                                 type="number"
-                                value={deliveryFee}
+                                value={deliveryFee || ''}
                                 onChange={e => setDeliveryFee(parseFloat(e.target.value) || 0)}
-                                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 mt-1 text-green-600 font-bold"
+                                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 mt-1 font-medium outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100 text-green-600 font-bold text-lg"
+                                placeholder="0.00"
                             />
                         </div>
                     </div>
                     
                     <div className="flex gap-3 mt-6">
-                        <button onClick={() => setDispatchingOrder(null)} className="flex-1 py-3 rounded-xl bg-gray-100 font-bold text-gray-600">Cancelar</button>
+                        <button 
+                            onClick={() => setDispatchingOrder(null)} 
+                            className="flex-1 py-3 rounded-xl bg-gray-100 font-bold text-gray-600 hover:bg-gray-200 transition-colors"
+                        >
+                            Cancelar
+                        </button>
                         <button 
                             onClick={() => {
-                                if (!dispatchingOrder) return;
-                                // ATUALIZAÇÃO PARA O NOVO STATUS DE ESPERA
                                 const updated: Order = {
                                     ...dispatchingOrder,
-                                    status: 'waiting_courier', 
+                                    status: 'delivering',
                                     courierId: selectedCourierId || undefined,
                                     deliveryFee: Number(deliveryFee),
-                                    mapLink: mapLink,
-                                    deliveryAddress: {
+                                    mapLink: mapLink
+                                };
+                                if (dispatchingOrder.deliveryAddress) {
+                                    updated.deliveryAddress = {
                                         ...dispatchingOrder.deliveryAddress,
                                         street: deliveryAddressStr
-                                    }
-                                };
+                                    };
+                                } else {
+                                    updated.deliveryAddress = {
+                                        street: deliveryAddressStr,
+                                        number: '', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0
+                                    };
+                                }
                                 onUpdateFullOrder(updated);
                                 setDispatchingOrder(null);
-                                alert("Pedido enviado para coluna 'Aguardando Aceite'!");
+                                alert("Pedido despachado e atualizado na rota com sucesso!");
                             }} 
-                            className="flex-1 py-3 rounded-xl bg-gray-900 font-bold text-white shadow-lg"
+                            className="flex-1 py-3 rounded-xl bg-gray-900 font-bold text-white hover:bg-black transition-colors shadow-lg"
                         >
                             Confirmar Rota
                         </button>
@@ -1841,12 +1941,6 @@ return (
                                         deliveryFee: isPickup ? order.deliveryFee : 0
                                     });
                                 }}
-                            />
-                            <KanbanColumn 
-                                title="Confirmando entrega" 
-                                status="waiting_courier" 
-                                items={orders.filter(o => o.status === 'waiting_courier')} 
-                                color="border-yellow-300"
                             />
                             <KanbanColumn 
                                  title="Em Entrega" 
