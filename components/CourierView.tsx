@@ -393,3 +393,96 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
                         </label>
                         <input 
                             type="text" maxLength
+                            className="w-full text-center text-3xl tracking-[0.5em] font-mono p-3 border rounded-xl focus:ring-2 focus:ring-orange-500 outline-none"
+                            placeholder="0000"
+                            value={deliveryCodeInput}
+                            onChange={(e) => setDeliveryCodeInput(e.target.value)}
+                        />
+                        <p className="text-xs text-center mt-2 text-gray-500">Peça os 4 últimos dígitos do telefone do cliente.</p>
+                    </div>
+
+                    <button 
+                        onClick={handleFinish}
+                        className="w-full bg-green-600 text-white font-bold py-4 rounded-xl hover:bg-green-700 shadow-lg shadow-green-200 flex items-center justify-center gap-2 transition-transform active:scale-95"
+                    >
+                        <CheckCircle className="w-5 h-5" /> Confirmar Entrega
+                    </button>
+                </div>
+            </div>
+        ) : (
+            /* Available Orders List */
+            <div className="p-4 space-y-4">
+                <div className="flex justify-between items-center">
+                    <h3 className="font-bold text-gray-600">Pedidos Próximos</h3>
+                    {currentLocation && (
+                        <span className="text-[10px] bg-gray-200 text-gray-600 px-2 py-1 rounded-full">
+                            Raio de {COURIER_OPERATIONAL_RADIUS_KM}km
+                        </span>
+                    )}
+                </div>
+
+                {filteredOrders.length === 0 && (
+                    <div className="text-center py-12 text-gray-400 bg-white rounded-xl border border-dashed border-gray-200 flex flex-col items-center gap-2">
+                        <Bike className="w-8 h-8 opacity-20" />
+                        <p>Nenhum pedido disponível na sua região.</p>
+                    </div>
+                )}
+
+                {filteredOrders.map(order => (
+                    <div key={order.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 p-2 bg-gray-50 rounded-bl-xl text-xs font-bold text-gray-500">
+                            {(order as any).distToPickup.toFixed(1)} km
+                        </div>
+                        
+                        <div className="flex justify-between items-start mb-2 pr-10">
+                            <div>
+                                <h4 className="font-bold text-gray-800">{order.companyName}</h4>
+                                <p className="text-xs text-gray-500">{order.pickupAddress?.neighborhood}</p>
+                            </div>
+                        </div>
+                        
+                        <div className="flex items-center gap-2 my-3 text-sm border-l-2 border-gray-200 pl-3">
+                             <div className="flex-1 space-y-1">
+                                 <p className="text-gray-500 text-xs truncate flex items-center gap-1">
+                                     <Store className="w-3 h-3" /> Coleta: {order.pickupAddress?.street}, {order.pickupAddress?.number}
+                                 </p>
+                                 <p className="font-medium text-gray-800 text-xs truncate flex items-center gap-1">
+                                     <MapPin className="w-3 h-3 text-red-500" /> Entrega: {order.deliveryAddress.street}, {order.deliveryAddress.number}
+                                 </p>
+                                 
+                                 {/* INSERIDO AQUI - Link do mapa na lista de pedidos */}
+                                 {(order as any).mapLink && (
+                                     <a 
+                                         href={(order as any).mapLink} 
+                                         target="_blank" 
+                                         rel="noopener noreferrer" 
+                                         className="mt-2 text-blue-600 font-bold text-xs flex items-center gap-1 bg-blue-50 px-3 py-2 rounded-lg w-fit hover:bg-blue-100 transition inline-flex"
+                                         onClick={(e) => e.stopPropagation()}
+                                     >
+                                         <MapPin className="w-3 h-3" />
+                                         Abrir Rota no GPS
+                                     </a>
+                                 )}
+                             </div>
+                        </div>
+
+                        <div className="flex items-center justify-between mt-4">
+                            <div className="bg-green-100 text-green-700 font-bold px-3 py-1.5 rounded-lg text-sm">
+                                + R$ {order.deliveryFee.toFixed(2)}
+                            </div>
+                            <button 
+                                onClick={() => handleAccept(order)}
+                                className="bg-gray-900 text-white font-bold py-2 px-4 rounded-lg hover:bg-black transition-colors flex items-center gap-2 text-sm shadow-md"
+                            >
+                                Aceitar <ArrowRight className="w-4 h-4" />
+                            </button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        )}
+    </div>
+  );
+};
+
+export default CourierView;
