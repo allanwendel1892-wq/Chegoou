@@ -1044,21 +1044,36 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   };
 
   // Lógica Modificada de Drag & Drop para Interceptação de Entregadores
-  const handleDragDropOrder = async (orderId: string, status: Order['status']) => {
-      const order = orders.find(o => o.id === orderId);
-      const isDelivery = order && !(order.deliveryMethod?.toLowerCase().includes('pickup') || order.deliveryMethod?.toLowerCase().includes('retirada'));
-      
-      if (status === 'delivering' && isDelivery) {
-          setDispatchingOrder(order);
-          setSelectedCourierId(order.courierId || '');
-          setDeliveryAddressStr(order.deliveryAddress ? `${order.deliveryAddress.street}, ${order.deliveryAddress.number || ''} - ${order.deliveryAddress.neighborhood || ''}`.trim() : '');
-          setMapLink((order as any).mapLink || '');
-          setDeliveryFee(order.deliveryFee || 0);
-          return;
-      }
-      updateOrderStatus(orderId, status);
-  };
+  const handleDragDropOrder = async (orderId: string, targetStatus: Order['status']) => {
+    const order = orders.find(o => o.id === orderId);
+    if (!order) return;
 
+    // 1. Identifica se é entrega (não é retirada)
+    const isDelivery = !(order.deliveryMethod?.toLowerCase().includes('pickup') || 
+                       order.deliveryMethod?.toLowerCase().includes('retirada'));
+
+    // 2. LÓGICA DE INTERCEPTAÇÃO:
+    // Se o usuário arrastar para a coluna "Aguardando Aceite" (waiting_courier)
+    // OU se tentar arrastar para "Em Entrega" (delivering), redirecionamos o fluxo:
+    if (isDelivery && (targetStatus === 'waiting_courier' || targetStatus === 'delivering')) {
+        
+        // Abre o modal de despacho para definir entregador e taxa
+        setDispatchingOrder(order);
+        setSelectedCourierId(order.courierId || '');
+        setDeliveryAddressStr(order.deliveryAddress 
+            ? `${order.deliveryAddress.street}, ${order.deliveryAddress.number || ''} - ${order.deliveryAddress.neighborhood || ''}`.trim() 
+            : ''
+        );
+        setMapLink((order as any).mapLink || '');
+        setDeliveryFee(order.deliveryFee || 0);
+        
+        // Retornamos vazio para o fluxo não continuar e não atualizar o status sozinho
+        return;
+    }
+
+    // 3. Comportamento padrão para outros status (Preparando, Pronto, Cancelado, etc)
+    updateOrderStatus(orderId, targetStatus);
+};
   const addGroup = () => {
       const newGroup: ProductGroup = {
           id: Date.now().toString(),
