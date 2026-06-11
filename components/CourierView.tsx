@@ -29,7 +29,7 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [deliveryCodeInput, setDeliveryCodeInput] = useState('');
   const [isWithdrawing, setIsWithdrawing] = useState(false);
-  
+
   // Real Balance Logic States
   const [withdrawHistory, setWithdrawHistory] = useState<WithdrawalRequest[]>([]);
   const [isBalanceLoading, setIsBalanceLoading] = useState(false);
@@ -71,7 +71,6 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
 
       return { availableBalance, deliveriesCount };
   }, [availableOrders, withdrawHistory, courier.id]);
-
 
   // --- PERSISTENCE LOGIC ---
   // Ensure that if an order is currently 'delivering', it remains as the active order
@@ -188,7 +187,6 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
                date: new Date().toISOString(),
                bankInfo: detailString
            }]);
-
            if (error) throw error;
 
            // Refresh local history
@@ -196,7 +194,6 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
            if (updatedHistory) setWithdrawHistory(updatedHistory);
             
            alert("Solicitação enviada com sucesso! O pagamento será realizado manualmente pelo administrador.");
-
       } catch (e: any) {
           console.error("Withdrawal error:", e);
           alert("Erro ao solicitar saque: " + (e.message || "Erro desconhecido"));
@@ -246,7 +243,7 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
                 <div>
                     <h1 className="font-bold text-gray-800">{courier.name}</h1>
                     <div className="flex items-center gap-2 text-xs">
-                         <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                       <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500'}`}></span>
                          {isOnline ? 'Online' : 'Offline'}
                          {locationStatus === 'locating' && <span className="text-orange-500 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin"/> Buscando GPS...</span>}
                          {locationStatus === 'found' && <span className="text-green-600 flex items-center gap-1"><Crosshair className="w-3 h-3"/> GPS Ativo</span>}
@@ -304,18 +301,18 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
                 <div className="p-4 space-y-6">
                     {/* Mock Map Route Visual */}
                     <div className="bg-gray-100 h-24 rounded-lg flex items-center justify-center relative border border-gray-200">
-                        <div className="absolute inset-0 flex items-center justify-between px-10">
+                         <div className="absolute inset-0 flex items-center justify-between px-10">
                              <div className="flex flex-col items-center gap-1 z-10">
                                 <div className="w-3 h-3 bg-blue-500 rounded-full ring-2 ring-white"></div>
                                 <span className="text-[10px] text-gray-500 font-bold">Você</span>
                              </div>
                              <div className="h-0.5 bg-gray-300 flex-1 mx-2 relative">
-                                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-white px-2 text-[10px] text-gray-500 rounded-full border border-gray-200">
+                                 <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-white px-2 text-[10px] text-gray-500 rounded-full border border-gray-200">
                                     {(activeDistances.toPickup + activeDistances.toDrop).toFixed(1)}km
-                                </div>
+                                 </div>
                              </div>
                              <div className="flex flex-col items-center gap-1 z-10">
-                                <div className="w-3 h-3 bg-red-500 rounded-full ring-2 ring-white animate-pulse"></div>
+                                 <div className="w-3 h-3 bg-red-500 rounded-full ring-2 ring-white animate-pulse"></div>
                                 <span className="text-[10px] text-gray-500 font-bold">Destino</span>
                              </div>
                         </div>
@@ -345,6 +342,19 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
                          <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-orange-500 border-2 border-white"></div>
                         <h4 className="font-bold text-gray-800 text-sm">Entrega: {activeOrder.customerName}</h4>
                         <p className="text-xs text-gray-500 mb-2">{activeOrder.deliveryAddress.street}, {activeOrder.deliveryAddress.number}</p>
+                        
+                        {/* INSERIDO AQUI - Link do mapa na rota ativa */}
+                        {(activeOrder as any).mapLink && (
+                            <a 
+                                href={(activeOrder as any).mapLink} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="mb-3 text-blue-600 font-bold text-xs flex items-center gap-1 bg-blue-50 px-3 py-2 rounded-lg w-fit hover:bg-blue-100 transition"
+                            >
+                                <MapPin className="w-3 h-3" />
+                                Abrir Rota no GPS
+                            </a>
+                        )}
                         
                         {/* PAYMENT ALERT FOR CASH */}
                         {(pMethod.includes('cash') || pMethod.includes('dinheiro')) && (
@@ -382,83 +392,4 @@ const CourierView: React.FC<CourierViewProps> = ({ courier, availableOrders, acc
                             Código de Confirmação
                         </label>
                         <input 
-                            type="text" maxLength={4}
-                            className="w-full text-center text-3xl tracking-[0.5em] font-mono p-3 border rounded-xl focus:ring-2 focus:ring-orange-500 outline-none"
-                            placeholder="0000"
-                            value={deliveryCodeInput}
-                            onChange={(e) => setDeliveryCodeInput(e.target.value)}
-                        />
-                        <p className="text-xs text-center mt-2 text-gray-500">Peça os 4 últimos dígitos do telefone do cliente.</p>
-                    </div>
-
-                    <button 
-                        onClick={handleFinish}
-                        className="w-full bg-green-600 text-white font-bold py-4 rounded-xl hover:bg-green-700 shadow-lg shadow-green-200 flex items-center justify-center gap-2 transition-transform active:scale-95"
-                    >
-                        <CheckCircle className="w-5 h-5" /> Confirmar Entrega
-                    </button>
-                </div>
-            </div>
-        ) : (
-            /* Available Orders List */
-            <div className="p-4 space-y-4">
-                <div className="flex justify-between items-center">
-                    <h3 className="font-bold text-gray-600">Pedidos Próximos</h3>
-                    {currentLocation && (
-                        <span className="text-[10px] bg-gray-200 text-gray-600 px-2 py-1 rounded-full">
-                            Raio de {COURIER_OPERATIONAL_RADIUS_KM}km
-                        </span>
-                    )}
-                </div>
-
-                {filteredOrders.length === 0 && (
-                    <div className="text-center py-12 text-gray-400 bg-white rounded-xl border border-dashed border-gray-200 flex flex-col items-center gap-2">
-                        <Bike className="w-8 h-8 opacity-20" />
-                        <p>Nenhum pedido disponível na sua região.</p>
-                    </div>
-                )}
-
-                {filteredOrders.map(order => (
-                    <div key={order.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 relative overflow-hidden group">
-                        <div className="absolute top-0 right-0 p-2 bg-gray-50 rounded-bl-xl text-xs font-bold text-gray-500">
-                            {(order as any).distToPickup.toFixed(1)} km
-                        </div>
-                        
-                        <div className="flex justify-between items-start mb-2 pr-10">
-                            <div>
-                                <h4 className="font-bold text-gray-800">{order.companyName}</h4>
-                                <p className="text-xs text-gray-500">{order.pickupAddress?.neighborhood}</p>
-                            </div>
-                        </div>
-                        
-                        <div className="flex items-center gap-2 my-3 text-sm border-l-2 border-gray-200 pl-3">
-                             <div className="flex-1 space-y-1">
-                                 <p className="text-gray-500 text-xs truncate flex items-center gap-1">
-                                     <Store className="w-3 h-3" /> Coleta: {order.pickupAddress?.street}, {order.pickupAddress?.number}
-                                 </p>
-                                 <p className="font-medium text-gray-800 text-xs truncate flex items-center gap-1">
-                                     <MapPin className="w-3 h-3 text-red-500" /> Entrega: {order.deliveryAddress.street}, {order.deliveryAddress.number}
-                                 </p>
-                             </div>
-                        </div>
-
-                        <div className="flex items-center justify-between mt-4">
-                            <div className="bg-green-100 text-green-700 font-bold px-3 py-1.5 rounded-lg text-sm">
-                                + R$ {order.deliveryFee.toFixed(2)}
-                            </div>
-                            <button 
-                                onClick={() => handleAccept(order)}
-                                className="bg-gray-900 text-white font-bold py-2 px-4 rounded-lg hover:bg-black transition-colors flex items-center gap-2 text-sm shadow-md"
-                            >
-                                Aceitar <ArrowRight className="w-4 h-4" />
-                            </button>
-                        </div>
-                    </div>
-                ))}
-            </div>
-        )}
-    </div>
-  );
-};
-
-export default CourierView;
+                            type="text" maxLength
