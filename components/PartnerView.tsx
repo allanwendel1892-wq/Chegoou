@@ -1043,55 +1043,22 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       }
   };
 
-  const handleDragDropOrder = async (orderId: string, newStatus: Order['status']) => {
-    const order = orders.find(o => o.id === orderId);
-    if (!order) return;
+  // Lógica Modificada de Drag & Drop para Interceptação de Entregadores
+  const handleDragDropOrder = async (orderId: string, status: Order['status']) => {
+      const order = orders.find(o => o.id === orderId);
+      const isDelivery = order && !(order.deliveryMethod?.toLowerCase().includes('pickup') || order.deliveryMethod?.toLowerCase().includes('retirada'));
+      
+      if (status === 'delivering' && isDelivery) {
+          setDispatchingOrder(order);
+          setSelectedCourierId(order.courierId || '');
+          setDeliveryAddressStr(order.deliveryAddress ? `${order.deliveryAddress.street}, ${order.deliveryAddress.number || ''} - ${order.deliveryAddress.neighborhood || ''}`.trim() : '');
+          setMapLink((order as any).mapLink || '');
+          setDeliveryFee(order.deliveryFee || 0);
+          return;
+      }
+      updateOrderStatus(orderId, status);
+  };
 
-    // 1. Atualização Otimista: Move o card imediatamente para a coluna de destino
-    const previousOrders = [...orders]; // Guarda o estado anterior para reverter caso necessário
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
-
-    // 2. Se for 'delivering', abre o modal para configurar o entregador
-    if (newStatus === 'delivering') {
-        setDispatchingOrder(order);
-    } else {
-        // Se for outro status, apenas atualiza no banco
-        try {
-            await supabase.from('orders').update({ status: newStatus }).eq('id', orderId);
-        } catch (error) {
-            console.error("Erro ao atualizar status:", error);
-            setOrders(previousOrders); // Reverte se der erro
-        }
-    }
-};
-      // E no seu modal, na função de confirmar o despacho:
-    const handleConfirmDispatch = async () => {
-        if (!dispatchingOrder || !selectedCourierId) {
-            alert("Por favor, selecione um entregador.");
-            return;
-        }
-    
-        try {
-            // Atualiza no banco com o entregador selecionado e status 'delivering'
-            const { error } = await supabase
-                .from('orders')
-                .update({ 
-                    status: 'delivering', 
-                    courier_id: selectedCourierId, // Garanta que o nome da coluna no banco está correto
-                    delivery_fee: Number(deliveryFee) 
-                })
-                .eq('id', dispatchingOrder.id);
-    
-            if (error) throw error;
-    
-            setDispatchingOrder(null);
-            alert("Pedido despachado!");
-        } catch (err) {
-            console.error(err);
-            // Se der erro no banco, volta o pedido para a coluna anterior
-            setOrders(prev => prev.map(o => o.id === dispatchingOrder.id ? { ...o, status: 'ready' } : o));
-        }
-    };
   const addGroup = () => {
       const newGroup: ProductGroup = {
           id: Date.now().toString(),
