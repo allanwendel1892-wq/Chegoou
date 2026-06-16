@@ -593,6 +593,7 @@ const App: React.FC = () => {
           // Busca de Produtos
           const { data: productsData, error: productsError } = await supabase.from('products').select('*').limit(5000);//limite de dados do banco
           if (productsError) throw productsError;
+          console.log("PRODUTOS ACHADOS NO BANCO:", productsData);
           if (productsData) setProducts(productsData);
 
           // Busca de Pedidos
