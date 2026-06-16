@@ -405,7 +405,7 @@ const App: React.FC = () => {
         supabase.removeChannel(messagesSub);
         supabase.removeChannel(withdrawalsSub);
     };
-  }, []);
+  }, [currentUser]);
 
   /**
    * Inicia inscrição Realtime para Pedidos com Lógica de Notificação Diferenciada
