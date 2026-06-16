@@ -27,7 +27,7 @@ import {
 } from './types';
 
 // --- COMPONENTES DE VISUALIZAÇÃO ---
-const AuthView = lazy(() => import('./components/AuthView'));
+import AuthView from './components/AuthView';
 const AdminView = lazy(() => import('./components/AdminView'));
 const PartnerView = lazy(() => import('./components/PartnerView'));
 const CourierView = lazy(() => import('./components/CourierView'));
@@ -1224,20 +1224,6 @@ const App: React.FC = () => {
   // ---------------------------------------------------------------------------
   // LÓGICA DE RENDERIZAÇÃO
   // ---------------------------------------------------------------------------
-
-  /**
-   * Tela de carregamento inicial
-   */
-  if (isLoading) {
-      return (
-          <div className="h-screen w-full flex flex-col items-center justify-center bg-gray-50">
-              <Loader2 className="w-12 h-12 text-red-600 animate-spin mb-6" />
-              <p className="text-gray-600 font-bold text-lg animate-pulse">
-                Carregando Chegoou...
-              </p>
-          </div>
-      );
-  }
 
   /**
    * Tela de erro de conexão com Supabase
