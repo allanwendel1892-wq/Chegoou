@@ -27,7 +27,7 @@ import {
 } from './types';
 
 // --- COMPONENTES DE VISUALIZAÇÃO ---
-import AuthView from './components/AuthView';
+const AuthView = lazy(() => import('./components/AuthView'));
 const AdminView = lazy(() => import('./components/AdminView'));
 const PartnerView = lazy(() => import('./components/PartnerView'));
 const CourierView = lazy(() => import('./components/CourierView'));
@@ -255,7 +255,7 @@ const App: React.FC = () => {
   };
 
   // ESTADOS DE CARREGAMENTO E ERRO
-  const [isLoading, setIsLoading] = useState(!localStorage.getItem('supabase-auth-token'));
+  const [isLoading, setIsLoading] = useState(true);
   const [connectionError, setConnectionError] = useState<{
     title: string;
     message: string;
@@ -349,12 +349,7 @@ const App: React.FC = () => {
    * Inicia inscrições de Realtime para Mensagens e Saques
    */
   useEffect(() => {
-    // A TRAVA DE SEGURANÇA: Se não tem ninguém logado, ignora o banco e o realtime!
-    if (!currentUser) return;
-
     fetchInitialData();
-
-    // CANAL DE CHAT REALTIME
 
     // CANAL DE CHAT REALTIME
     const messagesSub = supabase
@@ -405,7 +400,7 @@ const App: React.FC = () => {
         supabase.removeChannel(messagesSub);
         supabase.removeChannel(withdrawalsSub);
     };
-  }, [currentUser]);
+  }, []);
 
   /**
    * Inicia inscrição Realtime para Pedidos com Lógica de Notificação Diferenciada
@@ -1224,6 +1219,20 @@ const App: React.FC = () => {
   // ---------------------------------------------------------------------------
   // LÓGICA DE RENDERIZAÇÃO
   // ---------------------------------------------------------------------------
+
+  /**
+   * Tela de carregamento inicial
+   */
+  if (isLoading) {
+      return (
+          <div className="h-screen w-full flex flex-col items-center justify-center bg-gray-50">
+              <Loader2 className="w-12 h-12 text-red-600 animate-spin mb-6" />
+              <p className="text-gray-600 font-bold text-lg animate-pulse">
+                Carregando Chegoou...
+              </p>
+          </div>
+      );
+  }
 
   /**
    * Tela de erro de conexão com Supabase
