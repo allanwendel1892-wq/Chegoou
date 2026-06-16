@@ -1,6 +1,7 @@
 /**
  * SISTEMA CHEGOOU - CORE APPLICATION
- * Versão: 2.0.0 (PWA Optimized) - SEM REALTIME (LEVE)
+ * Versão: 2.0.0 (PWA Optimized)
+ * Descrição: Gestão completa de delivery, marketplace e logística.
  */
 
 import React, { 
@@ -40,12 +41,13 @@ import {
     AlertCircle, 
     Database, 
     Lock,
-    Download
+    Download // Adicionado para o botão de instalação
 } from 'lucide-react';
 
 // >>> MOTOR DO PWA (Registro do Service Worker) <<<
 import { registerSW } from 'virtual:pwa-register';
 
+// O PWA só vai tentar baixar o cache offline DEPOIS que o app abrir
 window.addEventListener('load', () => {
     registerSW({ immediate: true });
 });
@@ -58,9 +60,13 @@ import somEntrega from './somEntrega.mp3';
 // -----------------------------------------------------------------------------
 // FUNÇÕES UTILITÁRIAS GLOBAIS
 // -----------------------------------------------------------------------------
+
+/**
+ * Cálculo de distância entre dois pontos (Haversine)
+ */
 const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
-  const R = 6371; 
+  const R = 6371; // Raio da Terra em Km
   const dLat = (lat2 - lat1) * (Math.PI / 180);
   const dLon = (lon2 - lon1) * (Math.PI / 180);
   const a = 
@@ -72,6 +78,9 @@ const getDistanceFromLatLonInKm = (lat1: number, lon1: number, lat2: number, lon
   return distance;
 };
 
+/**
+ * Preparação de payload de produto para o banco de dados
+ */
 const prepareProductPayload = (product: Product) => {
     return {
         id: product.id,
@@ -88,48 +97,93 @@ const prepareProductPayload = (product: Product) => {
     };
 };
 
+/**
+ * Normalização de números de WhatsApp para o formato internacional
+ */
 const normalizeWhatsApp = (phone: string) => {
     if (!phone) return phone;
     let clean = phone.replace(/\D/g, ''); 
-    if (clean.startsWith('0')) clean = clean.substring(1);
-    if (clean.length === 10 || clean.length === 11) clean = '55' + clean;
+
+    // Remove zero inicial se houver
+    if (clean.startsWith('0')) {
+        clean = clean.substring(1);
+    }
+
+    // Adiciona código do país se faltar
+    if (clean.length === 10 || clean.length === 11) {
+        clean = '55' + clean;
+    }
+
+    // Ajuste de nono dígito para regiões específicas
     if (clean.length === 13 && clean.startsWith('55')) {
         const ddd = parseInt(clean.substring(2, 4), 10);
-        if (ddd > 28 && clean[4] === '9') clean = clean.substring(0, 4) + clean.substring(5); 
+        if (ddd > 28 && clean[4] === '9') {
+            clean = clean.substring(0, 4) + clean.substring(5); 
+        }
     }
+
     return clean;
 };
 
+/**
+ * Função Global de Geolocalização via Navegador (PWA Ready)
+ */
 export const getDeviceLocation = async () => {
+    console.log("Iniciando captura de localização via navegador...");
     return new Promise<{lat: number, lng: number}>((resolve, reject) => {
         if (!navigator.geolocation) {
             reject(new Error("Geolocalização não suportada pelo navegador."));
             return;
         }
+
         navigator.geolocation.getCurrentPosition(
             (pos) => {
-                resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+                console.log("Localização obtida com sucesso.");
+                resolve({ 
+                    lat: pos.coords.latitude, 
+                    lng: pos.coords.longitude 
+                });
             },
-            (err) => reject(err),
-            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            (err) => {
+                console.error("Erro ao obter localização:", err);
+                reject(err);
+            },
+            { 
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 0
+            }
         );
     });
 };
 
+// -----------------------------------------------------------------------------
+// COMPONENTE PRINCIPAL
+// -----------------------------------------------------------------------------
+
+// >>> MOTOR DE CÁLCULO DE ESTOQUE (FICHA TÉCNICA) <<<
 const processInventoryDeduction = async (orderItems: any[], dbCompositions: any[]) => {
   const stockDeductions: Record<string, number> = {};
+
   orderItems.forEach(item => {
+    // 1. Desconta insumos ligados DIRETAMENTE ao produto base
     const baseCompositions = dbCompositions.filter(c => c.referenceId === item.productId);
     baseCompositions.forEach(comp => {
       const totalToDeduct = comp.amount_needed * item.quantity;
       stockDeductions[comp.inventory_item_id] = (stockDeductions[comp.inventory_item_id] || 0) + totalToDeduct;
     });
+
+    // 2. Desconta insumos ligados às OPÇÕES/SABORES (ex: Calabresa)
     if (item.selectedOptions && item.selectedOptions.length > 0) {
+      // Conta quantos sabores a pizza tem para saber se é 1/2, 1/3, etc.
       const fractions = item.selectedOptions.length;
       const fractionMultiplier = 1 / fractions; 
+
       item.selectedOptions.forEach((option: any) => {
+        // Assume que o optionName ou ID da opção é a referência na ficha técnica
         const referenceToSearch = option.id || option.name || option.optionName;
         const optionCompositions = dbCompositions.filter(c => c.referenceId === referenceToSearch);
+        
         optionCompositions.forEach(comp => {
           const totalToDeduct = (comp.amount_needed * fractionMultiplier) * item.quantity;
           stockDeductions[comp.inventory_item_id] = (stockDeductions[comp.inventory_item_id] || 0) + totalToDeduct;
@@ -137,49 +191,78 @@ const processInventoryDeduction = async (orderItems: any[], dbCompositions: any[
       });
     }
   });
+
   return stockDeductions;
 };
+// >>> FIM DO MOTOR DE CÁLCULO <<<
 
-// -----------------------------------------------------------------------------
-// COMPONENTE PRINCIPAL
-// -----------------------------------------------------------------------------
 const App: React.FC = () => {
+  // ESTADOS DE AUTENTICAÇÃO E USUÁRIO
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const currentUserRef = useRef<User | null>(null);
   
-  useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
+  useEffect(() => { 
+    currentUserRef.current = currentUser; 
+  }, [currentUser]);
 
+  // --- LÓGICA DE INSTALAÇÃO PWA ---
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: Event) => {
+      // Impede que o mini-infobar apareça no mobile
       e.preventDefault();
+      // Guarda o evento para ser disparado depois
       setDeferredPrompt(e);
+      console.log("Evento beforeinstallprompt capturado.");
     };
+
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
   }, []);
 
   const handleInstall = async () => {
     if (!deferredPrompt) return;
+
+    // Mostra o prompt de instalação
     deferredPrompt.prompt();
+
+    // Aguarda a resposta do usuário
     const { outcome } = await deferredPrompt.userChoice;
+    console.log(`Usuário respondeu ao prompt de instalação: ${outcome}`);
+
+    // Limpa o prompt independentemente do resultado
     setDeferredPrompt(null);
   };
+  // --------------------------------
 
+  // ESTADOS DE NOTIFICAÇÃO (TOAST INTERNO)
   const [inAppNotification, setInAppNotification] = useState<{
-    title: string; message: string; icon: string;
+    title: string;
+    message: string;
+    icon: string;
   } | null>(null);
 
+  /**
+   * Exibe notificação visual na tela
+   */
   const showInAppNotification = (title: string, message: string, icon: string) => {
       setInAppNotification({ title, message, icon });
       setTimeout(() => setInAppNotification(null), 5000); 
   };
 
+  // ESTADOS DE CARREGAMENTO E ERRO
+  const [isLoading, setIsLoading] = useState(!localStorage.getItem('supabase-auth-token'));
   const [connectionError, setConnectionError] = useState<{
-    title: string; message: string; type: 'network' | 'permission' | 'unknown';
+    title: string;
+    message: string;
+    type: 'network' | 'permission' | 'unknown';
   } | null>(null);
   
+  // ESTADOS DE DADOS GLOBAIS
   const [users, setUsers] = useState<User[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -188,24 +271,39 @@ const App: React.FC = () => {
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
   const [chats, setChats] = useState<Record<string, ChatMessage[]>>({});
 
+  // CONFIGURAÇÕES GLOBAIS DA PLATAFORMA
   const [globalSettings, setGlobalSettings] = useState({
-      platformFee: 0.49, minWithdrawal: 50, maintenanceMode: false
+      platformFee: 0.49, 
+      minWithdrawal: 50,
+      maintenanceMode: false
   });
 
   const ordersRef = useRef<Order[]>([]);
-  useEffect(() => { ordersRef.current = orders; }, [orders]);
+  useEffect(() => { 
+    ordersRef.current = orders; 
+  }, [orders]);
 
-  // EFEITOS
+  // ---------------------------------------------------------------------------
+  // EFEITOS DE SISTEMA
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Aviso de Instalação para iPhone (iOS PWA)
+   */
   useEffect(() => {
     const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent);
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+    
     if (isIos && !isStandalone) {
       setTimeout(() => {
-        alert("Dica Chegoou: Para instalar o App, clique no ícone de 'Compartilhar' no Safari e escolha 'Adicionar à Tela de Início' 📲");
+        alert("Dica Chegoou: Para instalar o App, clique no ícone de 'Compartilhar' no seu Safari e escolha 'Adicionar à Tela de Início' 📲");
       }, 6000);
     }
   }, []);
 
+  /**
+   * Processamento de retorno de pagamento (Mercado Pago / Outros)
+   */
   useEffect(() => {
       const handlePaymentReturn = async () => {
           const query = new URLSearchParams(window.location.search);
@@ -213,42 +311,190 @@ const App: React.FC = () => {
           const externalReference = query.get('external_reference');
 
           if (collectionStatus === 'approved' && externalReference) {
+              console.log("Pagamento aprovado detectado para o pedido:", externalReference);
               try {
                   const { error } = await supabase
                       .from('orders')
-                      .update({ status: 'pending', paymentStatus: 'approved' })
+                      .update({ 
+                          status: 'pending',
+                          paymentStatus: 'approved' 
+                      })
                       .eq('id', externalReference);
                   
                   if (error) throw error;
                   
-                  showInAppNotification("Sucesso!", "Pagamento confirmado!", "✅");
+                  showInAppNotification(
+                      "Sucesso!",
+                      "Pagamento confirmado! Seu pedido foi enviado para a loja.",
+                      "✅"
+                  );
+                  
                   setOrders(prev => prev.map(o => o.id === externalReference ? { ...o, status: 'pending', paymentStatus: 'approved' } : o));
+
               } catch (e) {
                   console.error("Erro ao confirmar pagamento no retorno:", e);
               } finally {
+                  // Limpa a URL para evitar reprocessamento ao recarregar
                   window.history.replaceState({}, document.title, window.location.pathname);
               }
           }
       };
-      if (currentUser) handlePaymentReturn();
+
+      if (currentUser) {
+          handlePaymentReturn();
+      }
   }, [currentUser]);
 
-  // ---> A CHAVE DO CARRO FOI DEVOLVIDA AQUI <---
+  /**
+   * Inicia inscrições de Realtime para Mensagens e Saques
+   */
+  useEffect(() => {
+    // A TRAVA DE SEGURANÇA: Se não tem ninguém logado, ignora o banco e o realtime!
+    if (!currentUser) return;
+
+    fetchInitialData();
+
+    // CANAL DE CHAT REALTIME
+
+    // CANAL DE CHAT REALTIME
+    const messagesSub = supabase
+      .channel('public:messages')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+          const newMsg = payload.new as any;
+          const formattedMsg: ChatMessage = {
+              ...newMsg,
+              timestamp: new Date(newMsg.timestamp)
+          };
+
+          if (currentUserRef.current && formattedMsg.senderRole !== currentUserRef.current.role) {
+              new Audio(somMensagem).play().catch(() => {});
+              
+              showInAppNotification(
+                  `Nova mensagem`, 
+                  formattedMsg.text,
+                  '💬'
+              );
+          }
+          
+          setChats(prev => {
+              const currentChats = prev[formattedMsg.orderId] || [];
+              if (currentChats.some(m => m.id === formattedMsg.id)) return prev;
+              
+              return {
+                  ...prev,
+                  [formattedMsg.orderId]: [...currentChats, formattedMsg]
+              };
+          });
+      })
+      .subscribe();
+    
+    // CANAL DE SAQUES REALTIME
+    const withdrawalsSub = supabase
+      .channel('public:withdrawal_requests')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'withdrawal_requests' }, (payload) => {
+          console.log("Mudança detectada em solicitações de saque.");
+          if (payload.eventType === 'INSERT') {
+             setWithdrawals(prev => [...prev, payload.new as WithdrawalRequest]);
+          } else if (payload.eventType === 'UPDATE') {
+             setWithdrawals(prev => prev.map(w => w.id === payload.new.id ? payload.new as WithdrawalRequest : w));
+          }
+      })
+      .subscribe();
+
+    return () => {
+        supabase.removeChannel(messagesSub);
+        supabase.removeChannel(withdrawalsSub);
+    };
+  }, [currentUser]);
+
+  /**
+   * Inicia inscrição Realtime para Pedidos com Lógica de Notificação Diferenciada
+   */
   useEffect(() => {
       if (!currentUser) return;
-      fetchInitialData();
+
+      let filter = undefined;
+      if (currentUser.role === 'client') {
+          filter = `customerId=eq.${currentUser.id}`;
+      } else if (currentUser.role === 'partner') {
+          filter = `companyId=eq.${currentUser.id}`;
+      }
+
+      const channel = supabase.channel(`orders_user_${currentUser.id}`)
+          .on('postgres_changes', { 
+              event: '*', 
+              schema: 'public', 
+              table: 'orders',
+              filter: filter 
+          }, (payload) => {
+              if (payload.eventType === 'INSERT') {
+                  const newOrder = payload.new as Order;
+                  newOrder.timestamp = new Date(newOrder.timestamp);
+
+                  if (currentUser.role === 'partner') {
+                      new Audio(somPedido).play().catch(() => {});
+                      showInAppNotification("Novo Pedido!", `Você recebeu um novo pedido de ${newOrder.customerName}`, "🔔");
+                  }
+
+                  setOrders(prev => {
+                      if (prev.some(o => o.id === newOrder.id)) return prev;
+                      return [newOrder, ...prev]; 
+                  });
+              } else if (payload.eventType === 'UPDATE') {
+                  const updatedOrder = payload.new as Order;
+                  updatedOrder.timestamp = new Date(updatedOrder.timestamp);
+                  
+                  const oldOrder = ordersRef.current.find(o => o.id === updatedOrder.id);
+                  
+                  if (currentUser.role === 'client' && oldOrder) {
+                      // LÓGICA DE NOTIFICAÇÃO DIFERENCIADA (ENTREGA VS RETIRADA)
+                      
+                      // Caso 1: Saiu para Entrega
+                      if (updatedOrder.deliveryMethod === 'delivery' && oldOrder.status !== 'delivering' && updatedOrder.status === 'delivering') {
+                          new Audio(somEntrega).play().catch(() => {});
+                          showInAppNotification(
+                              'Chegoou! 🛵', 
+                              `Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!`,
+                              '🛵'
+                          );
+                      }
+                      // Caso 2: Pronto para Retirada
+                      else if (updatedOrder.deliveryMethod === 'pickup' && oldOrder.status !== 'ready' && updatedOrder.status === 'ready') {
+                          new Audio(somEntrega).play().catch(() => {});
+                          showInAppNotification(
+                              'Tá na mão! 🛍️', 
+                              `Seu pedido de ${updatedOrder.companyName} está pronto para ser retirado no balcão!`,
+                              '🛍️'
+                          );
+                      }
+                  }
+
+                  setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+              } else if (payload.eventType === 'DELETE') {
+                  setOrders(prev => prev.filter(o => o.id !== payload.old.id));
+              }
+          })
+          .subscribe();
+
+      return () => {
+          supabase.removeChannel(channel);
+      };
   }, [currentUser]);
 
-  // POLLING: BUSCA LEVE A CADA 5 SEGUNDOS (SUBSTITUI O REALTIME)
+  /**
+   * POLLING: Busca de Segurança periódica para garantir sincronia
+   */
   useEffect(() => {
       if (!currentUser) return;
 
       const interval = setInterval(async () => {
+          // Só busca se houver pedidos ativos para economizar recursos
           const activeOrders = ordersRef.current.filter(o => 
               ['waiting_payment', 'pending', 'preparing', 'ready', 'delivering'].includes(o.status)
           );
 
           const shouldFetch = currentUser.role === 'partner' || activeOrders.length > 0;
+
           if (!shouldFetch) return;
 
           let query = supabase.from('orders').select('*');
@@ -264,6 +510,7 @@ const App: React.FC = () => {
           }
 
           query = query.order('timestamp', { ascending: false }).limit(50);
+
           const { data, error } = await query;
 
           if (!error && data) {
@@ -281,24 +528,42 @@ const App: React.FC = () => {
                        if (!existing) {
                            newOrdersMap.set(freshOrder.id, formattedFreshOrder);
                            hasChanges = true;
-                           if (currentUser.role === 'partner') new Audio(somPedido).play().catch(() => {});
+                           
+                           if (currentUser.role === 'partner') {
+                               new Audio(somPedido).play().catch(() => {});
+                           }
+
                        } else if (existing.status !== freshOrder.status || existing.paymentStatus !== freshOrder.paymentStatus) {
                            newOrdersMap.set(freshOrder.id, formattedFreshOrder);
                            hasChanges = true;
                            
+                           // Verificação de notificações no Polling (Segurança)
                            if (currentUser.role === 'client') {
+                               // Notificação de Entrega
                                if (freshOrder.deliveryMethod === 'delivery' && existing.status !== 'delivering' && freshOrder.status === 'delivering') {
                                    new Audio(somEntrega).play().catch(() => {});
-                                   showInAppNotification('Chegoou! 🛵', `Oba! Seu pedido de ${freshOrder.companyName} saiu para entrega!`, '🛵');
-                               } else if (freshOrder.deliveryMethod === 'pickup' && existing.status !== 'ready' && freshOrder.status === 'ready') {
+                                   showInAppNotification(
+                                      'Chegoou! 🛵', 
+                                      `Oba! Seu pedido de ${freshOrder.companyName} saiu para entrega!`,
+                                      '🛵'
+                                   );
+                               }
+                               // Notificação de Retirada
+                               else if (freshOrder.deliveryMethod === 'pickup' && existing.status !== 'ready' && freshOrder.status === 'ready') {
                                    new Audio(somEntrega).play().catch(() => {});
-                                   showInAppNotification('Tá na mão! 🛍️', `Seu pedido de ${freshOrder.companyName} está pronto no balcão!`, '🛍️');
+                                   showInAppNotification(
+                                      'Tá na mão! 🛍️', 
+                                      `Seu pedido de ${freshOrder.companyName} está pronto no balcão!`,
+                                      '🛍️'
+                                   );
                                }
                            }
                        }
                    });
 
-                   if (hasChanges) return Array.from(newOrdersMap.values()).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+                   if (hasChanges) {
+                       return Array.from(newOrdersMap.values()).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+                   }
                    return prevOrders;
                });
           }
@@ -307,53 +572,76 @@ const App: React.FC = () => {
       return () => clearInterval(interval);
   }, [currentUser]); 
 
-  // HANDLERS
+  // ---------------------------------------------------------------------------
+  // MANIPULADORES DE DADOS (HANDLERS)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Busca inicial de todos os dados do sistema
+   */
   const fetchInitialData = async () => {
+      setIsLoading(true);
       setConnectionError(null);
+      console.log("Iniciando carregamento de dados globais...");
+      
       try {
+          // Busca de Empresas
           const { data: companiesData, error: companiesError } = await supabase.from('companies').select('*');
           if (companiesError) throw companiesError;
           if (companiesData) setCompanies(companiesData);
 
-          const { data: productsData, error: productsError } = await supabase.from('products').select('*').limit(5000);
+          // Busca de Produtos
+          const { data: productsData, error: productsError } = await supabase.from('products').select('*').limit(5000);//limite de dados do banco
           if (productsError) throw productsError;
           if (productsData) setProducts(productsData);
 
+          // Busca de Pedidos
           const { data: ordersData, error: ordersError } = await supabase.from('orders').select('*').limit(5000);
           if (ordersError) throw ordersError;
           if (ordersData) {
-              const formattedOrders = ordersData.map(o => ({ ...o, timestamp: new Date(o.timestamp) }));
+              const formattedOrders = ordersData.map(o => ({
+                  ...o,
+                  timestamp: new Date(o.timestamp)
+              }));
               formattedOrders.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
               setOrders(formattedOrders);
           }
 
+          // Busca de Usuários (Apenas se Admin no futuro, ou limitado)
           const { data: usersData, error: usersError } = await supabase.from('users').select('*').limit(5000);
           if (usersError) throw usersError;
           if (usersData) setUsers(usersData);
 
+          // Busca de Cupons
           try {
-            const { data: couponsData } = await supabase.from('coupons').select('*');
-            if (couponsData) setCoupons(couponsData);
-          } catch(e) {}
+            const { data: couponsData, error: couponsError } = await supabase.from('coupons').select('*');
+            if (!couponsError && couponsData) setCoupons(couponsData);
+          } catch(e) { console.warn("Tabela de cupons não acessível ou vazia."); }
 
+          // Busca de Saques
           try {
-            const { data: withdrawalData } = await supabase.from('withdrawal_requests').select('*');
-            if (withdrawalData) setWithdrawals(withdrawalData);
-          } catch (e) {}
+            const { data: withdrawalData, error: wdError } = await supabase.from('withdrawal_requests').select('*');
+            if (!wdError && withdrawalData) setWithdrawals(withdrawalData);
+          } catch (e) { console.warn("Tabela de saques não acessível."); }
 
+          // Busca de Histórico de Mensagens
           try {
-            const { data: messagesData } = await supabase.from('messages').select('*').order('timestamp', { ascending: true });
-            if (messagesData) {
+            const { data: messagesData, error: msgError } = await supabase.from('messages').select('*').order('timestamp', { ascending: true });
+            if (!msgError && messagesData) {
                 const groupedChats: Record<string, ChatMessage[]> = {};
                 messagesData.forEach((msg: ChatMessage) => {
                     if (!groupedChats[msg.orderId]) groupedChats[msg.orderId] = [];
-                    groupedChats[msg.orderId].push({ ...msg, timestamp: new Date(msg.timestamp) });
+                    groupedChats[msg.orderId].push({
+                        ...msg,
+                        timestamp: new Date(msg.timestamp)
+                    });
                 });
                 setChats(groupedChats);
             }
-          } catch (e) {}
+          } catch (e) { console.error("Erro ao carregar histórico de mensagens."); }
 
       } catch (error: any) {
+          console.error("Erro fatal ao carregar dados iniciais:", error);
           let errorType: 'network' | 'permission' | 'unknown' = 'unknown';
           let title = "Erro de Conexão";
           let message = error.message || "Erro desconhecido ao conectar com o servidor.";
@@ -361,27 +649,40 @@ const App: React.FC = () => {
           if (error.code === '42501') {
               errorType = 'permission';
               title = "Acesso Bloqueado (RLS)";
-              message = "Permissão negada pelo banco de dados.";
+              message = "Permissão negada pelo banco de dados. Verifique suas políticas de segurança.";
           } else if (error.message && (error.message.includes('fetch') || error.message.includes('network'))) {
               errorType = 'network';
               title = "Erro de Rede";
-              message = "Servidor do Supabase inalcançável.";
+              message = "Servidor do Supabase inalcançável. Verifique sua conexão com a internet.";
           }
           setConnectionError({ title, message, type: errorType });
+      } finally {
+          setIsLoading(false);
       }
   };
 
-  const handleLogout = () => setCurrentUser(null);
+  /**
+   * Finaliza sessão do usuário
+   */
+  const handleLogout = () => {
+    console.log("Encerrando sessão...");
+    setCurrentUser(null);
+  };
 
+  /**
+   * Gerencia login e unificação de contas (WhatsApp + Web)
+   */
   const handleLogin = async (userAttempt: User) => {
     if (userAttempt.phone) {
         userAttempt.phone = normalizeWhatsApp(userAttempt.phone);
+        
         if (userAttempt.phone.length < 12 && userAttempt.id.startsWith('u-')) {
-            alert("Por favor, digite o seu número completo com o DDD.");
+            alert("Por favor, digite o seu número completo com o DDD (Ex: 81 99999-9999).");
             return;
         }
     }
 
+    // Caso de Login via E-mail/Senha
     if (userAttempt.id === 'login_action') {
         try {
             const { data, error } = await supabase
@@ -395,30 +696,55 @@ const App: React.FC = () => {
                 alert("Credenciais incorretas. Tente novamente.");
                 return;
             }
+            
             if (data) {
                 setCurrentUser(data);
                 if (!users.find(u => u.id === data.id)) setUsers([...users, data]);
             }
-        } catch (e: any) { alert("Erro durante o login: " + e.message); }
-    } else if (userAttempt.id.startsWith('u-')) {
-        const { data: existingUser } = await supabase.from('users').select('*').eq('phone', userAttempt.phone).single();
+        } catch (e: any) {
+            alert("Erro durante o login: " + e.message);
+        }
+    } 
+    // Caso de Novo Cadastro / Login via Telefone
+    else if (userAttempt.id.startsWith('u-')) {
+        const { data: existingUser } = await supabase
+            .from('users')
+            .select('*')
+            .eq('phone', userAttempt.phone)
+            .single();
 
         if (existingUser) {
-            const updatedData = { name: userAttempt.name, email: userAttempt.email, password: userAttempt.password, role: 'client' };
-            const { data: updatedRecord, error: updateError } = await supabase.from('users').update(updatedData).eq('id', existingUser.id).select();
+            // Unifica conta Web com conta WhatsApp existente
+            const updatedData = {
+                name: userAttempt.name,
+                email: userAttempt.email,
+                password: userAttempt.password,
+                role: 'client' 
+            };
+
+            const { data: updatedRecord, error: updateError } = await supabase
+                .from('users')
+                .update(updatedData)
+                .eq('id', existingUser.id)
+                .select();
 
             if (updateError) {
                 alert("Erro ao sincronizar sua conta: " + updateError.message);
                 return;
             }
+
             if (updatedRecord) {
                 setUsers(users.map(u => u.id === existingUser.id ? updatedRecord[0] : u));
                 setCurrentUser(updatedRecord[0]);
                 showInAppNotification("Bem-vindo de volta!", "Suas contas foram unificadas com sucesso.", "🤝");
             }
         } else {
+            // Criação de conta totalmente nova
             const { data, error } = await supabase.from('users').insert([userAttempt]).select();
-            if (error) { alert("Erro ao criar perfil: " + error.message); return; }
+            if (error) {
+                 alert("Erro ao criar perfil: " + error.message);
+                 return;
+            }
             if (data) {
                 setUsers([...users, data[0]]);
                 setCurrentUser(data[0]);
@@ -427,24 +753,43 @@ const App: React.FC = () => {
     }
   };
   
+  /**
+   * Atualiza dados cadastrais do usuário
+   */
   const handleUpdateUser = async (updatedUser: User) => {
       if (updatedUser.phone) {
           updatedUser.phone = normalizeWhatsApp(updatedUser.phone);
-          if (updatedUser.phone.length < 12) { alert("Número de telefone inválido."); return; }
+          if (updatedUser.phone.length < 12) {
+              alert("Número de telefone inválido.");
+              return; 
+          }
       }
+      
       const { error } = await supabase.from('users').update(updatedUser).eq('id', updatedUser.id);
+      
       if (!error) {
         setUsers(users.map(u => u.id === updatedUser.id ? updatedUser : u));
-        if (currentUser && currentUser.id === updatedUser.id) setCurrentUser(updatedUser);
+        if (currentUser && currentUser.id === updatedUser.id) {
+            setCurrentUser(updatedUser);
+        }
       }
   };
 
+  /**
+   * Remove usuário do sistema
+   */
   const handleDeleteUser = async (userId: string) => {
       if (!window.confirm("Deseja realmente excluir este usuário?")) return;
+      
       const { error } = await supabase.from('users').delete().eq('id', userId);
-      if (!error) setUsers(users.filter(u => u.id !== userId));
+      if (!error) {
+          setUsers(users.filter(u => u.id !== userId));
+      }
   };
 
+  /**
+   * Cria ou atualiza empresa parceira
+   */
   const handleUpsertCompany = async (company: Company) => {
       const { data, error } = await supabase.from('companies').upsert(company).select();
       if (!error && data) {
@@ -457,106 +802,224 @@ const App: React.FC = () => {
       }
   };
 
+  /**
+   * Remove empresa parceira
+   */
   const handleDeleteCompany = async (companyId: string) => {
       if (!window.confirm("Deseja excluir esta empresa?")) return;
       const { error } = await supabase.from('companies').delete().eq('id', companyId);
       if (!error) setCompanies(companies.filter(c => c.id !== companyId));
   };
 
+  /**
+   * Atualiza configurações globais (Taxas, Mínimos)
+   */
   const handleUpdateGlobalSettings = (newSettings: typeof globalSettings) => {
       setGlobalSettings(newSettings);
+      // Aplica taxa administrativa a todas as empresas vinculadas
       companies.forEach(async (c) => {
-          await supabase.from('companies').update({ serviceFeePercentage: newSettings.platformFee }).eq('id', c.id);
+          await supabase.from('companies').update({ 
+            serviceFeePercentage: newSettings.platformFee 
+          }).eq('id', c.id);
       });
       setCompanies(prev => prev.map(c => ({ ...c, serviceFeePercentage: newSettings.platformFee })));
   };
 
+  /**
+   * Envia mensagem no chat do pedido
+   */
   const handleSendMessage = async (orderId: string, text: string, senderId: string, role: 'client' | 'partner') => {
       const newMessageId = `msg-${Date.now()}`;
       const timestampIso = new Date().toISOString();
-      const optimisticMessage: ChatMessage = { id: newMessageId, orderId, senderId, senderRole: role, text, timestamp: new Date(timestampIso) };
+      
+      const optimisticMessage: ChatMessage = {
+          id: newMessageId,
+          orderId,
+          senderId,
+          senderRole: role,
+          text,
+          timestamp: new Date(timestampIso)
+      };
 
+      // Update UI local imediatamente (Otimista)
       setChats(prev => {
           const currentChats = prev[orderId] || [];
           if (currentChats.some(m => m.id === newMessageId)) return prev;
-          return { ...prev, [orderId]: [...currentChats, optimisticMessage] };
+          return {
+              ...prev,
+              [orderId]: [...currentChats, optimisticMessage]
+          };
       });
 
-      const payloadToInsert = { id: newMessageId, orderId, senderId, senderRole: role, text, timestamp: timestampIso };
+      const payloadToInsert = {
+          id: newMessageId,
+          orderId,
+          senderId,
+          senderRole: role,
+          text,
+          timestamp: timestampIso
+      };
+      
       const { error } = await supabase.from('messages').insert([payloadToInsert]);
-      if (error) console.error("Falha ao persistir mensagem:", error);
+      if (error) {
+          console.error("Falha ao persistir mensagem:", error);
+      }
   };
 
+  /**
+   * Atualiza status de solicitação de saque (Admin)
+   */
   const handleUpdateWithdrawal = async (id: string, status: 'paid' | 'rejected') => {
       const { error } = await supabase.from('withdrawal_requests').update({ status }).eq('id', id);
-      if (!error) setWithdrawals(prev => prev.map(w => w.id === id ? { ...w, status } : w));
+      if (!error) {
+          setWithdrawals(prev => prev.map(w => w.id === id ? { ...w, status } : w));
+      }
   };
 
+  /**
+   * Realiza a criação do pedido e processa pagamento
+   */
   const handlePlaceOrder = async (
-      cartItems: any[], companyId: string, finalTotal: number, deliveryMethod: 'delivery' | 'pickup', 
-      serviceFee: number, deliveryFee: number, subtotal: number, paymentMethod: 'cash' | 'card' | 'pix', 
-      changeFor?: number, couponCode?: string, discountAmount?: number
+      cartItems: any[], 
+      companyId: string, 
+      finalTotal: number, 
+      deliveryMethod: 'delivery' | 'pickup', 
+      serviceFee: number, 
+      deliveryFee: number, 
+      subtotal: number, 
+      paymentMethod: 'cash' | 'card' | 'pix', 
+      changeFor?: number, 
+      couponCode?: string, 
+      discountAmount?: number
   ): Promise<boolean> => {
-    if (!currentUser || !currentUser.address) { alert("Erro: Por favor, selecione ou cadastre um endereço de entrega."); return false; }
+    
+    if (!currentUser || !currentUser.address) {
+        alert("Erro: Por favor, selecione ou cadastre um endereço de entrega.");
+        return false;
+    }
+    
     const company = companies.find(c => c.id === companyId);
-    if (!company) { alert("Erro: Empresa não identificada."); return false; }
+    if (!company) {
+        alert("Erro: Empresa não identificada.");
+        return false;
+    }
 
     const isOnlinePayment = paymentMethod !== 'cash';
-    const FIXED_SERVICE_FEE = 0.49; 
+    const FIXED_SERVICE_FEE = 0.49; // Taxa de serviço padrão
+    
     let repasseValue = 0;
     const subtotalAfterDiscount = subtotal - (discountAmount || 0);
 
+    // Lógica de Repasse Financeiro
     if (isOnlinePayment) {
-        repasseValue = company.deliveryType === 'own' ? subtotalAfterDiscount + deliveryFee : subtotalAfterDiscount;
+        if (company.deliveryType === 'own') {
+            repasseValue = subtotalAfterDiscount + deliveryFee;
+        } else {
+            repasseValue = subtotalAfterDiscount;
+        }
     } else {
-        repasseValue = company.deliveryType === 'chegoou' ? -1 * (deliveryFee + FIXED_SERVICE_FEE) : 0;
+        // Pedido em dinheiro: Calcula débito das taxas
+        if (company.deliveryType === 'chegoou') {
+            repasseValue = -1 * (deliveryFee + FIXED_SERVICE_FEE);
+        } else {
+            repasseValue = 0;
+        }
     }
 
+    // Instancia novo objeto de Pedido
     const newOrder: Order = {
-        id: `ord-${Date.now()}`, companyId, companyName: company.name, customerId: currentUser.id,
-        customerName: currentUser.name, customerPhone: currentUser.phone,
+        id: `ord-${Date.now()}`,
+        companyId,
+        companyName: company.name,
+        customerId: currentUser.id,
+        customerName: currentUser.name,
+        customerPhone: currentUser.phone,
         items: cartItems.map((i: any) => ({
-            productId: i.product.id, productName: i.product.name, quantity: i.quantity,
-            price: i.finalPrice, selectedOptions: i.selectedOptions
+            productId: i.product.id,
+            productName: i.product.name,
+            quantity: i.quantity,
+            price: i.finalPrice, 
+            selectedOptions: i.selectedOptions
         })),
-        total: finalTotal, subtotal: subtotal, deliveryFee: deliveryFee, serviceFee: FIXED_SERVICE_FEE, 
-        deliveryMethod: deliveryMethod, paymentMethod: paymentMethod, changeFor: changeFor,
-        status: paymentMethod === 'cash' ? 'pending' : 'waiting_payment', timestamp: new Date(),
-        deliveryCode: currentUser.phone.slice(-4), deliveryAddress: currentUser.address,
+        total: finalTotal,
+        subtotal: subtotal,
+        deliveryFee: deliveryFee,
+        serviceFee: FIXED_SERVICE_FEE, 
+        deliveryMethod: deliveryMethod,
+        paymentMethod: paymentMethod,
+        changeFor: changeFor,
+        status: paymentMethod === 'cash' ? 'pending' : 'waiting_payment',
+        timestamp: new Date(),
+        deliveryCode: currentUser.phone.slice(-4),
+        deliveryAddress: currentUser.address,
         pickupAddress: company.address || { street: '', number: '', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0 },
-        deliveryType: company.deliveryType, paymentStatus: 'pending', repasseValue: repasseValue,
-        repasseStatus: 'pending', couponCode: couponCode, discountAmount: discountAmount
+        deliveryType: company.deliveryType,
+        paymentStatus: 'pending',
+        repasseValue: repasseValue,
+        repasseStatus: 'pending',
+        couponCode: couponCode,
+        discountAmount: discountAmount
     };
 
     const { error } = await supabase.from('orders').insert([newOrder]);
-    if (error) { alert("Erro técnico ao registrar pedido: " + error.message); return false; }
+    
+    if (error) {
+        alert("Erro técnico ao registrar pedido: " + error.message);
+        return false;
+    }
 
+    // Processamento de Pagamento Digital
     if (paymentMethod !== 'cash') {
         try {
-            const paymentResponse = await PaymentService.processPayment(finalTotal, paymentMethod, currentUser, `Pedido #${newOrder.id} - ${company.name}`, newOrder.id);
+            const paymentResponse = await PaymentService.processPayment(
+                finalTotal,
+                paymentMethod,
+                currentUser,
+                `Pedido #${newOrder.id} - ${company.name}`,
+                newOrder.id
+            );
+
+            // Caso de Cartão / Link Externo
             if (paymentResponse.ticketUrl && !paymentResponse.copyPaste && !paymentResponse.qrCodeBase64) {
-                window.location.assign(paymentResponse.ticketUrl); return true; 
+                window.location.assign(paymentResponse.ticketUrl);
+                return true; 
             }
+
+            // Caso de PIX (QR Code e Copia/Cola)
             if (paymentMethod === 'pix' && (paymentResponse.copyPaste || paymentResponse.qrCodeBase64)) {
                  await supabase.from('orders').update({
-                    paymentPixCode: paymentResponse.copyPaste, paymentPixImage: paymentResponse.qrCodeBase64, paymentId: paymentResponse.paymentId
+                    paymentPixCode: paymentResponse.copyPaste,
+                    paymentPixImage: paymentResponse.qrCodeBase64,
+                    paymentId: paymentResponse.paymentId
                  }).eq('id', newOrder.id);
             }
+
             if (!paymentResponse.success) {
                 alert("Pagamento negado: " + paymentResponse.message);
-                await supabase.from('orders').update({ status: 'cancelled' }).eq('id', newOrder.id); return false;
+                await supabase.from('orders').update({ status: 'cancelled' }).eq('id', newOrder.id);
+                return false;
             }
-        } catch (e: any) { alert("Falha crítica no checkout: " + (e.message || "Erro de conexão com o gateway.")); return false; }
+
+        } catch (e: any) {
+            alert("Falha crítica no checkout: " + (e.message || "Erro de conexão com o gateway."));
+            return false;
+        }
     }
 
     showInAppNotification("Pedido Criado!", "Seu pedido foi enviado com sucesso!", "🍟");
     return true;
   };
 
+  /**
+   * Atualiza status do pedido e processa estornos
+   */
   const updateOrderStatus = async (orderId: string, status: Order['status']) => {
     if (status === 'cancelled') {
         const orderToCancel = orders.find(o => o.id === orderId);
+        
+        // Estorno Automático para pagamentos digitais
         if (orderToCancel && orderToCancel.paymentId && orderToCancel.paymentMethod !== 'cash') {
+            console.log("Iniciando processo de estorno para transação:", orderToCancel.paymentId);
             try {
                 const refundResult = await PaymentService.refundPayment(orderToCancel.paymentId);
                 if (refundResult.success) {
@@ -565,65 +1028,111 @@ const App: React.FC = () => {
                     await supabase.from('orders').update({ status, paymentStatus: 'refunded' }).eq('id', orderId);
                     return;
                 } else {
-                    alert("O estorno automático falhou e deve ser verificado manualmente: " + refundResult.message);
+                    alert("Pedido cancelado. Nota: O estorno automático falhou e deve ser verificado: " + refundResult.message);
                 }
-            } catch (e) { console.error("Falha no serviço de estorno:", e); }
+            } catch (e) {
+                console.error("Falha no serviço de estorno:", e);
+            }
         }
     }
 
     let updateData: Partial<Order> = { status };
+    
+    // Libera saldo para empresa se entregue e GATILHO DE ESTOQUE
     if (status === 'delivered') {
-        updateData.repasseStatus = 'blocked'; 
+        updateData.repasseStatus = 'blocked'; // Fica em carência
         updateData.repasseDate = new Date().toISOString();
+
+        // >>> INÍCIO DA BAIXA DE ESTOQUE AUTOMÁTICA <<<
         try {
             const orderToDeduct = orders.find(o => o.id === orderId);
             if (orderToDeduct && orderToDeduct.items) {
+                // Puxa as fichas técnicas do banco de dados
                 const { data: compositions } = await supabase.from('compositions').select('*');
+                
                 if (compositions) {
+                    // Roda a calculadora de estoque
                     const deductions = await processInventoryDeduction(orderToDeduct.items, compositions);
+                    
+                    // Vai no banco e desconta o que foi usado
                     for (const [inventoryId, amountToDeduct] of Object.entries(deductions)) {
-                        const { data: itemData } = await supabase.from('inventory_items').select('current_stock').eq('id', inventoryId).single();
+                        const { data: itemData } = await supabase.from('inventory_items')
+                            .select('current_stock').eq('id', inventoryId).single();
+                            
                         if (itemData) {
                             const newStock = Math.max(0, Number(itemData.current_stock) - Number(amountToDeduct));
-                            await supabase.from('inventory_items').update({ current_stock: newStock }).eq('id', inventoryId);
+                            await supabase.from('inventory_items')
+                                .update({ current_stock: newStock }).eq('id', inventoryId);
                         }
                     }
+                    console.log("Chegoou: Estoque atualizado com sucesso para o pedido", orderId);
                 }
             }
-        } catch (e) { console.error("Erro ao abater estoque:", e); }
+        } catch (e) {
+            console.error("Chegoou: Erro ao abater estoque:", e);
+        }
+        // >>> FIM DA BAIXA DE ESTOQUE AUTOMÁTICA <<<
     }
 
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updateData } : o));
     await supabase.from('orders').update(updateData).eq('id', orderId);
   };
 
+  /**
+   * Atribui entregador ao pedido
+   */
   const handleCourierAcceptOrder = async (orderId: string) => {
       if (!currentUser) return;
-      const updateData: { status: Order['status']; courierId: string } = { status: 'delivering', courierId: currentUser.id };
+      
+      const updateData: { status: Order['status']; courierId: string } = {
+          status: 'delivering',
+          courierId: currentUser.id
+      };
+
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updateData } : o));
       await supabase.from('orders').update(updateData).eq('id', orderId);
   };
 
+  /**
+   * Cancelamento solicitado pelo usuário ou restaurante
+   */
   const handleCancelOrder = async (orderId: string) => {
       const order = orders.find(o => o.id === orderId);
       if (!order || !currentUser) return;
-      if (currentUser.role === 'client' && order.status !== 'pending' && order.status !== 'waiting_payment') {
-          alert("O restaurante já iniciou o preparo. Entre em contato via chat para solicitar cancelamento."); return;
+
+      if (currentUser.role === 'client') {
+          // Clientes só cancelam se não estiver em preparo
+          if (order.status !== 'pending' && order.status !== 'waiting_payment') {
+              alert("O restaurante já iniciou o preparo. Por favor, entre em contato via chat para solicitar cancelamento.");
+              return;
+          }
       }
-      if (window.confirm("Deseja cancelar este pedido? Pagamentos online serão estornados.")) await updateOrderStatus(orderId, 'cancelled');
+      
+      if (window.confirm("Deseja cancelar este pedido? Pagamentos online serão estornados.")) {
+          await updateOrderStatus(orderId, 'cancelled');
+      }
   };
   
+  /**
+   * Atualização total de objeto de pedido (Admin/Parceiro)
+   */
   const handleUpdateFullOrder = async (updatedOrder: Order) => {
     setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
     await supabase.from('orders').update(updatedOrder).eq('id', updatedOrder.id);
   };
 
+  /**
+   * Exclusão física de pedido (Apenas Admin)
+   */
   const handleDeleteOrder = async (orderId: string) => {
     if (!window.confirm("Atenção Admin: Excluir um pedido é uma ação irreversível. Continuar?")) return;
     setOrders(prev => prev.filter(o => o.id !== orderId));
     await supabase.from('orders').delete().eq('id', orderId);
   };
 
+  /**
+   * Criação de novo produto no cardápio
+   */
   const handleAddProduct = async (newProduct: Product) => {
       const payload = prepareProductPayload(newProduct);
       const { data, error } = await supabase.from('products').insert([payload]).select();
@@ -633,30 +1142,55 @@ const App: React.FC = () => {
       }
   };
 
+  /**
+   * Atualização de produto existente
+   */
   const handleUpdateProduct = async (updatedProduct: Product) => {
       const payload = prepareProductPayload(updatedProduct);
       const { error } = await supabase.from('products').update(payload).eq('id', updatedProduct.id);
-      if (!error) setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
+      if (!error) {
+          setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
+      }
   };
 
+  /**
+   * Remove produto do cardápio
+   */
   const handleDeleteProduct = async (productId: string) => {
       if (!window.confirm("Excluir este produto do cardápio?")) return;
       const { error } = await supabase.from('products').delete().eq('id', productId);
       if (!error) setProducts(prev => prev.filter(p => p.id !== productId));
   };
   
+  /**
+   * Atualiza dados da empresa parceira
+   */
   const handleUpdateCompany = async (companyId: string, data: Partial<Company>) => {
       const { error } = await supabase.from('companies').update(data).eq('id', companyId);
-      if(!error) setCompanies(prevCompanies => prevCompanies.map(c => c.id === companyId ? {...c, ...data} : c));
+      if(!error) {
+        setCompanies(prevCompanies => 
+            prevCompanies.map(c => c.id === companyId ? {...c, ...data} : c)
+        );
+      }
   };
 
+  /**
+   * Cadastro de novos endereços salvos
+   */
   const handleAddAddress = (address: Address) => {
       if (!currentUser) return;
-      const updatedUser = { ...currentUser, address: address, savedAddresses: [...(currentUser.savedAddresses || []), address] };
+      const updatedUser = { 
+        ...currentUser, 
+        address: address, 
+        savedAddresses: [...(currentUser.savedAddresses || []), address] 
+      };
       handleUpdateUser(updatedUser);
       showInAppNotification("Endereço salvo!", "Localização definida como padrão.", "📍");
   };
 
+  /**
+   * Remoção de endereços salvos
+   */
   const handleRemoveAddress = (index: number) => {
       if (!currentUser || !currentUser.savedAddresses) return;
       const updatedAddresses = [...currentUser.savedAddresses];
@@ -664,13 +1198,22 @@ const App: React.FC = () => {
       handleUpdateUser({ ...currentUser, savedAddresses: updatedAddresses });
   };
 
+  /**
+   * Adiciona cartão de crédito à carteira digital
+   */
   const handleAddCard = (card: CreditCard) => {
       if (!currentUser) return;
-      const updatedUser = { ...currentUser, savedCards: [...(currentUser.savedCards || []), card] };
+      const updatedUser = { 
+        ...currentUser, 
+        savedCards: [...(currentUser.savedCards || []), card] 
+      };
       handleUpdateUser(updatedUser);
       showInAppNotification("Cartão salvo", "Método de pagamento adicionado.", "💳");
   };
 
+  /**
+   * Remove cartão da carteira
+   */
   const handleRemoveCard = (index: number) => {
       if (!currentUser || !currentUser.savedCards) return;
       const updatedCards = [...currentUser.savedCards];
@@ -679,16 +1222,24 @@ const App: React.FC = () => {
   };
 
   // ---------------------------------------------------------------------------
-  // RENDERIZAÇÃO
+  // LÓGICA DE RENDERIZAÇÃO
   // ---------------------------------------------------------------------------
+
+  /**
+   * Tela de erro de conexão com Supabase
+   */
   if (connectionError) {
       return (
           <div className="h-screen w-full flex flex-col items-center justify-center bg-white p-8 text-center">
               <div className="bg-red-50 p-6 rounded-full mb-6">
                 <AlertCircle className="w-16 h-16 text-red-600 mx-auto" />
               </div>
-              <h2 className="text-2xl font-black text-gray-900 uppercase tracking-tighter">{connectionError.title}</h2>
-              <p className="text-gray-500 mt-4 max-w-sm font-medium">{connectionError.message}</p>
+              <h2 className="text-2xl font-black text-gray-900 uppercase tracking-tighter">
+                {connectionError.title}
+              </h2>
+              <p className="text-gray-500 mt-4 max-w-sm font-medium">
+                {connectionError.message}
+              </p>
               <button 
                 onClick={() => window.location.reload()} 
                 className="mt-10 bg-red-600 text-white px-10 py-4 rounded-2xl font-black shadow-lg shadow-red-200 hover:scale-105 active:scale-95 transition-all"
@@ -699,35 +1250,76 @@ const App: React.FC = () => {
       );
   }
 
+  /**
+   * Tela de Autenticação
+   */
   if (!currentUser) {
-    return <AuthView onLogin={handleLogin} existingUsers={users} />;
+    return (
+        <AuthView 
+            onLogin={handleLogin} 
+            existingUsers={users} 
+        />
+    );
   }
 
+  /**
+   * UI DA NOTIFICAÇÃO VISUAL INTERNA (TOAST)
+   * Centralizada no topo para máxima visibilidade
+   */
   const NotificationToast = inAppNotification && (
       <div className="fixed top-6 left-0 right-0 z-[99999] flex justify-center pointer-events-none px-6">
           <div className="bg-white/95 backdrop-blur-md rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-white/20 p-5 flex items-center gap-5 animate-slide-up w-full max-w-md pointer-events-auto ring-1 ring-black/5">
-              <div className="bg-red-600 text-3xl p-3 rounded-2xl shrink-0 flex items-center justify-center h-14 w-14 shadow-lg shadow-red-100">{inAppNotification.icon}</div>
+              <div className="bg-red-600 text-3xl p-3 rounded-2xl shrink-0 flex items-center justify-center h-14 w-14 shadow-lg shadow-red-100">
+                  {inAppNotification.icon}
+              </div>
               <div className="overflow-hidden">
-                  <h4 className="font-black text-gray-900 text-sm uppercase tracking-tight truncate">{inAppNotification.title}</h4>
-                  <p className="text-xs text-gray-500 font-bold leading-tight mt-1">{inAppNotification.message}</p>
+                  <h4 className="font-black text-gray-900 text-sm uppercase tracking-tight truncate">
+                    {inAppNotification.title}
+                  </h4>
+                  <p className="text-xs text-gray-500 font-bold leading-tight mt-1">
+                    {inAppNotification.message}
+                  </p>
               </div>
           </div>
       </div>
   );
 
+  /**
+   * BOTÃO DE INSTALAÇÃO PWA (CUSTOMIZADO)
+   */
   const InstallPWAButton = deferredPrompt && (
-      <button onClick={handleInstall} className="fixed bottom-24 right-6 z-[100] bg-red-600 text-white px-5 py-3 rounded-full shadow-2xl flex items-center gap-3 animate-bounce hover:scale-105 active:scale-95 transition-all border-2 border-white">
+      <button
+        onClick={handleInstall}
+        className="fixed bottom-24 right-6 z-[100] bg-red-600 text-white px-5 py-3 rounded-full shadow-2xl flex items-center gap-3 animate-bounce hover:scale-105 active:scale-95 transition-all border-2 border-white"
+      >
           <Download className="w-5 h-5" />
           <span className="font-black text-xs uppercase tracking-widest">Instalar App</span>
       </button>
   );
 
+  // SELEÇÃO DE VIEW POR PERFIL
   let ViewToRender;
   
   switch (currentUser.role) {
     case 'admin':
-        ViewToRender = <AdminView users={users} setUsers={setUsers} companies={companies} setCompanies={setCompanies} orders={orders} withdrawals={withdrawals} onUpdateWithdrawal={handleUpdateWithdrawal} onLogout={handleLogout} globalSettings={globalSettings} onUpdateSettings={handleUpdateGlobalSettings} onUpdateUser={handleUpdateUser} onDeleteUser={handleDeleteUser} onUpsertCompany={handleUpsertCompany} onDeleteCompany={handleDeleteCompany} />;
+        ViewToRender = <AdminView 
+            users={users} 
+            setUsers={setUsers} 
+            companies={companies} 
+            setCompanies={setCompanies} 
+            orders={orders} 
+            withdrawals={withdrawals}
+            onUpdateWithdrawal={handleUpdateWithdrawal}
+            onLogout={handleLogout}
+            globalSettings={globalSettings} 
+            onUpdateSettings={handleUpdateGlobalSettings}
+            onUpdateUser={handleUpdateUser}
+            onDeleteUser={handleDeleteUser}
+            onUpsertCompany={handleUpsertCompany}
+            onDeleteCompany={handleDeleteCompany}
+        />;
         break;
+    
     case 'partner':
         const myCompany = companies.find(c => c.id === currentUser.id);
         if (!myCompany) {
@@ -740,18 +1332,58 @@ const App: React.FC = () => {
                 </div>
             );
         } else {
-            ViewToRender = <PartnerView company={myCompany} orders={orders.filter(o => o.companyId === myCompany.id)} products={products.filter(p => p.companyId === myCompany.id)} updateOrderStatus={updateOrderStatus} updateCompany={(data) => handleUpdateCompany(myCompany.id, data)} onAddProduct={handleAddProduct} onUpdateProduct={handleUpdateProduct} onDeleteProduct={handleDeleteProduct} onLogout={handleLogout} chats={chats} onSendMessage={handleSendMessage} onUpdateFullOrder={handleUpdateFullOrder} onDeleteOrder={handleDeleteOrder} />;
+            ViewToRender = <PartnerView 
+                company={myCompany} 
+                orders={orders.filter(o => o.companyId === myCompany.id)}
+                products={products.filter(p => p.companyId === myCompany.id)}
+                updateOrderStatus={updateOrderStatus}
+                updateCompany={(data) => handleUpdateCompany(myCompany.id, data)}
+                onAddProduct={handleAddProduct}
+                onUpdateProduct={handleUpdateProduct} 
+                onDeleteProduct={handleDeleteProduct} 
+                onLogout={handleLogout}
+                chats={chats}
+                onSendMessage={handleSendMessage}
+                onUpdateFullOrder={handleUpdateFullOrder}
+                onDeleteOrder={handleDeleteOrder}
+            />;
         }
         break;
+
     case 'courier':
-        ViewToRender = <CourierView courier={currentUser} availableOrders={orders} acceptOrder={handleCourierAcceptOrder} confirmDelivery={(id, code) => updateOrderStatus(id, 'delivered')} onLogout={handleLogout} />;
+        ViewToRender = <CourierView 
+            courier={currentUser} 
+            availableOrders={orders} 
+            acceptOrder={handleCourierAcceptOrder}
+            confirmDelivery={(id, code) => updateOrderStatus(id, 'delivered')}
+            onLogout={handleLogout}
+        />;
         break;
+
     case 'client':
     default:
-        ViewToRender = <ClientView user={currentUser} companies={companies} products={products} onPlaceOrder={handlePlaceOrder} onLogout={handleLogout} orders={orders} coupons={coupons} onUpdateUser={handleUpdateUser} chats={chats} onSendMessage={handleSendMessage} onAddAddress={handleAddAddress} onRemoveAddress={handleRemoveAddress} onAddCard={handleAddCard} onRemoveCard={handleRemoveCard} onCancelOrder={handleCancelOrder} />;
+        ViewToRender = <ClientView 
+            user={currentUser} 
+            companies={companies} 
+            products={products}
+            onPlaceOrder={handlePlaceOrder}
+            onLogout={handleLogout}
+            orders={orders} 
+            coupons={coupons}
+            onUpdateUser={handleUpdateUser}
+            chats={chats}
+            onSendMessage={handleSendMessage}
+            onAddAddress={handleAddAddress}
+            onRemoveAddress={handleRemoveAddress}
+            onAddCard={handleAddCard}
+            onRemoveCard={handleRemoveCard}
+            onCancelOrder={handleCancelOrder} 
+        />;
         break;
   }
 
+  // COMPOSIÇÃO FINAL DA UI
+  // COMPOSIÇÃO FINAL DA UI
   return (
       <div className="antialiased font-sans select-none">
         {NotificationToast}
