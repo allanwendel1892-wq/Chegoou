@@ -255,7 +255,7 @@ const App: React.FC = () => {
   };
 
   // ESTADOS DE CARREGAMENTO E ERRO
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!localStorage.getItem('supabase-auth-token'));
   const [connectionError, setConnectionError] = useState<{
     title: string;
     message: string;
