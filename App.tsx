@@ -349,7 +349,12 @@ const App: React.FC = () => {
    * Inicia inscrições de Realtime para Mensagens e Saques
    */
   useEffect(() => {
+    // A TRAVA DE SEGURANÇA: Se não tem ninguém logado, ignora o banco e o realtime!
+    if (!currentUser) return;
+
     fetchInitialData();
+
+    // CANAL DE CHAT REALTIME
 
     // CANAL DE CHAT REALTIME
     const messagesSub = supabase
