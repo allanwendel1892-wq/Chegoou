@@ -3,6 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    
+    <!-- FORÇA O CELULAR A TRATAR COMO APP NATIVO E NÃO FECHAR À TOA -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Chegoou">
+    <meta name="theme-color" content="#ffffff">
+
     <title>Chegoou Delivery</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -90,7 +98,7 @@
   }
 }
 </script>
-</head>
+  </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
