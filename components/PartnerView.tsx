@@ -545,7 +545,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           <p style="font-weight:bold;">ENTREGA</p>
           <p>${order.deliveryAddress?.street}, ${order.deliveryAddress?.number}</p>
           <p>${order.deliveryAddress?.neighborhood} - ${order.deliveryAddress?.city}</p>
-          ${order.deliveryAddress?.zipCode ? `<p>CEP: ${order.deliveryAddress.zipCode}</p>` : ''}
+          CEP: ${order.deliveryAddress.zipCode}</p>` : ''}
         `;
       const paymentInfo = order.paymentMethod === 'cash' 
         ? `DINHEIRO ${order.changeFor ? `(Troco p/ R$ ${order.changeFor.toFixed(2)})` : ''}`
