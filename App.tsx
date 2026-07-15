@@ -382,17 +382,17 @@ const App: React.FC = () => {
               //);
           //}
           
-          setChats(prev => {
-              const currentChats = prev[formattedMsg.orderId] || [];
-              if (currentChats.some(m => m.id === formattedMsg.id)) return prev;
+          //setChats(prev => {
+              //const currentChats = prev[formattedMsg.orderId] || [];
+              //if (currentChats.some(m => m.id === formattedMsg.id)) return prev;
               
-              return {
-                  ...prev,
-                  [formattedMsg.orderId]: [...currentChats, formattedMsg]
-              };
-          });
-      })
-      .subscribe();
+              //return {
+                  //...prev,
+                  //[formattedMsg.orderId]: [...currentChats, formattedMsg]
+              //};
+          //});
+      //})
+      //.subscribe();
     
     // CANAL DE SAQUES REALTIME
     const withdrawalsSub = supabase
