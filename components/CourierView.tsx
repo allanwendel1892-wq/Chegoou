@@ -41,15 +41,16 @@ const CourierView: React.FC<CourierViewProps> = ({
   const [requestingWithdrawal, setRequestingWithdrawal] = useState(false);
 
   // 1. LÓGICA DE FILTRAGEM (Sem gambiarras, puramente o que vem do banco)
+  // Adicionado o fallback (availableOrders || []) para evitar crashes se os dados atrasarem
   
   // Pedidos liberados para todos (limbo nunca mais)
   const openPoolOrders = useMemo(() => {
-    return availableOrders.filter(o => o.status === 'waiting_courier');
+    return (availableOrders || []).filter(o => o.status === 'waiting_courier');
   }, [availableOrders]);
 
   // Pedidos atribuídos a ESTE motoboy que estão em andamento
   const myActiveOrders = useMemo(() => {
-    return availableOrders.filter(o => 
+    return (availableOrders || []).filter(o => 
         o.courierId === courier.id && 
         (o.status === 'delivering' || o.status === 'ready')
     );
@@ -57,28 +58,25 @@ const CourierView: React.FC<CourierViewProps> = ({
 
   // Pedidos concluídos por ESTE motoboy (Para a Carteira)
   const myCompletedOrders = useMemo(() => {
-    return availableOrders.filter(o => 
+    return (availableOrders || []).filter(o => 
         o.courierId === courier.id && 
         o.status === 'delivered'
     );
   }, [availableOrders, courier.id]);
 
   // Lógica da Carteira Financeira
-  // courierPaid agora é um campo real (ver migration_courier_wallet.sql),
-  // setado automaticamente quando o admin marca uma solicitação de saque
-  // como paga (ver handleUpdateWithdrawal em App.tsx).
   const unpaidOrders = myCompletedOrders.filter(o => !(o as any).courierPaid);
   const paidOrders = myCompletedOrders.filter(o => (o as any).courierPaid);
 
   // Solicitações de saque deste entregador (histórico completo)
+  // CORREÇÃO: Adicionado o fallback (withdrawals || []) para evitar o erro "is not iterable"
   const myWithdrawals = useMemo(() => {
-    return [...withdrawals].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return [...(withdrawals || [])].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [withdrawals]);
 
   const pendingWithdrawal = myWithdrawals.find(w => w.status === 'pending');
 
-  // IDs de corridas que já estão dentro de uma solicitação pendente —
-  // não devem ser contadas de novo no saldo disponível pra pedir saque.
+  // IDs de corridas que já estão dentro de uma solicitação pendente
   const orderIdsInPendingRequest = useMemo(() => {
     if (!pendingWithdrawal) return new Set<string>();
     return new Set(((pendingWithdrawal as any).relatedOrderIds || []) as string[]);
@@ -110,7 +108,7 @@ const CourierView: React.FC<CourierViewProps> = ({
               <Bike className="w-6 h-6 text-green-400" />
             </div>
             <div>
-              <h1 className="font-bold text-lg leading-tight">{courier.name}</h1>
+              <h1 className="font-bold text-lg leading-tight">{courier?.name}</h1>
               <p className="text-gray-400 text-sm flex items-center gap-1">
                 <CheckCircle className="w-3 h-3 text-green-400" /> Online e Operando
               </p>
