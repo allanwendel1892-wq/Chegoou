@@ -1374,30 +1374,34 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         <button 
     onClick={() => {
         const novoStatus = selectedCourierId ? 'delivering' : 'waiting_courier';
-        
-        const updated: any = {
-            ...dispatchingOrder,
-            status: novoStatus,
-            courierId: selectedCourierId || null, 
-            deliveryFee: Number(deliveryFee),
-            deliveryType: 'chegoou' // <--- ESTA É A LINHA QUE TIRA O PEDIDO DO LIMBO
-        };
 
-        if (dispatchingOrder.deliveryAddress) {
-            updated.deliveryAddress = {
-                ...dispatchingOrder.deliveryAddress,
-                street: deliveryAddressStr,
-                mapLink: mapLink 
-            };
-        } else {
-            updated.deliveryAddress = {
-                street: deliveryAddressStr,
-                number: '', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0,
-                mapLink: mapLink
-            };
-        }
+const updated: any = {
+    ...dispatchingOrder,
+    status: novoStatus,
+    courierId: selectedCourierId || null,
+    deliveryFee: Number(deliveryFee),
+    deliveryType: 'chegoou'
+};
 
-        delete updated.mapLink;
+if (dispatchingOrder.deliveryAddress) {
+    updated.deliveryAddress = {
+        ...dispatchingOrder.deliveryAddress,
+        mapLink: mapLink
+    };
+} else {
+    updated.deliveryAddress = {
+        street: '',
+        number: '',
+        neighborhood: '',
+        city: '',
+        zipCode: '',
+        lat: 0,
+        lng: 0,
+        mapLink: mapLink
+    };
+}
+
+delete updated.mapLink;
 
         onUpdateFullOrder(updated);
         setDispatchingOrder(null);
