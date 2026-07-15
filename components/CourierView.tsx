@@ -24,7 +24,8 @@ interface CourierViewProps {
   confirmDelivery: (orderId: string, code: string) => void;
   onLogout: () => void;
   withdrawals: WithdrawalRequest[];
-  onRequestWithdrawal: (courierId: string, amount: number, orderIds: string[]) => Promise<void> | void;
+  // AJUSTE: Adicionado o parâmetro companyId para vincular o saque ao restaurante
+  onRequestWithdrawal: (courierId: string, amount: number, orderIds: string[], companyId?: string) => Promise<void> | void;
 }
 
 const CourierView: React.FC<CourierViewProps> = ({ 
@@ -40,15 +41,11 @@ const CourierView: React.FC<CourierViewProps> = ({
   const [deliveryCode, setDeliveryCode] = useState('');
   const [requestingWithdrawal, setRequestingWithdrawal] = useState(false);
 
-  // 1. LÓGICA DE FILTRAGEM (Sem gambiarras, puramente o que vem do banco)
-  // Adicionado o fallback (availableOrders || []) para evitar crashes se os dados atrasarem
-  
-  // Pedidos liberados para todos (limbo nunca mais)
+  // LÓGICA DE FILTRAGEM
   const openPoolOrders = useMemo(() => {
     return (availableOrders || []).filter(o => o.status === 'waiting_courier');
   }, [availableOrders]);
 
-  // Pedidos atribuídos a ESTE motoboy que estão em andamento
   const myActiveOrders = useMemo(() => {
     return (availableOrders || []).filter(o => 
         o.courierId === courier.id && 
@@ -56,7 +53,6 @@ const CourierView: React.FC<CourierViewProps> = ({
     );
   }, [availableOrders, courier.id]);
 
-  // Pedidos concluídos por ESTE motoboy (Para a Carteira)
   const myCompletedOrders = useMemo(() => {
     return (availableOrders || []).filter(o => 
         o.courierId === courier.id && 
@@ -68,15 +64,12 @@ const CourierView: React.FC<CourierViewProps> = ({
   const unpaidOrders = myCompletedOrders.filter(o => !(o as any).courierPaid);
   const paidOrders = myCompletedOrders.filter(o => (o as any).courierPaid);
 
-  // Solicitações de saque deste entregador (histórico completo)
-  // CORREÇÃO: Adicionado o fallback (withdrawals || []) para evitar o erro "is not iterable"
   const myWithdrawals = useMemo(() => {
     return [...(withdrawals || [])].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [withdrawals]);
 
   const pendingWithdrawal = myWithdrawals.find(w => w.status === 'pending');
 
-  // IDs de corridas que já estão dentro de uma solicitação pendente
   const orderIdsInPendingRequest = useMemo(() => {
     if (!pendingWithdrawal) return new Set<string>();
     return new Set(((pendingWithdrawal as any).relatedOrderIds || []) as string[]);
@@ -90,9 +83,13 @@ const CourierView: React.FC<CourierViewProps> = ({
 
   const handleRequestWithdrawal = async () => {
       if (availableBalance <= 0) return;
+      
+      // AJUSTE: Pegar o companyId (restaurante) vinculado ao primeiro pedido da lista de saque
+      const targetCompanyId = availableForWithdrawal.length > 0 ? (availableForWithdrawal[0] as any).companyId : undefined;
+
       setRequestingWithdrawal(true);
       try {
-          await onRequestWithdrawal(courier.id, availableBalance, availableForWithdrawal.map(o => o.id));
+          await onRequestWithdrawal(courier.id, availableBalance, availableForWithdrawal.map(o => o.id), targetCompanyId);
       } finally {
           setRequestingWithdrawal(false);
       }
@@ -219,10 +216,10 @@ const CourierView: React.FC<CourierViewProps> = ({
                                 </div>
                             </div>
 
-                            {/* O link de mapa mais seguro possível */}
-                            {order.deliveryAddress?.mapLink && (
+                            {/* AJUSTE: Link dinâmico do Google Maps via Query String usando o endereço fornecido */}
+                            {order.deliveryAddress && (
                                 <a 
-                                    href={order.deliveryAddress.mapLink}
+                                    href={order.deliveryAddress.mapLink || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${order.deliveryAddress.street}, ${order.deliveryAddress.number || 'S/N'}, ${order.deliveryAddress.neighborhood || ''}, ${order.deliveryAddress.city || ''}`)}`}
                                     target="_blank" 
                                     rel="noopener noreferrer"
                                     className="flex items-center justify-center gap-2 w-full bg-blue-50 text-blue-700 font-bold py-2.5 rounded-xl border border-blue-200 hover:bg-blue-100"
