@@ -81,10 +81,20 @@ const CourierView: React.FC<CourierViewProps> = ({
 
   const availableForWithdrawal = unpaidOrders.filter(o => !orderIdsInPendingRequest.has(o.id));
 
-  const walletBalance = unpaidOrders.reduce((acc, o) => acc + (o.deliveryFee || 0), 0);
-  const availableBalance = availableForWithdrawal.reduce((acc, o) => acc + (o.deliveryFee || 0), 0);
-  const totalEarned = paidOrders.reduce((acc, o) => acc + (o.deliveryFee || 0), 0);
+  const walletBalance = availableForWithdrawal.reduce(
+    (acc, o) => acc + (o.deliveryFee || 0),
+    0
+);
 
+const availableBalance = availableForWithdrawal.reduce(
+    (acc, o) => acc + (o.deliveryFee || 0),
+    0
+);
+
+const totalEarned = myWithdrawals
+    .filter(w => w.status === 'paid')
+    .reduce((acc, w) => acc + w.amount, 0);
+    
   const handleRequestWithdrawal = async () => {
       if (availableBalance <= 0) return;
       setRequestingWithdrawal(true);
