@@ -75,22 +75,30 @@ const CourierView: React.FC<CourierViewProps> = ({
   const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
   // --- LÓGICA DA CARTEIRA FINANCEIRA (LIVRO-CAIXA) ---
-  // 1. Soma TUDO que o entregador já ganhou na vida (somente entregas concluídas por ELE)
-  const totalEarned = round2(
+  
+  // 1. Soma TUDO que o entregador produziu (entregas concluídas)
+  const totalProduzido = round2(
     myCompletedOrders.reduce((acc, o) => acc + (Number(o.deliveryFee) || 0), 0)
   );
 
-  // 2. Soma TUDO que ELE já sacou (pago) ou pediu para sacar (pendente)
-  const totalSacadoOuPendente = round2(
+  // 2. Soma TUDO que já foi PAGO (saques concluídos)
+  const totalRecebido = round2(
     myWithdrawals
-      .filter(w => w.status === 'paid' || w.status === 'pending')
+      .filter(w => w.status === 'paid')
       .reduce((acc, w) => acc + (Number(w.amount) || 0), 0)
   );
 
-  // 3. O saldo disponível é a diferença
-  const availableBalance = Math.max(0, round2(totalEarned - totalSacadoOuPendente));
-  const walletBalance = availableBalance; // Alias para manter a interface funcionando
-    
+  // 3. Soma TUDO que está em ANÁLISE (pendente)
+  const totalEmAnalise = round2(
+    myWithdrawals
+      .filter(w => w.status === 'pending')
+      .reduce((acc, w) => acc + (Number(w.amount) || 0), 0)
+  );
+
+  // 4. Saldo Disponível para saque (Produzido - Recebido - Em análise)
+  const availableBalance = Math.max(0, round2(totalProduzido - totalRecebido - totalEmAnalise));
+  const walletBalance = availableBalance;
+
   const handleRequestWithdrawal = async () => {
       if (availableBalance <= 0) return;
       setRequestingWithdrawal(true);
