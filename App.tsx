@@ -526,28 +526,45 @@ const App: React.FC = () => {
 
   /**
    * Busca inicial de todos os dados do sistema
+   * (Requisições em PARALELO — antes eram sequenciais, uma esperando a
+   * outra terminar, o que somava vários segundos de espera desnecessária
+   * numa tela de carregamento. Agora todas saem ao mesmo tempo e o tempo
+   * total passa a ser o da requisição mais lenta, não a soma de todas.)
    */
   const fetchInitialData = async () => {
       setIsLoading(true);
       setConnectionError(null);
       console.log("Iniciando carregamento de dados globais...");
-      
+
       try {
-          // Busca de Empresas
-          const { data: companiesData, error: companiesError } = await supabase.from('companies').select('*');
-          if (companiesError) throw companiesError;
-          if (companiesData) setCompanies(companiesData);
+          const [
+              companiesRes,
+              productsRes,
+              ordersRes,
+              usersRes,
+              couponsRes,
+              withdrawalsRes,
+              messagesRes
+          ] = await Promise.all([
+              supabase.from('companies').select('*'),
+              supabase.from('products').select('*').limit(5000), //limite de dados do banco
+              supabase.from('orders').select('*').limit(5000),
+              supabase.from('users').select('*').limit(5000),
+              supabase.from('coupons').select('*'),
+              supabase.from('withdrawal_requests').select('*'),
+              supabase.from('messages').select('*').order('timestamp', { ascending: true })
+          ]);
 
-          // Busca de Produtos
-          const { data: productsData, error: productsError } = await supabase.from('products').select('*').limit(5000);//limite de dados do banco
-          if (productsError) throw productsError;
-          if (productsData) setProducts(productsData);
+          // --- Dados CRÍTICOS: se falharem, mostramos a tela de erro ---
+          if (companiesRes.error) throw companiesRes.error;
+          if (companiesRes.data) setCompanies(companiesRes.data);
 
-          // Busca de Pedidos
-          const { data: ordersData, error: ordersError } = await supabase.from('orders').select('*').limit(5000);
-          if (ordersError) throw ordersError;
-          if (ordersData) {
-              const formattedOrders = ordersData.map(o => ({
+          if (productsRes.error) throw productsRes.error;
+          if (productsRes.data) setProducts(productsRes.data);
+
+          if (ordersRes.error) throw ordersRes.error;
+          if (ordersRes.data) {
+              const formattedOrders = ordersRes.data.map((o: any) => ({
                   ...o,
                   timestamp: new Date(o.timestamp)
               }));
@@ -555,38 +572,35 @@ const App: React.FC = () => {
               setOrders(formattedOrders);
           }
 
-          // Busca de Usuários (Apenas se Admin no futuro, ou limitado)
-          const { data: usersData, error: usersError } = await supabase.from('users').select('*').limit(5000);
-          if (usersError) throw usersError;
-          if (usersData) setUsers(usersData);
+          if (usersRes.error) throw usersRes.error;
+          if (usersRes.data) setUsers(usersRes.data);
 
-          // Busca de Cupons
-          try {
-            const { data: couponsData, error: couponsError } = await supabase.from('coupons').select('*');
-            if (!couponsError && couponsData) setCoupons(couponsData);
-          } catch(e) { console.warn("Tabela de cupons não acessível ou vazia."); }
+          // --- Dados OPCIONAIS: se falharem, apenas avisamos no console ---
+          if (!couponsRes.error && couponsRes.data) {
+              setCoupons(couponsRes.data);
+          } else if (couponsRes.error) {
+              console.warn("Tabela de cupons não acessível ou vazia.");
+          }
 
-          // Busca de Saques
-          try {
-            const { data: withdrawalData, error: wdError } = await supabase.from('withdrawal_requests').select('*');
-            if (!wdError && withdrawalData) setWithdrawals(withdrawalData);
-          } catch (e) { console.warn("Tabela de saques não acessível."); }
+          if (!withdrawalsRes.error && withdrawalsRes.data) {
+              setWithdrawals(withdrawalsRes.data);
+          } else if (withdrawalsRes.error) {
+              console.warn("Tabela de saques não acessível.");
+          }
 
-          // Busca de Histórico de Mensagens
-          try {
-            const { data: messagesData, error: msgError } = await supabase.from('messages').select('*').order('timestamp', { ascending: true });
-            if (!msgError && messagesData) {
-                const groupedChats: Record<string, ChatMessage[]> = {};
-                messagesData.forEach((msg: ChatMessage) => {
-                    if (!groupedChats[msg.orderId]) groupedChats[msg.orderId] = [];
-                    groupedChats[msg.orderId].push({
-                        ...msg,
-                        timestamp: new Date(msg.timestamp)
-                    });
-                });
-                setChats(groupedChats);
-            }
-          } catch (e) { console.error("Erro ao carregar histórico de mensagens."); }
+          if (!messagesRes.error && messagesRes.data) {
+              const groupedChats: Record<string, ChatMessage[]> = {};
+              messagesRes.data.forEach((msg: ChatMessage) => {
+                  if (!groupedChats[msg.orderId]) groupedChats[msg.orderId] = [];
+                  groupedChats[msg.orderId].push({
+                      ...msg,
+                      timestamp: new Date(msg.timestamp)
+                  });
+              });
+              setChats(groupedChats);
+          } else if (messagesRes.error) {
+              console.error("Erro ao carregar histórico de mensagens.");
+          }
 
       } catch (error: any) {
           console.error("Erro fatal ao carregar dados iniciais:", error);
