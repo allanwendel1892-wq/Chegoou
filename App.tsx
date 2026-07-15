@@ -357,154 +357,36 @@ const App: React.FC = () => {
   }, [currentUser]);
 
   /**
-   * Inicia inscrições de Realtime para Mensagens e Saques
+   * Busca inicial de dados (sem Realtime — apenas REST/HTTP via Supabase)
+   * O Realtime (WebSocket) foi desativado propositalmente. Todo o sistema
+   * agora se mantém sincronizado via polling (ver useEffect abaixo).
    */
   useEffect(() => {
     fetchInitialData();
-
-    // CANAL DE CHAT REALTIME
-    const messagesSub = supabase
-      .channel('public:messages')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-          const newMsg = payload.new as any;
-          const formattedMsg: ChatMessage = {
-              ...newMsg,
-              timestamp: new Date(newMsg.timestamp)
-          };
-
-          if (currentUserRef.current && formattedMsg.senderRole !== currentUserRef.current.role) {
-              new Audio(somMensagem).play().catch(() => {});
-              
-              showInAppNotification(
-                  `Nova mensagem`, 
-                  formattedMsg.text,
-                  '💬'
-              );
-          }
-          
-          setChats(prev => {
-              const currentChats = prev[formattedMsg.orderId] || [];
-              if (currentChats.some(m => m.id === formattedMsg.id)) return prev;
-              
-              return {
-                  ...prev,
-                  [formattedMsg.orderId]: [...currentChats, formattedMsg]
-              };
-          });
-      })
-      .subscribe();
-    
-    // CANAL DE SAQUES REALTIME
-    const withdrawalsSub = supabase
-      .channel('public:withdrawal_requests')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'withdrawal_requests' }, (payload) => {
-          console.log("Mudança detectada em solicitações de saque.");
-          if (payload.eventType === 'INSERT') {
-             setWithdrawals(prev => [...prev, payload.new as WithdrawalRequest]);
-          } else if (payload.eventType === 'UPDATE') {
-             setWithdrawals(prev => prev.map(w => w.id === payload.new.id ? payload.new as WithdrawalRequest : w));
-          }
-      })
-      .subscribe();
-
-    return () => {
-        supabase.removeChannel(messagesSub);
-        supabase.removeChannel(withdrawalsSub);
-    };
   }, []);
 
   /**
-   * Inicia inscrição Realtime para Pedidos com Lógica de Notificação Diferenciada
+   * POLLING UNIFICADO (substitui os antigos canais Realtime de
+   * "orders", "messages" e "withdrawal_requests").
+   *
+   * A cada 5 segundos, busca o que há de novo em Pedidos, Mensagens de
+   * Chat e Solicitações de Saque, comparando com o estado atual em tela
+   * para disparar os mesmos sons/notificações que o Realtime disparava,
+   * mas sem depender de WebSocket.
    */
   useEffect(() => {
       if (!currentUser) return;
 
-      let filter = undefined;
-      if (currentUser.role === 'client') {
-          filter = `customerId=eq.${currentUser.id}`;
-      } else if (currentUser.role === 'partner') {
-          filter = `companyId=eq.${currentUser.id}`;
-      }
-
-      const channel = supabase.channel(`orders_user_${currentUser.id}`)
-          .on('postgres_changes', { 
-              event: '*', 
-              schema: 'public', 
-              table: 'orders',
-              filter: filter 
-          }, (payload) => {
-              if (payload.eventType === 'INSERT') {
-                  const newOrder = payload.new as Order;
-                  newOrder.timestamp = new Date(newOrder.timestamp);
-
-                  if (currentUser.role === 'partner') {
-                      new Audio(somPedido).play().catch(() => {});
-                      showInAppNotification("Novo Pedido!", `Você recebeu um novo pedido de ${newOrder.customerName}`, "🔔");
-                  }
-
-                  setOrders(prev => {
-                      if (prev.some(o => o.id === newOrder.id)) return prev;
-                      return [newOrder, ...prev]; 
-                  });
-              } else if (payload.eventType === 'UPDATE') {
-                  const updatedOrder = payload.new as Order;
-                  updatedOrder.timestamp = new Date(updatedOrder.timestamp);
-                  
-                  const oldOrder = ordersRef.current.find(o => o.id === updatedOrder.id);
-                  
-                  if (currentUser.role === 'client' && oldOrder) {
-                      // LÓGICA DE NOTIFICAÇÃO DIFERENCIADA (ENTREGA VS RETIRADA)
-                      
-                      // Caso 1: Saiu para Entrega
-                      if (updatedOrder.deliveryMethod === 'delivery' && oldOrder.status !== 'delivering' && updatedOrder.status === 'delivering') {
-                          new Audio(somEntrega).play().catch(() => {});
-                          showInAppNotification(
-                              'Chegoou! 🛵', 
-                              `Oba! Seu pedido de ${updatedOrder.companyName} saiu para entrega!`,
-                              '🛵'
-                          );
-                      }
-                      // Caso 2: Pronto para Retirada
-                      else if (updatedOrder.deliveryMethod === 'pickup' && oldOrder.status !== 'ready' && updatedOrder.status === 'ready') {
-                          new Audio(somEntrega).play().catch(() => {});
-                          showInAppNotification(
-                              'Tá na mão! 🛍️', 
-                              `Seu pedido de ${updatedOrder.companyName} está pronto para ser retirado no balcão!`,
-                              '🛍️'
-                          );
-                      }
-                  }
-
-                  setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-              } else if (payload.eventType === 'DELETE') {
-                  setOrders(prev => prev.filter(o => o.id !== payload.old.id));
-              }
-          })
-          .subscribe();
-
-      return () => {
-          supabase.removeChannel(channel);
-      };
-  }, [currentUser]);
-
-  /**
-   * POLLING: Busca de Segurança periódica para garantir sincronia
-   */
-  useEffect(() => {
-      if (!currentUser) return;
-
-      const interval = setInterval(async () => {
-          // Só busca se houver pedidos ativos para economizar recursos
+      const fetchOrdersUpdate = async () => {
+          // Só busca pedidos se houver pedidos ativos ou se for parceiro
           const activeOrders = ordersRef.current.filter(o => 
               ['waiting_payment', 'pending', 'preparing', 'ready', 'delivering'].includes(o.status)
           );
-
           const shouldFetch = currentUser.role === 'partner' || activeOrders.length > 0;
-
           if (!shouldFetch) return;
 
           let query = supabase.from('orders').select('*');
-          
+
           if (currentUser.role === 'client') {
               query = query.eq('customerId', currentUser.id)
                            .in('status', ['waiting_payment', 'pending', 'preparing', 'ready', 'delivering', 'cancelled']);
@@ -512,69 +394,129 @@ const App: React.FC = () => {
               query = query.eq('companyId', currentUser.id)
                            .in('status', ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering', 'delivered', 'cancelled', 'waiting_payment']);
           } else {
-              return; 
+              return;
           }
 
           query = query.order('timestamp', { ascending: false }).limit(50);
 
           const { data, error } = await query;
+          if (error || !data) return;
 
-          if (!error && data) {
-               setOrders((prevOrders) => {
-                   const newOrdersMap = new Map<string, Order>(prevOrders.map(o => [o.id, o]));
-                   let hasChanges = false;
+          setOrders((prevOrders) => {
+              const newOrdersMap = new Map<string, Order>(prevOrders.map(o => [o.id, o]));
+              let hasChanges = false;
 
-                   (data as any[]).forEach((freshOrder: any) => {
-                       const existing = newOrdersMap.get(freshOrder.id);
-                       const formattedFreshOrder: Order = {
-                           ...freshOrder,
-                           timestamp: new Date(freshOrder.timestamp)
-                       };
+              (data as any[]).forEach((freshOrder: any) => {
+                  const existing = newOrdersMap.get(freshOrder.id);
+                  const formattedFreshOrder: Order = {
+                      ...freshOrder,
+                      timestamp: new Date(freshOrder.timestamp)
+                  };
 
-                       if (!existing) {
-                           newOrdersMap.set(freshOrder.id, formattedFreshOrder);
-                           hasChanges = true;
-                           
-                           if (currentUser.role === 'partner') {
-                               new Audio(somPedido).play().catch(() => {});
-                           }
+                  if (!existing) {
+                      newOrdersMap.set(freshOrder.id, formattedFreshOrder);
+                      hasChanges = true;
 
-                       } else if (existing.status !== freshOrder.status || existing.paymentStatus !== freshOrder.paymentStatus) {
-                           newOrdersMap.set(freshOrder.id, formattedFreshOrder);
-                           hasChanges = true;
-                           
-                           // Verificação de notificações no Polling (Segurança)
-                           if (currentUser.role === 'client') {
-                               // Notificação de Entrega
-                               if (freshOrder.deliveryMethod === 'delivery' && existing.status !== 'delivering' && freshOrder.status === 'delivering') {
-                                   new Audio(somEntrega).play().catch(() => {});
-                                   showInAppNotification(
-                                      'Chegoou! 🛵', 
-                                      `Oba! Seu pedido de ${freshOrder.companyName} saiu para entrega!`,
-                                      '🛵'
-                                   );
-                               }
-                               // Notificação de Retirada
-                               else if (freshOrder.deliveryMethod === 'pickup' && existing.status !== 'ready' && freshOrder.status === 'ready') {
-                                   new Audio(somEntrega).play().catch(() => {});
-                                   showInAppNotification(
-                                      'Tá na mão! 🛍️', 
-                                      `Seu pedido de ${freshOrder.companyName} está pronto no balcão!`,
-                                      '🛍️'
-                                   );
-                               }
-                           }
-                       }
-                   });
+                      if (currentUser.role === 'partner') {
+                          new Audio(somPedido).play().catch(() => {});
+                          showInAppNotification("Novo Pedido!", `Você recebeu um novo pedido de ${formattedFreshOrder.customerName}`, "🔔");
+                      }
 
-                   if (hasChanges) {
-                       return Array.from(newOrdersMap.values()).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-                   }
-                   return prevOrders;
-               });
-          }
-      }, 5000); 
+                  } else if (existing.status !== freshOrder.status || existing.paymentStatus !== freshOrder.paymentStatus) {
+                      newOrdersMap.set(freshOrder.id, formattedFreshOrder);
+                      hasChanges = true;
 
+                      if (currentUser.role === 'client') {
+                          // Notificação de Entrega
+                          if (freshOrder.deliveryMethod === 'delivery' && existing.status !== 'delivering' && freshOrder.status === 'delivering') {
+                              new Audio(somEntrega).play().catch(() => {});
+                              showInAppNotification(
+                                 'Chegoou! 🛵', 
+                                 `Oba! Seu pedido de ${freshOrder.companyName} saiu para entrega!`,
+                                 '🛵'
+                              );
+                          }
+                          // Notificação de Retirada
+                          else if (freshOrder.deliveryMethod === 'pickup' && existing.status !== 'ready' && freshOrder.status === 'ready') {
+                              new Audio(somEntrega).play().catch(() => {});
+                              showInAppNotification(
+                                 'Tá na mão! 🛍️', 
+                                 `Seu pedido de ${freshOrder.companyName} está pronto no balcão!`,
+                                 '🛍️'
+                              );
+                          }
+                      }
+                  }
+              });
+
+              if (hasChanges) {
+                  return Array.from(newOrdersMap.values()).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+              }
+              return prevOrders;
+          });
+      };
+
+      const fetchMessagesUpdate = async () => {
+          const { data, error } = await supabase
+              .from('messages')
+              .select('*')
+              .order('timestamp', { ascending: true });
+
+          if (error || !data) return;
+
+          setChats(prev => {
+              let hasChanges = false;
+              const next: Record<string, ChatMessage[]> = { ...prev };
+
+              (data as any[]).forEach((msg: any) => {
+                  const formattedMsg: ChatMessage = {
+                      ...msg,
+                      timestamp: new Date(msg.timestamp)
+                  };
+
+                  const currentList = next[formattedMsg.orderId] || [];
+                  if (currentList.some(m => m.id === formattedMsg.id)) return;
+
+                  if (currentUserRef.current && formattedMsg.senderRole !== currentUserRef.current.role) {
+                      new Audio(somMensagem).play().catch(() => {});
+                      showInAppNotification(`Nova mensagem`, formattedMsg.text, '💬');
+                  }
+
+                  next[formattedMsg.orderId] = [...currentList, formattedMsg];
+                  hasChanges = true;
+              });
+
+              return hasChanges ? next : prev;
+          });
+      };
+
+      const fetchWithdrawalsUpdate = async () => {
+          const { data, error } = await supabase.from('withdrawal_requests').select('*');
+          if (error || !data) return;
+
+          setWithdrawals(prev => {
+              const prevMap = new Map(prev.map(w => [w.id, w]));
+              let hasChanges = false;
+
+              (data as WithdrawalRequest[]).forEach(fresh => {
+                  const existing = prevMap.get(fresh.id);
+                  if (!existing || JSON.stringify(existing) !== JSON.stringify(fresh)) {
+                      prevMap.set(fresh.id, fresh);
+                      hasChanges = true;
+                  }
+              });
+
+              return hasChanges ? Array.from(prevMap.values()) : prev;
+          });
+      };
+
+      const runPolling = () => {
+          fetchOrdersUpdate();
+          fetchMessagesUpdate();
+          fetchWithdrawalsUpdate();
+      };
+
+      const interval = setInterval(runPolling, 5000);
       return () => clearInterval(interval);
   }, [currentUser]); 
 
