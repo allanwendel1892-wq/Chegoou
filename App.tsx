@@ -4,6 +4,8 @@
  * Descrição: Gestão completa de delivery, marketplace e logística.
  */
 
+import DigitalMenuView from './components/DigitalMenuView';
+
 import React, { 
     useState,
     lazy,
@@ -874,7 +876,7 @@ const App: React.FC = () => {
   /**
    * Realiza a criação do pedido e processa pagamento
    */
-  const handlePlaceOrder = async (
+const handlePlaceOrder = async (
       cartItems: any[], 
       companyId: string, 
       finalTotal: number, 
@@ -885,11 +887,19 @@ const App: React.FC = () => {
       paymentMethod: 'cash' | 'card' | 'pix', 
       changeFor?: number, 
       couponCode?: string, 
-      discountAmount?: number
+      discountAmount?: number,
+      guestData?: { name: string, phone: string, address: any } // NOVO: Suporte para cliente sem login
   ): Promise<boolean> => {
     
-    if (!currentUser || !currentUser.address) {
-        alert("Erro: Por favor, selecione ou cadastre um endereço de entrega.");
+    // 1. Identificação do Cliente (Logado no App ou Visitante no Cardápio Digital)
+    const customerId = currentUser ? currentUser.id : undefined;
+    const customerName = currentUser ? currentUser.name : guestData?.name || 'Cliente Avulso';
+    const customerPhone = currentUser ? currentUser.phone : guestData?.phone || '';
+    const deliveryAddress = currentUser ? currentUser.address : guestData?.address;
+
+    // 2. Validação de Endereço (Apenas se for entrega)
+    if (deliveryMethod === 'delivery' && !deliveryAddress) {
+        alert("Erro: Por favor, informe um endereço de entrega válido.");
         return false;
     }
     
@@ -899,25 +909,28 @@ const App: React.FC = () => {
         return false;
     }
 
+    const isGuest = !currentUser;
     const isOnlinePayment = paymentMethod !== 'cash';
-    const FIXED_SERVICE_FEE = 0.49; // Taxa de serviço padrão
+    const FIXED_SERVICE_FEE = isGuest ? 0 : 0.49; // Taxa de serviço zerada para o cardápio digital
     
     let repasseValue = 0;
     const subtotalAfterDiscount = subtotal - (discountAmount || 0);
 
-    // Lógica de Repasse Financeiro
-    if (isOnlinePayment) {
-        if (company.deliveryType === 'own') {
-            repasseValue = subtotalAfterDiscount + deliveryFee;
+    // Lógica de Repasse Financeiro (Apenas para pedidos via App)
+    if (!isGuest) {
+        if (isOnlinePayment) {
+            if (company.deliveryType === 'own') {
+                repasseValue = subtotalAfterDiscount + deliveryFee;
+            } else {
+                repasseValue = subtotalAfterDiscount;
+            }
         } else {
-            repasseValue = subtotalAfterDiscount;
-        }
-    } else {
-        // Pedido em dinheiro: Calcula débito das taxas
-        if (company.deliveryType === 'chegoou') {
-            repasseValue = -1 * (deliveryFee + FIXED_SERVICE_FEE);
-        } else {
-            repasseValue = 0;
+            // Pedido em dinheiro: Calcula débito das taxas
+            if (company.deliveryType === 'chegoou') {
+                repasseValue = -1 * (deliveryFee + FIXED_SERVICE_FEE);
+            } else {
+                repasseValue = 0;
+            }
         }
     }
 
@@ -926,9 +939,9 @@ const App: React.FC = () => {
         id: `ord-${Date.now()}`,
         companyId,
         companyName: company.name,
-        customerId: currentUser.id,
-        customerName: currentUser.name,
-        customerPhone: currentUser.phone,
+        customerId: customerId,
+        customerName: customerName,
+        customerPhone: customerPhone,
         items: cartItems.map((i: any) => ({
             productId: i.product.id,
             productName: i.product.name,
@@ -943,15 +956,17 @@ const App: React.FC = () => {
         deliveryMethod: deliveryMethod,
         paymentMethod: paymentMethod,
         changeFor: changeFor,
-        status: paymentMethod === 'cash' ? 'pending' : 'waiting_payment',
+        // Visitantes entram como 'pending' direto para o restaurante aceitar e cobrar no local
+        status: isGuest ? 'pending' : (paymentMethod === 'cash' ? 'pending' : 'waiting_payment'),
         timestamp: new Date(),
-        deliveryCode: currentUser.phone.slice(-4),
-        deliveryAddress: currentUser.address,
+        deliveryCode: customerPhone.slice(-4) || '0000',
+        deliveryAddress: deliveryAddress,
         pickupAddress: company.address || { street: '', number: '', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0 },
         deliveryType: company.deliveryType,
         paymentStatus: 'pending',
         repasseValue: repasseValue,
-        repasseStatus: 'pending',
+        // O app não gerencia o dinheiro do visitante, então o repasse é ignorado
+        repasseStatus: isGuest ? 'ignored' : 'pending',
         couponCode: couponCode,
         discountAmount: discountAmount
     };
@@ -964,12 +979,13 @@ const App: React.FC = () => {
     }
 
     // Processamento de Pagamento Digital
-    if (paymentMethod !== 'cash') {
+    // Somente usuários logados passam pelo gateway. Visitantes pagam presencialmente.
+    if (!isGuest && paymentMethod !== 'cash') {
         try {
             const paymentResponse = await PaymentService.processPayment(
                 finalTotal,
                 paymentMethod,
-                currentUser,
+                currentUser!, // Uso ! pois já validamos que !isGuest
                 `Pedido #${newOrder.id} - ${company.name}`,
                 newOrder.id
             );
@@ -1003,7 +1019,6 @@ const App: React.FC = () => {
 
     showInAppNotification("Pedido Criado!", "Seu pedido foi enviado com sucesso!", "🍟");
     return true;
-  };
 
   /**
    * Atualiza status do pedido e processa estornos
