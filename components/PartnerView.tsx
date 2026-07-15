@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem, WithdrawalRequest, Coupon, User } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
-import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle, ArrowRight, Lock, Unlock, Banknote, AlertCircle, Info, MessageSquare, CreditCard, Printer, TrendingUp } from 'lucide-react';
+import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle, ArrowRight, Lock, Unlock, Banknote, AlertCircle, Info, MessageSquare, CreditCard, Printer, TrendingUp, Copy, Link2 } from 'lucide-react';
+import { uploadProductImage, uploadCompanyImage } from '../services/imageUpload';
 import DashboardView from './DashboardView';
 import WhatsAppBotView from './WhatsAppBotView';
 import Sidebar from './Sidebar';
@@ -973,6 +974,10 @@ const PartnerView: React.FC<PartnerViewProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chats, activeChatOrder]);
 
+  const [savingProduct, setSavingProduct] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, onSuccess: (base64: string) => void) => {
       const file = e.target.files?.[0];
       if (file) {
@@ -1114,36 +1119,90 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       setEditingProductId(null);
   };
 
-  const handleSaveProduct = () => {
+  const handleSaveProduct = async () => {
       if (!newProduct.name || !newProduct.category) { alert("Preencha nome e categoria.");
       return; }
-      
-      const productData: Product = {
-          id: editingProductId || Date.now().toString(),
-          companyId: company.id,
-          name: newProduct.name!,
-          description: newProduct.description || '',
-          category: newProduct.category!,
-          price: Number(newProduct.price),
-          image: productImagePreview || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c',
-          isAvailable: true,
-          pricingMode: newProduct.pricingMode || 'default',
-          groups: newProduct.groups || []
-      };
-      if (editingProductId) {
-          onUpdateProduct(productData);
-          alert("Produto updated!");
-      } else {
-          onAddProduct(productData);
-          alert("Produto criado!");
+
+      setSavingProduct(true);
+      try {
+          // Se veio um arquivo novo (ou já melhorado pela IA), productImagePreview é uma
+          // data URL base64. uploadProductImage comprime e sobe pro Storage, retornando
+          // uma URL curta. Se já for uma URL (produto existente sem alteração de foto),
+          // ela é apenas reaproveitada sem novo upload.
+          const imageUrl = productImagePreview
+              ? await uploadProductImage(productImagePreview, company.id)
+              : 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c';
+
+          const productData: Product = {
+              id: editingProductId || Date.now().toString(),
+              companyId: company.id,
+              name: newProduct.name!,
+              description: newProduct.description || '',
+              category: newProduct.category!,
+              price: Number(newProduct.price),
+              image: imageUrl,
+              isAvailable: true,
+              pricingMode: newProduct.pricingMode || 'default',
+              groups: newProduct.groups || []
+          };
+          if (editingProductId) {
+              onUpdateProduct(productData);
+              alert("Produto updated!");
+          } else {
+              onAddProduct(productData);
+              alert("Produto criado!");
+          }
+
+          handleCancelEdit();
+      } catch (e: any) {
+          alert("Erro ao enviar a imagem do produto: " + (e.message || 'tente novamente.'));
+      } finally {
+          setSavingProduct(false);
       }
-      
-      handleCancelEdit();
   };
 
-  const handleSaveSettings = () => {
-    updateCompany(localCompany);
-    alert('Configurações salvas com sucesso!');
+  const handleSaveSettings = async () => {
+    setSavingSettings(true);
+    try {
+        const updatedCompany = { ...localCompany };
+
+        // Só sobe pro Storage se logo/coverImage forem uma data URL nova (base64).
+        // Se já forem URLs (sem alteração), são reaproveitadas sem re-upload.
+        if (updatedCompany.logo) {
+            updatedCompany.logo = await uploadCompanyImage(updatedCompany.logo, company.id, 'logo');
+        }
+        if (updatedCompany.coverImage) {
+            updatedCompany.coverImage = await uploadCompanyImage(updatedCompany.coverImage, company.id, 'banner');
+        }
+
+        setLocalCompany(updatedCompany);
+        updateCompany(updatedCompany);
+        alert('Configurações salvas com sucesso!');
+    } catch (e: any) {
+        alert("Erro ao enviar logo/banner: " + (e.message || 'tente novamente.'));
+    } finally {
+        setSavingSettings(false);
+    }
+  };
+
+  const menuLink = `${window.location.origin}/cardapio/${company.id}`;
+
+  const handleCopyMenuLink = async () => {
+      try {
+          await navigator.clipboard.writeText(menuLink);
+      } catch {
+          // Fallback para navegadores sem suporte ao Clipboard API
+          const textarea = document.createElement('textarea');
+          textarea.value = menuLink;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textarea);
+      }
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2500);
   };
 
   const editingOrderPaymentMethod = editingOrder?.paymentMethod?.toLowerCase() || '';
@@ -2223,9 +2282,14 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
                             <button 
                                 onClick={handleSaveProduct} 
-                                 className={`w-full text-white font-bold py-3 rounded-xl hover:opacity-90 transition-all shadow-lg shadow-gray-200 ${editingProductId ? 'bg-blue-600' : 'bg-gray-900'}`}
+                                disabled={savingProduct}
+                                 className={`w-full text-white font-bold py-3 rounded-xl hover:opacity-90 transition-all shadow-lg shadow-gray-200 flex items-center justify-center gap-2 ${savingProduct ? 'bg-gray-400 cursor-not-allowed' : editingProductId ? 'bg-blue-600' : 'bg-gray-900'}`}
                             >
-                                {editingProductId ? 'Atualizar Produto' : 'Salvar Produto'}
+                                {savingProduct ? (
+                                    <><Loader2 className="w-4 h-4 animate-spin" /> Enviando imagem...</>
+                                ) : (
+                                    editingProductId ? 'Atualizar Produto' : 'Salvar Produto'
+                                )}
                             </button>
                         </div>
                     </div>
@@ -2290,6 +2354,30 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                     <h2 className="text-2xl font-bold text-gray-900 mb-6">Configurações da Loja</h2>
                     
                      <div className="space-y-6">
+
+                        <div className="bg-gray-900 rounded-xl p-6 mb-2">
+                            <h3 className="font-bold text-white mb-2 flex items-center gap-2">
+                                <Link2 className="w-5 h-5" /> Link do Cardápio Digital
+                            </h3>
+                            <p className="text-sm text-gray-300 mb-4 leading-relaxed">
+                                Compartilhe este link com seus clientes (redes sociais, WhatsApp, etc). Ele abre seu cardápio direto, sem exigir login.
+                            </p>
+                            <div className="flex gap-2">
+                                <input
+                                    readOnly
+                                    value={menuLink}
+                                    onClick={(e) => (e.target as HTMLInputElement).select()}
+                                    className="flex-1 bg-gray-800 text-gray-100 text-sm font-mono rounded-lg px-4 py-2.5 border border-gray-700 truncate outline-none"
+                                />
+                                <button
+                                    onClick={handleCopyMenuLink}
+                                    className={`shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-lg font-bold text-sm transition-all ${linkCopied ? 'bg-green-600 text-white' : 'bg-white text-gray-900 hover:bg-gray-100'}`}
+                                >
+                                    {linkCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                                    {linkCopied ? 'Copiado!' : 'Copiar'}
+                                </button>
+                            </div>
+                        </div>
 
                         <div className="bg-red-50 border border-red-100 rounded-xl p-6 mb-6">
                             <h3 className="font-bold text-red-900 mb-2 flex items-center gap-2">
@@ -2512,9 +2600,14 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                         <div className="flex justify-end pt-4">
                             <button 
                                  onClick={handleSaveSettings}
-                                className="bg-red-600 text-white font-bold px-8 py-3 rounded-xl hover:bg-red-700 shadow-lg shadow-red-200 transition-all"
+                                disabled={savingSettings}
+                                className={`text-white font-bold px-8 py-3 rounded-xl shadow-lg shadow-red-200 transition-all flex items-center justify-center gap-2 ${savingSettings ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700'}`}
                             >
-                                 Salvar Alterações
+                                 {savingSettings ? (
+                                     <><Loader2 className="w-4 h-4 animate-spin" /> Enviando imagens...</>
+                                 ) : (
+                                     'Salvar Alterações'
+                                 )}
                             </button>
                         </div>
                     </div>
