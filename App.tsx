@@ -904,37 +904,51 @@ const App: React.FC = () => {
    * pedido (relatedOrderIds), pra dar baixa automática quando for pago.
    */
   const handleCourierRequestWithdrawal = async (courierId: string, amount: number, orderIds: string[]) => {
-      if (amount <= 0 || orderIds.length === 0) {
-          alert("Não há saldo pendente para solicitar.");
-          return;
-      }
+    if (amount <= 0 || orderIds.length === 0) {
+        alert("Não há saldo pendente para solicitar.");
+        return;
+    }
 
-      const alreadyPending = withdrawals.some(w => w.userId === courierId && w.status === 'pending');
-      if (alreadyPending) {
-          alert("Você já tem uma solicitação de saque pendente. Aguarde o pagamento antes de pedir novamente.");
-          return;
-      }
+    const alreadyPending = withdrawals.some(w => w.userId === courierId && w.status === 'pending');
+    if (alreadyPending) {
+        alert("Você já tem uma solicitação de saque pendente. Aguarde o pagamento antes de pedir novamente.");
+        return;
+    }
 
-      const newRequest = {
-          id: `wd-${Date.now()}`,
-          userId: courierId,
-          amount,
-          status: 'pending',
-          date: new Date().toISOString(),
-          type: 'courier',
-          relatedOrderIds: orderIds,
-      };
+    // Criamos o objeto mapeado perfeitamente com a sua tabela 'withdrawal_requests'
+    const newRequest = {
+        id: `wd-${Date.now()}`,
+        userId: courierId,
+        userName: currentUser?.name || 'Entregador', // Salva o nome para o restaurante ver quem é
+        userType: 'courier',                        // CORREÇÃO: De 'type' para 'userType'
+        amount: amount,
+        status: 'pending',
+        date: new Date().toISOString(),
+        relatedOrderIds: orderIds,
+        bankInfo: `Chave Pix: ${currentUser?.pixKey || 'Não cadastrada'}` // Ajuda o restaurante a saber para onde transferir
+    };
 
-      const { data, error } = await supabase.from('withdrawal_requests').insert([newRequest]).select();
-      if (error) {
-          alert("Erro ao solicitar saque: " + error.message);
-          return;
-      }
-      if (data) {
-          setWithdrawals(prev => [...prev, data[0]]);
-          showInAppNotification("Solicitação enviada!", "Seu saque foi solicitado e será analisado pelo administrador.", "💰");
-      }
-  };
+    try {
+        // 1. Grava no banco de dados
+        const { error } = await supabase
+            .from('withdrawal_requests')
+            .insert([newRequest]);
+
+        if (error) {
+            console.error("Erro ao salvar no banco:", error);
+            alert("Erro ao enviar a solicitação para o banco de dados.");
+            return;
+        }
+
+        // 2. Atualiza o estado local do React para refletir na tela na hora
+        setWithdrawals(prev => [newRequest as any, ...prev]);
+        alert("Solicitação de saque enviada com sucesso! Aguarde a aprovação do restaurante.");
+
+    } catch (err) {
+        console.error("Erro na requisição de saque:", err);
+        alert("Erro de conexão ao solicitar saque.");
+    }
+};
 
   /**
    * Realiza a criação do pedido e processa pagamento
