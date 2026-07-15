@@ -527,13 +527,36 @@ const App: React.FC = () => {
   /**
    * Busca inicial de todos os dados do sistema
    */
+  /**
+   * Busca inicial de todos os dados do sistema
+   */
   const fetchInitialData = async () => {
       setIsLoading(true);
       setConnectionError(null);
       console.log("Iniciando carregamento de dados globais...");
       
-          // Busca de Produtos (Continua normal para os donos e administradores)
-          const { data: productsData, error: productsError } = await supabase.from('products').select('*').limit(5000);//limite de dados do banco
+      try {
+          // --- INÍCIO DO ATALHO DEFINITIVO ---
+          if (publicMenuCompanyId) {
+              // 1. Baixa APENAS a empresa dona do link
+              const { data: singleCompany } = await supabase.from('companies').select('*').eq('id', publicMenuCompanyId);
+              if (singleCompany) setCompanies(singleCompany);
+
+              // 2. Baixa APENAS os produtos dessa empresa
+              const { data: storeProducts } = await supabase.from('products').select('*').eq('companyId', publicMenuCompanyId);
+              if (storeProducts) setProducts(storeProducts);
+
+              return; // Encerra o carregamento do banco de dados aqui!
+          }
+          // --- FIM DO ATALHO ---
+
+          // Busca de Empresas
+          const { data: companiesData, error: companiesError } = await supabase.from('companies').select('*');
+          if (companiesError) throw companiesError;
+          if (companiesData) setCompanies(companiesData);
+
+          // Busca de Produtos
+          const { data: productsData, error: productsError } = await supabase.from('products').select('*').limit(5000);
           if (productsError) throw productsError;
           if (productsData) setProducts(productsData);
 
