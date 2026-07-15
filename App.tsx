@@ -399,20 +399,23 @@ const App: React.FC = () => {
           const activeOrders = ordersRef.current.filter(o => 
               ['waiting_payment', 'pending', 'preparing', 'ready', 'delivering'].includes(o.status)
           );
-          const shouldFetch = currentUser.role === 'partner' || activeOrders.length > 0;
-          if (!shouldFetch) return;
+          const shouldFetch = currentUser.role === 'partner' || currentUser.role === 'courier' || activeOrders.length > 0;
+if (!shouldFetch) return;
 
           let query = supabase.from('orders').select('*');
 
           if (currentUser.role === 'client') {
-              query = query.eq('customerId', currentUser.id)
-                           .in('status', ['waiting_payment', 'pending', 'preparing', 'ready', 'delivering', 'cancelled']);
-          } else if (currentUser.role === 'partner') {
-              query = query.eq('companyId', currentUser.id)
-                           .in('status', ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering', 'delivered', 'cancelled', 'waiting_payment']);
-          } else {
-              return;
-          }
+    query = query.eq('customerId', currentUser.id)
+                 .in('status', ['waiting_payment', 'pending', 'preparing', 'ready', 'delivering', 'cancelled']);
+} else if (currentUser.role === 'partner') {
+    query = query.eq('companyId', currentUser.id)
+                 .in('status', ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering', 'delivered', 'cancelled', 'waiting_payment']);
+} else if (currentUser.role === 'courier') {
+    // Entregador puxa pedidos que estão prontos para coleta ou que já estão na sua rota
+    query = query.in('status', ['ready', 'waiting_courier', 'delivering']);
+} else {
+    return;
+}
 
           query = query.order('timestamp', { ascending: false }).limit(50);
 
