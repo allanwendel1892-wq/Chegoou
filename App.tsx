@@ -43,6 +43,7 @@ import {
     AlertCircle, 
     Database, 
     Lock,
+    Store, // Usado na tela de "Loja não encontrada" do Cardápio Digital
     Download // Adicionado para o botão de instalação
 } from 'lucide-react';
 
@@ -199,6 +200,14 @@ const processInventoryDeduction = async (orderItems: any[], dbCompositions: any[
 // >>> FIM DO MOTOR DE CÁLCULO <<<
 
 const App: React.FC = () => {
+  // ---------------------------------------------------------------------------
+  // ROTEAMENTO PÚBLICO: CARDÁPIO DIGITAL (SEM LOGIN)
+  // Detecta URLs no formato /cardapio/:companyId para liberar acesso
+  // ao DigitalMenuView sem exigir autenticação.
+  // ---------------------------------------------------------------------------
+  const menuRouteMatch = window.location.pathname.match(/^\/cardapio\/([^/?#]+)/);
+  const publicMenuCompanyId = menuRouteMatch ? decodeURIComponent(menuRouteMatch[1]) : null;
+
   // ESTADOS DE AUTENTICAÇÃO E USUÁRIO
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const currentUserRef = useRef<User | null>(null);
@@ -1019,6 +1028,7 @@ const handlePlaceOrder = async (
 
     showInAppNotification("Pedido Criado!", "Seu pedido foi enviado com sucesso!", "🍟");
     return true;
+  };
 
   /**
    * Atualiza status do pedido e processa estornos
@@ -1271,6 +1281,46 @@ const handlePlaceOrder = async (
                   TENTAR NOVAMENTE
               </button>
           </div>
+      );
+  }
+
+  /**
+   * Cardápio Digital Público (Acesso via /cardapio/:companyId)
+   * Não exige login. Disponível tanto para visitantes quanto para
+   * usuários já autenticados que acessem o link diretamente.
+   */
+  if (publicMenuCompanyId) {
+      const publicMenuCompany = companies.find(c => c.id === publicMenuCompanyId);
+
+      if (!publicMenuCompany) {
+          return (
+              <div className="h-screen w-full flex flex-col items-center justify-center bg-white p-8 text-center">
+                  <div className="bg-gray-50 p-6 rounded-full mb-6">
+                    <Store className="w-16 h-16 text-gray-300 mx-auto" />
+                  </div>
+                  <h2 className="text-2xl font-black text-gray-900 uppercase tracking-tighter">
+                    Loja não encontrada
+                  </h2>
+                  <p className="text-gray-500 mt-4 max-w-sm font-medium">
+                    O cardápio que você está procurando não existe ou não está mais disponível.
+                  </p>
+              </div>
+          );
+      }
+
+      return (
+          <Suspense fallback={
+              <div className="flex flex-col h-screen w-full items-center justify-center bg-white gap-4">
+                  <Loader2 className="w-12 h-12 text-red-600 animate-spin" />
+                  <p className="text-gray-500 font-medium">Carregando cardápio...</p>
+              </div>
+          }>
+              <DigitalMenuView
+                  company={publicMenuCompany}
+                  products={products.filter(p => p.companyId === publicMenuCompany.id)}
+                  onPlaceOrder={handlePlaceOrder}
+              />
+          </Suspense>
       );
   }
 
