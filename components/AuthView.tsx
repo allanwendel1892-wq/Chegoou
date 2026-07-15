@@ -28,6 +28,7 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
   const [mapAddress, setMapAddress] = useState('');
   const [isMapDragging, setIsMapDragging] = useState(false);
   const [mapError, setMapError] = useState(false);
+  const [bgImageFailed, setBgImageFailed] = useState(false); // esconde a imagem de fundo se o link falhar
 
   const [formData, setFormData] = useState({
     email: '',
@@ -438,12 +439,24 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, existingUsers = [] }) => {
         {/* 👇👇👇 COMO TROCAR A IMAGEM FEIA DE COMIDA 👇👇👇 
             1. Salve uma imagem bonita na sua pasta "public" (ex: fundo.jpg)
             2. Troque o link abaixo do "src" por "/fundo.jpg"
-            3. Ou cole um link de outra imagem da internet. */}
-        <img 
-            src="https://shpdyqsrqudtwagqwart.supabase.co/storage/v1/object/sign/chegoou_imagens_sites/fundo.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV8xYjJlNzgwYS00Mzk3LTRiNTUtYjE4OS1lOTcwMzNjNWU0YWYiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJjaGVnb291X2ltYWdlbnNfc2l0ZXMvZnVuZG8ucG5nIiwiaWF0IjoxNzcyMzkwMTE0LCJleHAiOjE4MDM5MjYxMTR9.ZVPDRKt7dd0JTu-O8WmIhknarYayEbuJ7SI1-dueXCw" 
-            className="absolute inset-0 w-full h-full object-cover"
-            alt="Food Background"
-        />
+            3. Ou cole um link de outra imagem da internet.
+
+            ⚠️ O link antigo apontava pra um projeto Supabase que não existe
+            mais (shpdyqsrqudtwagqwart.supabase.co), e por isso o DNS falhava
+            (ERR_NAME_NOT_RESOLVED), atrasando o carregamento da tela.
+            Agora, se a imagem falhar por qualquer motivo, ela some sozinha
+            (via onError) e a tela mostra só o fundo vermelho sólido, sem
+            travar nem gerar erro no console. */}
+        {!bgImageFailed && (
+            <img 
+                src="/fundo.jpg"
+                className="absolute inset-0 w-full h-full object-cover"
+                alt="Food Background"
+                loading="eager"
+                decoding="async"
+                onError={() => setBgImageFailed(true)}
+            />
+        )}
         {/* 👆👆👆 ==================================== 👆👆👆 */}
 
         <div className="relative z-20 text-white p-12 max-w-lg">
