@@ -24,7 +24,6 @@ interface CourierViewProps {
   confirmDelivery: (orderId: string, code: string) => void;
   onLogout: () => void;
   withdrawals: WithdrawalRequest[];
-  // AJUSTADO: Agora aceita o quarto parâmetro opcional 'companyId'
   onRequestWithdrawal: (courierId: string, amount: number, orderIds: string[], companyId?: string) => Promise<void> | void;
 }
 
@@ -41,7 +40,7 @@ const CourierView: React.FC<CourierViewProps> = ({
   const [deliveryCode, setDeliveryCode] = useState('');
   const [requestingWithdrawal, setRequestingWithdrawal] = useState(false);
 
-  // Pedidos liberados para todos (limbo nunca mais)
+  // Pedidos liberados para todos (limbo)
   const openPoolOrders = useMemo(() => {
     return (availableOrders || []).filter(o => o.status === 'waiting_courier');
   }, [availableOrders]);
@@ -54,7 +53,7 @@ const CourierView: React.FC<CourierViewProps> = ({
     );
   }, [availableOrders, courier.id]);
 
-  // Pedidos concluídos por ESTE motoboy (Para a Carteira)
+  // Pedidos concluídos por ESTE motoboy
   const myCompletedOrders = useMemo(() => {
     return (availableOrders || []).filter(o => 
         o.courierId === courier.id && 
@@ -99,6 +98,7 @@ const CourierView: React.FC<CourierViewProps> = ({
           setRequestingWithdrawal(false);
       }
   };
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col pb-20 font-sans">
       {/* HEADER */}
@@ -220,7 +220,7 @@ const CourierView: React.FC<CourierViewProps> = ({
                                 </div>
                             </div>
 
-                            {/* DYNAMIC GPS ACTION BUTTON: Redireciona para o Google Maps preenchendo automaticamente o endereço se não houver link salvo */}
+                            {/* DYNAMIC GPS ACTION BUTTON */}
                             {order.deliveryAddress && (
                                 <a 
                                     href={order.deliveryAddress.mapLink || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${order.deliveryAddress.street || ''}, ${order.deliveryAddress.number || ''}, ${order.deliveryAddress.neighborhood || ''}, ${order.deliveryAddress.city || ''}`)}`}
@@ -275,8 +275,8 @@ const CourierView: React.FC<CourierViewProps> = ({
                         <p className="font-bold">R$ {totalEarned.toFixed(2)}</p>
                     </div>
                     <div className="text-right">
-                        <p className="text-gray-400 text-xs">Entregas pendentes</p>
-                        <p className="font-bold">{unpaidOrders.length} corridas</p>
+                        <p className="text-gray-400 text-xs">Total de entregas</p>
+                        <p className="font-bold">{myCompletedOrders.length} corridas</p>
                     </div>
                 </div>
 
@@ -337,16 +337,16 @@ const CourierView: React.FC<CourierViewProps> = ({
                 )}
             </div>
 
-            {/* Lista de Corridas Pendentes de Pagamento */}
+            {/* Lista das Últimas Corridas Concluídas */}
             <div className="mt-6">
                 <h3 className="font-bold text-gray-700 mb-3 flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 text-orange-500" /> Corridas aguardando acerto
+                    <CheckCircle className="w-4 h-4 text-green-500" /> Últimas corridas entregues
                 </h3>
-                {unpaidOrders.length === 0 ? (
-                    <p className="text-sm text-gray-500 text-center py-4">Sua carteira está zerada. Todas as entregas foram pagas!</p>
+                {myCompletedOrders.length === 0 ? (
+                    <p className="text-sm text-gray-500 text-center py-4">Você ainda não realizou nenhuma entrega.</p>
                 ) : (
                     <div className="space-y-2">
-                        {unpaidOrders.map(order => (
+                        {myCompletedOrders.slice(0, 15).map(order => (
                             <div key={order.id} className="bg-white p-3 rounded-xl border border-gray-200 flex justify-between items-center">
                                 <div>
                                     <p className="font-bold text-sm text-gray-800">{order.customerName}</p>
