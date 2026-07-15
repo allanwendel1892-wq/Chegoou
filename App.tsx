@@ -903,7 +903,12 @@ const App: React.FC = () => {
    * marcando type: 'courier' e guardando quais corridas entram nesse
    * pedido (relatedOrderIds), pra dar baixa automática quando for pago.
    */
-  const handleCourierRequestWithdrawal = async (courierId: string, amount: number, orderIds: string[]) => {
+  const handleCourierRequestWithdrawal = async (
+    courierId: string, 
+    amount: number, 
+    orderIds: string[],
+    companyId?: string // <-- PARÂMETRO ADICIONADO
+) => {
     if (amount <= 0 || orderIds.length === 0) {
         alert("Não há saldo pendente para solicitar.");
         return;
@@ -915,21 +920,21 @@ const App: React.FC = () => {
         return;
     }
 
-    // Criamos o objeto mapeado perfeitamente com a sua tabela 'withdrawal_requests'
     const newRequest = {
         id: `wd-${Date.now()}`,
         userId: courierId,
-        userName: currentUser?.name || 'Entregador', // Salva o nome para o restaurante ver quem é
-        userType: 'courier',                        // CORREÇÃO: De 'type' para 'userType'
+        userName: currentUser?.name || 'Entregador', 
+        userType: 'courier',                        
         amount: amount,
         status: 'pending',
         date: new Date().toISOString(),
         relatedOrderIds: orderIds,
-        bankInfo: `Chave Pix: ${currentUser?.pixKey || 'Não cadastrada'}` // Ajuda o restaurante a saber para onde transferir
+        companyId: companyId || null, // <-- SALVA O ID NA SUA COLUNA companyId DO BANCO DE DADOS!
+        bankInfo: `Chave Pix: ${currentUser?.pixKey || 'Não cadastrada'}` 
     };
 
     try {
-        // 1. Grava no banco de dados
+        // 1. Grava diretamente no banco de dados na tabela de saques
         const { error } = await supabase
             .from('withdrawal_requests')
             .insert([newRequest]);
@@ -940,7 +945,7 @@ const App: React.FC = () => {
             return;
         }
 
-        // 2. Atualiza o estado local do React para refletir na tela na hora
+        // 2. Atualiza o estado interno do React local
         setWithdrawals(prev => [newRequest as any, ...prev]);
         alert("Solicitação de saque enviada com sucesso! Aguarde a aprovação do restaurante.");
 
