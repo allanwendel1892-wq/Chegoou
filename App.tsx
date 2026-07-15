@@ -865,11 +865,74 @@ const App: React.FC = () => {
 
   /**
    * Atualiza status de solicitação de saque (Admin)
+   * Quando é uma solicitação de ENTREGADOR e é marcada como "paid",
+   * damos baixa automaticamente nas corridas relacionadas
+   * (courierPaid = true), pra carteira do entregador parar de contar
+   * esse valor como pendente.
    */
   const handleUpdateWithdrawal = async (id: string, status: 'paid' | 'rejected') => {
       const { error } = await supabase.from('withdrawal_requests').update({ status }).eq('id', id);
       if (!error) {
           setWithdrawals(prev => prev.map(w => w.id === id ? { ...w, status } : w));
+
+          if (status === 'paid') {
+              const request = withdrawals.find(w => w.id === id);
+              const relatedOrderIds: string[] = (request as any)?.relatedOrderIds || [];
+
+              if (relatedOrderIds.length > 0) {
+                  const { error: settleError } = await supabase
+                      .from('orders')
+                      .update({ courierPaid: true })
+                      .in('id', relatedOrderIds);
+
+                  if (!settleError) {
+                      setOrders(prev => prev.map(o =>
+                          relatedOrderIds.includes(o.id) ? ({ ...o, courierPaid: true } as any) : o
+                      ));
+                  } else {
+                      console.error("Erro ao dar baixa nas corridas do saque:", settleError);
+                  }
+              }
+          }
+      }
+  };
+
+  /**
+   * Solicitação de saque feita pelo ENTREGADOR a partir da Carteira.
+   * Registra na mesma tabela `withdrawal_requests` usada pelas lojas,
+   * marcando type: 'courier' e guardando quais corridas entram nesse
+   * pedido (relatedOrderIds), pra dar baixa automática quando for pago.
+   */
+  const handleCourierRequestWithdrawal = async (courierId: string, amount: number, orderIds: string[]) => {
+      if (amount <= 0 || orderIds.length === 0) {
+          alert("Não há saldo pendente para solicitar.");
+          return;
+      }
+
+      const alreadyPending = withdrawals.some(w => w.userId === courierId && w.status === 'pending');
+      if (alreadyPending) {
+          alert("Você já tem uma solicitação de saque pendente. Aguarde o pagamento antes de pedir novamente.");
+          return;
+      }
+
+      const newRequest = {
+          id: `wd-${Date.now()}`,
+          userId: courierId,
+          amount,
+          status: 'pending',
+          date: new Date().toISOString(),
+          type: 'courier',
+          relatedOrderIds: orderIds,
+      };
+
+      const { data, error } = await supabase.from('withdrawal_requests').insert([newRequest]).select();
+      if (error) {
+          alert("Erro ao solicitar saque: " + error.message);
+          return;
+      }
+      if (data) {
+          setWithdrawals(prev => [...prev, data[0]]);
+          showInAppNotification("Solicitação enviada!", "Seu saque foi solicitado e será analisado pelo administrador.", "💰");
       }
   };
 
@@ -1458,6 +1521,8 @@ const handlePlaceOrder = async (
             acceptOrder={handleCourierAcceptOrder}
             confirmDelivery={(id, code) => updateOrderStatus(id, 'delivered')}
             onLogout={handleLogout}
+            withdrawals={withdrawals.filter(w => w.userId === currentUser.id)}
+            onRequestWithdrawal={handleCourierRequestWithdrawal}
         />;
         break;
 
