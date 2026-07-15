@@ -18,6 +18,8 @@ interface DigitalMenuViewProps {
         subtotal: number, 
         paymentMethod: 'cash' | 'card' | 'pix', 
         changeFor?: number,
+        couponCode?: string,
+        discountAmount?: number,
         customerData?: { name: string, phone: string, address: any } // Adicionado para suportar clientes sem login
     ) => Promise<boolean>;
 }
@@ -139,7 +141,9 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
             productTotal, 
             paymentMethod, 
             changeForValue,
-            guestData // Passando os dados do cliente para o App.tsx
+            undefined, // couponCode (cardápio digital não usa cupom por enquanto)
+            undefined, // discountAmount
+            guestData // Passando os dados do cliente para o App.tsx (agora na posição certa)
         ); 
 
         setIsProcessing(false);
