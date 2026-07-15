@@ -62,10 +62,6 @@ const CourierView: React.FC<CourierViewProps> = ({
     );
   }, [availableOrders, courier.id]);
 
-  // Lógica da Carteira Financeira
-  const unpaidOrders = myCompletedOrders.filter(o => !(o as any).courierPaid);
-  const paidOrders = myCompletedOrders.filter(o => (o as any).courierPaid);
-
   // Solicitações de saque deste entregador
   const myWithdrawals = useMemo(() => {
     return [...(withdrawals || [])].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -73,46 +69,36 @@ const CourierView: React.FC<CourierViewProps> = ({
 
   const pendingWithdrawal = myWithdrawals.find(w => w.status === 'pending');
 
-  // IDs de corridas que já estão dentro de uma solicitação pendente
-  const orderIdsInPendingRequest = useMemo(() => {
-    if (!pendingWithdrawal) return new Set<string>();
-    return new Set(((pendingWithdrawal as any).relatedOrderIds || []) as string[]);
-  }, [pendingWithdrawal]);
+  // --- NOVA LÓGICA DA CARTEIRA FINANCEIRA (LIVRO-CAIXA) ---
+  // 1. Soma TUDO que o entregador já ganhou na vida
+  const totalEarned = myCompletedOrders.reduce((acc, o) => acc + (Number(o.deliveryFee) || 0), 0);
 
-  const availableForWithdrawal = unpaidOrders.filter(o => !orderIdsInPendingRequest.has(o.id));
+  // 2. Soma TUDO que ele já sacou (pago) ou pediu para sacar (pendente)
+  const totalSacadoOuPendente = myWithdrawals
+      .filter(w => w.status === 'paid' || w.status === 'pending')
+      .reduce((acc, w) => acc + (Number(w.amount) || 0), 0);
 
-  const walletBalance = availableForWithdrawal.reduce(
-    (acc, o) => acc + (o.deliveryFee || 0),
-    0
-);
-
-const availableBalance = availableForWithdrawal.reduce(
-    (acc, o) => acc + (o.deliveryFee || 0),
-    0
-);
-
-const totalEarned = myWithdrawals
-    .filter(w => w.status === 'paid')
-    .reduce((acc, w) => acc + w.amount, 0);
+  // 3. O saldo disponível é a diferença
+  const availableBalance = Math.max(0, totalEarned - totalSacadoOuPendente);
+  const walletBalance = availableBalance; // Alias para manter a interface funcionando
     
   const handleRequestWithdrawal = async () => {
       if (availableBalance <= 0) return;
       setRequestingWithdrawal(true);
       try {
-          // Captura o ID do restaurante do primeiro pedido pendente de pagamento
-          const targetCompanyId = availableForWithdrawal.length > 0 ? (availableForWithdrawal[0] as any).companyId : undefined;
+          // Pega a empresa da última entrega como referência
+          const targetCompanyId = myCompletedOrders.length > 0 ? myCompletedOrders[myCompletedOrders.length - 1].companyId : undefined;
           
           await onRequestWithdrawal(
               courier.id, 
               availableBalance, 
-              availableForWithdrawal.map(o => o.id), 
-              targetCompanyId // Repassa o ID direto para a função principal
+              [], // Não precisamos mais enviar os IDs das corridas
+              targetCompanyId
           );
       } finally {
           setRequestingWithdrawal(false);
       }
   };
-
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col pb-20 font-sans">
       {/* HEADER */}
