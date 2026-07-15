@@ -363,36 +363,36 @@ const App: React.FC = () => {
     fetchInitialData();
 
     // CANAL DE CHAT REALTIME
-    //const messagesSub = supabase
-      //.channel('public:messages')
-      //.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-          //const newMsg = payload.new as any;
-          //const formattedMsg: ChatMessage = {
-              //...newMsg,
-              //timestamp: new Date(newMsg.timestamp)
-          //};
+    const messagesSub = supabase
+      .channel('public:messages')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+          const newMsg = payload.new as any;
+          const formattedMsg: ChatMessage = {
+              ...newMsg,
+              timestamp: new Date(newMsg.timestamp)
+          };
 
-          //if (currentUserRef.current && formattedMsg.senderRole !== currentUserRef.current.role) {
-              //new Audio(somMensagem).play().catch(() => {});
+          if (currentUserRef.current && formattedMsg.senderRole !== currentUserRef.current.role) {
+              new Audio(somMensagem).play().catch(() => {});
               
-              //showInAppNotification(
-                  //`Nova mensagem`, 
-                  //formattedMsg.text,
-                  //'💬'
-              //);
-          //}
+              showInAppNotification(
+                  `Nova mensagem`, 
+                  formattedMsg.text,
+                  '💬'
+              );
+          }
           
-          //setChats(prev => {
-              //const currentChats = prev[formattedMsg.orderId] || [];
-              //if (currentChats.some(m => m.id === formattedMsg.id)) return prev;
+          setChats(prev => {
+              const currentChats = prev[formattedMsg.orderId] || [];
+              if (currentChats.some(m => m.id === formattedMsg.id)) return prev;
               
-              //return {
-                  //...prev,
-                  //[formattedMsg.orderId]: [...currentChats, formattedMsg]
-              //};
-          //});
-      //})
-      //.subscribe();
+              return {
+                  ...prev,
+                  [formattedMsg.orderId]: [...currentChats, formattedMsg]
+              };
+          });
+      })
+      .subscribe();
     
     // CANAL DE SAQUES REALTIME
     const withdrawalsSub = supabase
@@ -597,12 +597,12 @@ const App: React.FC = () => {
           if (companiesData) setCompanies(companiesData);
 
           // Busca de Produtos
-          const { data: productsData, error: productsError } = await supabase.from('products').select('*').limit(50);//limite de dados do banco
+          const { data: productsData, error: productsError } = await supabase.from('products').select('*').limit(5000);//limite de dados do banco
           if (productsError) throw productsError;
           if (productsData) setProducts(productsData);
 
           // Busca de Pedidos
-          const { data: ordersData, error: ordersError } = await supabase.from('orders').select('*').limit(50);
+          const { data: ordersData, error: ordersError } = await supabase.from('orders').select('*').limit(5000);
           if (ordersError) throw ordersError;
           if (ordersData) {
               const formattedOrders = ordersData.map(o => ({
@@ -614,7 +614,7 @@ const App: React.FC = () => {
           }
 
           // Busca de Usuários (Apenas se Admin no futuro, ou limitado)
-          const { data: usersData, error: usersError } = await supabase.from('users').select('*').limit(50);
+          const { data: usersData, error: usersError } = await supabase.from('users').select('*').limit(5000);
           if (usersError) throw usersError;
           if (usersData) setUsers(usersData);
 
