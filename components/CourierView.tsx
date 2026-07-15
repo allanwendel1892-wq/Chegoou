@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Order, User } from '../types';
+import { Order, User, WithdrawalRequest } from '../types';
 import { 
     Navigation, 
     Bike, 
@@ -10,7 +10,10 @@ import {
     Wallet, 
     Clock, 
     Check,
-    AlertCircle
+    AlertCircle,
+    Send,
+    XCircle,
+    Loader2
 } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
@@ -20,6 +23,8 @@ interface CourierViewProps {
   acceptOrder: (orderId: string) => void;
   confirmDelivery: (orderId: string, code: string) => void;
   onLogout: () => void;
+  withdrawals: WithdrawalRequest[];
+  onRequestWithdrawal: (courierId: string, amount: number, orderIds: string[]) => Promise<void> | void;
 }
 
 const CourierView: React.FC<CourierViewProps> = ({ 
@@ -27,10 +32,13 @@ const CourierView: React.FC<CourierViewProps> = ({
     availableOrders, 
     acceptOrder, 
     confirmDelivery, 
-    onLogout 
+    onLogout,
+    withdrawals,
+    onRequestWithdrawal
 }) => {
   const [activeTab, setActiveTab] = useState<'disponiveis' | 'rota' | 'carteira'>('rota');
   const [deliveryCode, setDeliveryCode] = useState('');
+  const [requestingWithdrawal, setRequestingWithdrawal] = useState(false);
 
   // 1. LÓGICA DE FILTRAGEM (Sem gambiarras, puramente o que vem do banco)
   
@@ -56,11 +64,41 @@ const CourierView: React.FC<CourierViewProps> = ({
   }, [availableOrders, courier.id]);
 
   // Lógica da Carteira Financeira
+  // courierPaid agora é um campo real (ver migration_courier_wallet.sql),
+  // setado automaticamente quando o admin marca uma solicitação de saque
+  // como paga (ver handleUpdateWithdrawal em App.tsx).
   const unpaidOrders = myCompletedOrders.filter(o => !(o as any).courierPaid);
   const paidOrders = myCompletedOrders.filter(o => (o as any).courierPaid);
-  
+
+  // Solicitações de saque deste entregador (histórico completo)
+  const myWithdrawals = useMemo(() => {
+    return [...withdrawals].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [withdrawals]);
+
+  const pendingWithdrawal = myWithdrawals.find(w => w.status === 'pending');
+
+  // IDs de corridas que já estão dentro de uma solicitação pendente —
+  // não devem ser contadas de novo no saldo disponível pra pedir saque.
+  const orderIdsInPendingRequest = useMemo(() => {
+    if (!pendingWithdrawal) return new Set<string>();
+    return new Set(((pendingWithdrawal as any).relatedOrderIds || []) as string[]);
+  }, [pendingWithdrawal]);
+
+  const availableForWithdrawal = unpaidOrders.filter(o => !orderIdsInPendingRequest.has(o.id));
+
   const walletBalance = unpaidOrders.reduce((acc, o) => acc + (o.deliveryFee || 0), 0);
+  const availableBalance = availableForWithdrawal.reduce((acc, o) => acc + (o.deliveryFee || 0), 0);
   const totalEarned = paidOrders.reduce((acc, o) => acc + (o.deliveryFee || 0), 0);
+
+  const handleRequestWithdrawal = async () => {
+      if (availableBalance <= 0) return;
+      setRequestingWithdrawal(true);
+      try {
+          await onRequestWithdrawal(courier.id, availableBalance, availableForWithdrawal.map(o => o.id));
+      } finally {
+          setRequestingWithdrawal(false);
+      }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col pb-20 font-sans">
@@ -242,6 +280,62 @@ const CourierView: React.FC<CourierViewProps> = ({
                         <p className="font-bold">{unpaidOrders.length} corridas</p>
                     </div>
                 </div>
+
+                <button
+                    onClick={handleRequestWithdrawal}
+                    disabled={availableBalance <= 0 || !!pendingWithdrawal || requestingWithdrawal}
+                    className={`w-full mt-5 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${
+                        pendingWithdrawal
+                            ? 'bg-yellow-500/20 text-yellow-300 cursor-not-allowed'
+                            : availableBalance <= 0
+                            ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                            : 'bg-green-500 text-gray-900 hover:bg-green-400'
+                    }`}
+                >
+                    {requestingWithdrawal ? (
+                        <><Loader2 className="w-4 h-4 animate-spin" /> Enviando...</>
+                    ) : pendingWithdrawal ? (
+                        <><Clock className="w-4 h-4" /> Saque de R$ {pendingWithdrawal.amount.toFixed(2)} em análise</>
+                    ) : (
+                        <><Send className="w-4 h-4" /> Solicitar Saque (R$ {availableBalance.toFixed(2)})</>
+                    )}
+                </button>
+            </div>
+
+            {/* Histórico de Solicitações de Saque */}
+            <div className="mt-6">
+                <h3 className="font-bold text-gray-700 mb-3 flex items-center gap-2">
+                    <Wallet className="w-4 h-4 text-gray-500" /> Minhas solicitações de saque
+                </h3>
+                {myWithdrawals.length === 0 ? (
+                    <p className="text-sm text-gray-500 text-center py-4">Você ainda não solicitou nenhum saque.</p>
+                ) : (
+                    <div className="space-y-2">
+                        {myWithdrawals.map(w => (
+                            <div key={w.id} className="bg-white p-3 rounded-xl border border-gray-200 flex justify-between items-center">
+                                <div>
+                                    <p className="font-bold text-sm text-gray-800">R$ {w.amount.toFixed(2)}</p>
+                                    <p className="text-xs text-gray-400">{new Date(w.date).toLocaleDateString('pt-BR')}</p>
+                                </div>
+                                {w.status === 'pending' && (
+                                    <span className="flex items-center gap-1 text-xs font-bold text-yellow-700 bg-yellow-50 px-2.5 py-1 rounded-full border border-yellow-200">
+                                        <Clock className="w-3 h-3" /> Em análise
+                                    </span>
+                                )}
+                                {w.status === 'paid' && (
+                                    <span className="flex items-center gap-1 text-xs font-bold text-green-700 bg-green-50 px-2.5 py-1 rounded-full border border-green-200">
+                                        <CheckCircle className="w-3 h-3" /> Pago
+                                    </span>
+                                )}
+                                {w.status === 'rejected' && (
+                                    <span className="flex items-center gap-1 text-xs font-bold text-red-700 bg-red-50 px-2.5 py-1 rounded-full border border-red-200">
+                                        <XCircle className="w-3 h-3" /> Rejeitado
+                                    </span>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
 
             {/* Lista de Corridas Pendentes de Pagamento */}
