@@ -62,23 +62,33 @@ const CourierView: React.FC<CourierViewProps> = ({
   }, [availableOrders, courier.id]);
 
   // Solicitações de saque deste entregador
+  // BUG CORRIGIDO: antes não filtrava por courier.id e trazia saques de TODOS os motoboys
   const myWithdrawals = useMemo(() => {
-    return [...(withdrawals || [])].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [withdrawals]);
+    return (withdrawals || [])
+      .filter(w => w.courierId === courier.id)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [withdrawals, courier.id]);
 
   const pendingWithdrawal = myWithdrawals.find(w => w.status === 'pending');
 
-  // --- NOVA LÓGICA DA CARTEIRA FINANCEIRA (LIVRO-CAIXA) ---
-  // 1. Soma TUDO que o entregador já ganhou na vida
-  const totalEarned = myCompletedOrders.reduce((acc, o) => acc + (Number(o.deliveryFee) || 0), 0);
+  // Util para evitar erros de ponto flutuante (ex: 19.999999999998)
+  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-  // 2. Soma TUDO que ele já sacou (pago) ou pediu para sacar (pendente)
-  const totalSacadoOuPendente = myWithdrawals
+  // --- LÓGICA DA CARTEIRA FINANCEIRA (LIVRO-CAIXA) ---
+  // 1. Soma TUDO que o entregador já ganhou na vida (somente entregas concluídas por ELE)
+  const totalEarned = round2(
+    myCompletedOrders.reduce((acc, o) => acc + (Number(o.deliveryFee) || 0), 0)
+  );
+
+  // 2. Soma TUDO que ELE já sacou (pago) ou pediu para sacar (pendente)
+  const totalSacadoOuPendente = round2(
+    myWithdrawals
       .filter(w => w.status === 'paid' || w.status === 'pending')
-      .reduce((acc, w) => acc + (Number(w.amount) || 0), 0);
+      .reduce((acc, w) => acc + (Number(w.amount) || 0), 0)
+  );
 
   // 3. O saldo disponível é a diferença
-  const availableBalance = Math.max(0, totalEarned - totalSacadoOuPendente);
+  const availableBalance = Math.max(0, round2(totalEarned - totalSacadoOuPendente));
   const walletBalance = availableBalance; // Alias para manter a interface funcionando
     
   const handleRequestWithdrawal = async () => {
@@ -172,7 +182,7 @@ const CourierView: React.FC<CourierViewProps> = ({
                                 <p className="text-sm text-gray-500 truncate max-w-[200px]">{order.deliveryAddress?.street}</p>
                             </div>
                             <div className="text-right">
-                                <span className="text-xl font-black text-green-600">R$ {order.deliveryFee.toFixed(2)}</span>
+                                <span className="text-xl font-black text-green-600">R$ {(Number(order.deliveryFee) || 0).toFixed(2)}</span>
                                 <p className="text-xs text-gray-400">Taxa de Entrega</p>
                             </div>
                         </div>
@@ -216,7 +226,7 @@ const CourierView: React.FC<CourierViewProps> = ({
                                 </div>
                                 <div className="bg-green-50 px-3 py-1.5 rounded-lg border border-green-100 text-center">
                                     <p className="text-xs text-green-600 font-bold uppercase">Taxa</p>
-                                    <p className="font-black text-green-700">R$ {order.deliveryFee.toFixed(2)}</p>
+                                    <p className="font-black text-green-700">R$ {(Number(order.deliveryFee) || 0).toFixed(2)}</p>
                                 </div>
                             </div>
 
@@ -294,7 +304,7 @@ const CourierView: React.FC<CourierViewProps> = ({
                     {requestingWithdrawal ? (
                         <><Loader2 className="w-4 h-4 animate-spin" /> Enviando...</>
                     ) : pendingWithdrawal ? (
-                        <><Clock className="w-4 h-4" /> Saque de R$ {pendingWithdrawal.amount.toFixed(2)} em análise</>
+                        <><Clock className="w-4 h-4" /> Saque de R$ {(Number(pendingWithdrawal.amount) || 0).toFixed(2)} em análise</>
                     ) : (
                         <><Send className="w-4 h-4" /> Solicitar Saque (R$ {availableBalance.toFixed(2)})</>
                     )}
@@ -313,7 +323,7 @@ const CourierView: React.FC<CourierViewProps> = ({
                         {myWithdrawals.map(w => (
                             <div key={w.id} className="bg-white p-3 rounded-xl border border-gray-200 flex justify-between items-center">
                                 <div>
-                                    <p className="font-bold text-sm text-gray-800">R$ {w.amount.toFixed(2)}</p>
+                                    <p className="font-bold text-sm text-gray-800">R$ {(Number(w.amount) || 0).toFixed(2)}</p>
                                     <p className="text-xs text-gray-400">{new Date(w.date).toLocaleDateString('pt-BR')}</p>
                                 </div>
                                 {w.status === 'pending' && (
@@ -353,7 +363,7 @@ const CourierView: React.FC<CourierViewProps> = ({
                                     <p className="text-xs text-gray-400">Pedido #{order.id.slice(0,6)}</p>
                                 </div>
                                 <div className="font-bold text-green-600">
-                                    + R$ {order.deliveryFee.toFixed(2)}
+                                    + R$ {(Number(order.deliveryFee) || 0).toFixed(2)}
                                 </div>
                             </div>
                         ))}
