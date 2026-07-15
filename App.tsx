@@ -363,24 +363,24 @@ const App: React.FC = () => {
     fetchInitialData();
 
     // CANAL DE CHAT REALTIME
-    const messagesSub = supabase
-      .channel('public:messages')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-          const newMsg = payload.new as any;
-          const formattedMsg: ChatMessage = {
-              ...newMsg,
-              timestamp: new Date(newMsg.timestamp)
-          };
+    //const messagesSub = supabase
+      //.channel('public:messages')
+      //.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+          //const newMsg = payload.new as any;
+          //const formattedMsg: ChatMessage = {
+              //...newMsg,
+              //timestamp: new Date(newMsg.timestamp)
+          //};
 
-          if (currentUserRef.current && formattedMsg.senderRole !== currentUserRef.current.role) {
-              new Audio(somMensagem).play().catch(() => {});
+          //if (currentUserRef.current && formattedMsg.senderRole !== currentUserRef.current.role) {
+              //new Audio(somMensagem).play().catch(() => {});
               
-              showInAppNotification(
-                  `Nova mensagem`, 
-                  formattedMsg.text,
-                  '💬'
-              );
-          }
+              //showInAppNotification(
+                  //`Nova mensagem`, 
+                  //formattedMsg.text,
+                  //'💬'
+              //);
+          //}
           
           setChats(prev => {
               const currentChats = prev[formattedMsg.orderId] || [];
