@@ -726,28 +726,25 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       return Array.from(ids);
   }, [orders]);
 
-  // Busca as solicitações de saque feitas pelos entregadores deste restaurante,
-  // para que o parceiro possa analisar e aprovar o repasse do valor
+  // Busca as solicitações de saque feitas pelos entregadores deste restaurante diretamente pela coluna companyId
   useEffect(() => {
-    if (view === ViewState.FINANCE && restaurantCourierIds.length > 0) {
+    if (view === ViewState.FINANCE) {
         setIsLoadingCourierWithdrawals(true);
         const fetchCourierWithdrawals = async () => {
              const { data, error } = await supabase
                 .from('withdrawal_requests')
                 .select('*')
                 .eq('userType', 'courier')
-                .in('userId', restaurantCourierIds)
+                .eq('companyId', company.id) // <-- FILTRAGEM DIRETA PELO ID DA SUA COLUNA DO BANCO DE DADOS!
                 .order('date', { ascending: false });
              if (!error && data) setCourierWithdrawals(data);
              setIsLoadingCourierWithdrawals(false);
         };
         fetchCourierWithdrawals();
-    } else if (view === ViewState.FINANCE) {
-        setCourierWithdrawals([]);
     }
-  }, [view, restaurantCourierIds.join(',')]);
+  }, [view, company.id]);
   
-  useEffect(() => {
+  (() => {
     const fetchCoupons = async () => {
       const { data, error } = await supabase
         .from('coupons')
