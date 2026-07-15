@@ -411,6 +411,11 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const [isLoadingFinance, setIsLoadingFinance] = useState(false);
   const [coupons, setCoupons] = useState<Coupon[]>([]);
 
+  // Estados para análise/aprovação de saques dos entregadores (repasse ao motoboy)
+  const [courierWithdrawals, setCourierWithdrawals] = useState<WithdrawalRequest[]>([]);
+  const [isLoadingCourierWithdrawals, setIsLoadingCourierWithdrawals] = useState(false);
+  const [processingCourierWithdrawalId, setProcessingCourierWithdrawalId] = useState<string | null>(null);
+
   const [compositions, setCompositions] = useState<any[]>([]);
   const [dashboardInventoryItems, setDashboardInventoryItems] = useState<any[]>([]);
 
@@ -710,6 +715,37 @@ const PartnerView: React.FC<PartnerViewProps> = ({
         fetchWithdrawals();
     }
   }, [view, company.id]);
+
+  // IDs dos entregadores que já realizaram entregas para este restaurante
+  // (usado para restringir a análise de saques apenas aos entregadores "deste" restaurante)
+  const restaurantCourierIds = useMemo(() => {
+      const ids = new Set<string>();
+      orders.forEach(o => {
+          if (o.courierId) ids.add(o.courierId);
+      });
+      return Array.from(ids);
+  }, [orders]);
+
+  // Busca as solicitações de saque feitas pelos entregadores deste restaurante,
+  // para que o parceiro possa analisar e aprovar o repasse do valor
+  useEffect(() => {
+    if (view === ViewState.FINANCE && restaurantCourierIds.length > 0) {
+        setIsLoadingCourierWithdrawals(true);
+        const fetchCourierWithdrawals = async () => {
+             const { data, error } = await supabase
+                .from('withdrawal_requests')
+                .select('*')
+                .eq('userType', 'courier')
+                .in('userId', restaurantCourierIds)
+                .order('date', { ascending: false });
+             if (!error && data) setCourierWithdrawals(data);
+             setIsLoadingCourierWithdrawals(false);
+        };
+        fetchCourierWithdrawals();
+    } else if (view === ViewState.FINANCE) {
+        setCourierWithdrawals([]);
+    }
+  }, [view, restaurantCourierIds.join(',')]);
   
   useEffect(() => {
     const fetchCoupons = async () => {
@@ -831,6 +867,64 @@ const PartnerView: React.FC<PartnerViewProps> = ({
        } finally {
            setIsLoadingFinance(false);
        }
+  };
+
+  // Aprova o saque solicitado pelo entregador: marca a solicitação como paga
+  // e abate (marca como pago) os pedidos vinculados na carteira do entregador
+  const handleApproveCourierWithdrawal = async (request: WithdrawalRequest) => {
+      if (processingCourierWithdrawalId) return;
+      if (!window.confirm(`Confirmar repasse de R$ ${request.amount.toFixed(2)} para ${request.userName}? Esta ação abaterá o valor da carteira do entregador.`)) {
+          return;
+      }
+      setProcessingCourierWithdrawalId(request.id);
+      try {
+          const relatedOrderIds: string[] = ((request as any).relatedOrderIds || []) as string[];
+
+          const { error: withdrawalError } = await supabase
+              .from('withdrawal_requests')
+              .update({ status: 'paid' })
+              .eq('id', request.id);
+          if (withdrawalError) throw withdrawalError;
+
+          if (relatedOrderIds.length > 0) {
+              const { error: ordersError } = await supabase
+                  .from('orders')
+                  .update({ courierPaid: true })
+                  .in('id', relatedOrderIds);
+              if (ordersError) throw ordersError;
+          }
+
+          setCourierWithdrawals(prev => prev.map(w => w.id === request.id ? { ...w, status: 'paid' } : w));
+          alert("Repasse aprovado! O valor foi abatido da carteira do entregador.");
+      } catch (e: any) {
+          console.error("Erro ao aprovar saque do entregador:", e);
+          alert("Erro ao aprovar saque: " + (e.message || "Erro desconhecido."));
+      } finally {
+          setProcessingCourierWithdrawalId(null);
+      }
+  };
+
+  // Rejeita a solicitação de saque do entregador (os pedidos vinculados voltam a ficar disponíveis para uma nova solicitação)
+  const handleRejectCourierWithdrawal = async (request: WithdrawalRequest) => {
+      if (processingCourierWithdrawalId) return;
+      if (!window.confirm(`Rejeitar a solicitação de saque de R$ ${request.amount.toFixed(2)} de ${request.userName}?`)) {
+          return;
+      }
+      setProcessingCourierWithdrawalId(request.id);
+      try {
+          const { error } = await supabase
+              .from('withdrawal_requests')
+              .update({ status: 'rejected' })
+              .eq('id', request.id);
+          if (error) throw error;
+
+          setCourierWithdrawals(prev => prev.map(w => w.id === request.id ? { ...w, status: 'rejected' } : w));
+      } catch (e: any) {
+          console.error("Erro ao rejeitar saque do entregador:", e);
+          alert("Erro ao rejeitar saque: " + (e.message || "Erro desconhecido."));
+      } finally {
+          setProcessingCourierWithdrawalId(null);
+      }
   };
 
   const calculatedSalesHistory = useMemo(() => {
@@ -1874,6 +1968,89 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                                              </td>
                                         </tr>
                                      ))}
+                                </tbody>
+                            </table>
+                        </div>
+                     </div>
+
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                        <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+                            <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+                                <Bike className="w-5 h-5 text-gray-500" /> Saques dos Entregadores
+                            </h3>
+                            {isLoadingCourierWithdrawals && <Loader2 className="w-4 h-4 animate-spin text-gray-400"/>}
+                        </div>
+                        <div className="px-6 pt-4">
+                            <p className="text-sm text-gray-500">
+                                Analise e aprove os repasses solicitados pelos entregadores que atenderam pedidos deste restaurante. Ao aprovar, o valor é abatido da carteira do entregador.
+                            </p>
+                        </div>
+                        <div className="overflow-x-auto mt-4">
+                            <table className="w-full text-left">
+                                <thead className="bg-gray-50/50">
+                                    <tr>
+                                        <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Entregador</th>
+                                        <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Data Solicitada</th>
+                                        <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Valor</th>
+                                        <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Status</th>
+                                        <th className="p-4 text-xs font-semibold text-gray-500 uppercase text-right">Ações</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {courierWithdrawals.length === 0 && (
+                                        <tr>
+                                            <td colSpan={5} className="p-8 text-center text-gray-400">
+                                                Nenhuma solicitação de saque de entregador no momento.
+                                            </td>
+                                        </tr>
+                                    )}
+                                    {courierWithdrawals.map(req => (
+                                        <tr key={req.id} className="hover:bg-gray-50 transition-colors">
+                                            <td className="p-4 text-sm font-bold text-gray-800">
+                                                {req.userName}
+                                            </td>
+                                            <td className="p-4 text-sm font-medium text-gray-600">
+                                                {new Date(req.date).toLocaleString()}
+                                            </td>
+                                            <td className="p-4 font-bold text-gray-900">
+                                                R$ {req.amount.toFixed(2)}
+                                            </td>
+                                            <td className="p-4">
+                                                <span className={`px-2 py-1 rounded-full text-xs font-bold uppercase ${req.status === 'paid' ? 'bg-green-100 text-green-700' : ''} ${req.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : ''} ${req.status === 'rejected' ? 'bg-red-100 text-red-700' : ''}`}>
+                                                    {req.status === 'paid' ? 'Pago' : req.status === 'pending' ? 'Pendente' : 'Rejeitado'}
+                                                </span>
+                                            </td>
+                                            <td className="p-4">
+                                                {req.status === 'pending' ? (
+                                                    <div className="flex justify-end gap-2">
+                                                        <button
+                                                            onClick={() => handleRejectCourierWithdrawal(req)}
+                                                            disabled={processingCourierWithdrawalId === req.id}
+                                                            className="px-3 py-2 rounded-lg text-xs font-bold bg-red-50 text-red-600 border border-red-100 hover:bg-red-100 flex items-center gap-1 disabled:opacity-50"
+                                                        >
+                                                            <XCircle className="w-3.5 h-3.5" /> Rejeitar
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleApproveCourierWithdrawal(req)}
+                                                            disabled={processingCourierWithdrawalId === req.id}
+                                                            className="px-3 py-2 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 flex items-center gap-1 disabled:opacity-50"
+                                                        >
+                                                            {processingCourierWithdrawalId === req.id ? (
+                                                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                            ) : (
+                                                                <Check className="w-3.5 h-3.5" />
+                                                            )}
+                                                            Aprovar
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-right text-xs text-gray-400">
+                                                        {req.status === 'paid' ? 'Repassado' : 'Sem ação'}
+                                                    </div>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
                                 </tbody>
                             </table>
                         </div>
