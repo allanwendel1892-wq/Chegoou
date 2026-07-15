@@ -24,7 +24,7 @@ interface CourierViewProps {
   confirmDelivery: (orderId: string, code: string) => void;
   onLogout: () => void;
   withdrawals: WithdrawalRequest[];
-  // AJUSTE: Adicionado o parâmetro companyId para vincular o saque ao restaurante
+  // AJUSTADO: Agora aceita o quarto parâmetro opcional 'companyId'
   onRequestWithdrawal: (courierId: string, amount: number, orderIds: string[], companyId?: string) => Promise<void> | void;
 }
 
@@ -41,11 +41,12 @@ const CourierView: React.FC<CourierViewProps> = ({
   const [deliveryCode, setDeliveryCode] = useState('');
   const [requestingWithdrawal, setRequestingWithdrawal] = useState(false);
 
-  // LÓGICA DE FILTRAGEM
+  // Pedidos liberados para todos (limbo nunca mais)
   const openPoolOrders = useMemo(() => {
     return (availableOrders || []).filter(o => o.status === 'waiting_courier');
   }, [availableOrders]);
 
+  // Pedidos atribuídos a ESTE motoboy que estão em andamento
   const myActiveOrders = useMemo(() => {
     return (availableOrders || []).filter(o => 
         o.courierId === courier.id && 
@@ -53,6 +54,7 @@ const CourierView: React.FC<CourierViewProps> = ({
     );
   }, [availableOrders, courier.id]);
 
+  // Pedidos concluídos por ESTE motoboy (Para a Carteira)
   const myCompletedOrders = useMemo(() => {
     return (availableOrders || []).filter(o => 
         o.courierId === courier.id && 
@@ -64,12 +66,14 @@ const CourierView: React.FC<CourierViewProps> = ({
   const unpaidOrders = myCompletedOrders.filter(o => !(o as any).courierPaid);
   const paidOrders = myCompletedOrders.filter(o => (o as any).courierPaid);
 
+  // Solicitações de saque deste entregador
   const myWithdrawals = useMemo(() => {
     return [...(withdrawals || [])].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [withdrawals]);
 
   const pendingWithdrawal = myWithdrawals.find(w => w.status === 'pending');
 
+  // IDs de corridas que já estão dentro de uma solicitação pendente
   const orderIdsInPendingRequest = useMemo(() => {
     if (!pendingWithdrawal) return new Set<string>();
     return new Set(((pendingWithdrawal as any).relatedOrderIds || []) as string[]);
@@ -83,13 +87,17 @@ const CourierView: React.FC<CourierViewProps> = ({
 
   const handleRequestWithdrawal = async () => {
       if (availableBalance <= 0) return;
-      
-      // AJUSTE: Pegar o companyId (restaurante) vinculado ao primeiro pedido da lista de saque
-      const targetCompanyId = availableForWithdrawal.length > 0 ? (availableForWithdrawal[0] as any).companyId : undefined;
-
       setRequestingWithdrawal(true);
       try {
-          await onRequestWithdrawal(courier.id, availableBalance, availableForWithdrawal.map(o => o.id), targetCompanyId);
+          // Captura o ID do restaurante do primeiro pedido pendente de pagamento
+          const targetCompanyId = availableForWithdrawal.length > 0 ? (availableForWithdrawal[0] as any).companyId : undefined;
+          
+          await onRequestWithdrawal(
+              courier.id, 
+              availableBalance, 
+              availableForWithdrawal.map(o => o.id), 
+              targetCompanyId // Repassa o ID direto para a função principal
+          );
       } finally {
           setRequestingWithdrawal(false);
       }
@@ -216,10 +224,10 @@ const CourierView: React.FC<CourierViewProps> = ({
                                 </div>
                             </div>
 
-                            {/* AJUSTE: Link dinâmico do Google Maps via Query String usando o endereço fornecido */}
+                            {/* DYNAMIC GPS ACTION BUTTON: Redireciona para o Google Maps preenchendo automaticamente o endereço se não houver link salvo */}
                             {order.deliveryAddress && (
                                 <a 
-                                    href={order.deliveryAddress.mapLink || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${order.deliveryAddress.street}, ${order.deliveryAddress.number || 'S/N'}, ${order.deliveryAddress.neighborhood || ''}, ${order.deliveryAddress.city || ''}`)}`}
+                                    href={order.deliveryAddress.mapLink || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${order.deliveryAddress.street || ''}, ${order.deliveryAddress.number || ''}, ${order.deliveryAddress.neighborhood || ''}, ${order.deliveryAddress.city || ''}`)}`}
                                     target="_blank" 
                                     rel="noopener noreferrer"
                                     className="flex items-center justify-center gap-2 w-full bg-blue-50 text-blue-700 font-bold py-2.5 rounded-xl border border-blue-200 hover:bg-blue-100"
