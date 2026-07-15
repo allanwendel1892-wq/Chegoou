@@ -266,12 +266,19 @@ const App: React.FC = () => {
   };
 
   // ESTADOS DE CARREGAMENTO E ERRO
+  // isLoading agora só controla o carregamento dos dados do PAINEL (admin/parceiro/entregador/cliente).
+  // Ele NÃO bloqueia mais a tela de Login nem o Cardápio Digital, que têm seus próprios estados abaixo.
   const [isLoading, setIsLoading] = useState(true);
   const [connectionError, setConnectionError] = useState<{
     title: string;
     message: string;
     type: 'network' | 'permission' | 'unknown';
   } | null>(null);
+
+  // ESTADOS EXCLUSIVOS DO CARDÁPIO DIGITAL PÚBLICO (rota /cardapio/:companyId)
+  // Isolados do carregamento geral do painel para abrir instantaneamente.
+  const [isMenuLoading, setIsMenuLoading] = useState(true);
+  const [menuError, setMenuError] = useState<string | null>(null);
   
   // ESTADOS DE DADOS GLOBAIS
   const [users, setUsers] = useState<User[]>([]);
@@ -360,9 +367,19 @@ const App: React.FC = () => {
    * Busca inicial de dados (sem Realtime — apenas REST/HTTP via Supabase)
    * O Realtime (WebSocket) foi desativado propositalmente. Todo o sistema
    * agora se mantém sincronizado via polling (ver useEffect abaixo).
+   *
+   * ROTEAMENTO DE CARREGAMENTO:
+   * - Se for o Cardápio Digital (/cardapio/:id) -> busca SÓ a loja + produtos dela.
+   * - Caso contrário -> busca o pacote completo do painel (companies, products,
+   *   orders, users, coupons, withdrawals, messages), sem travar a tela de login,
+   *   que já é exibida instantaneamente (ver LÓGICA DE RENDERIZAÇÃO mais abaixo).
    */
   useEffect(() => {
-    fetchInitialData();
+    if (publicMenuCompanyId) {
+      fetchPublicMenuData();
+    } else {
+      fetchInitialData();
+    }
   }, []);
 
   /**
@@ -530,26 +547,41 @@ const App: React.FC = () => {
   /**
    * Busca inicial de todos os dados do sistema
    */
+  /**
+   * Busca RÁPIDA e ISOLADA para o Cardápio Digital Público.
+   * Só baixa a loja e os produtos daquela loja — nada de orders, users,
+   * coupons, withdrawals ou messages. Não usa nem depende de isLoading
+   * do painel, então o cardápio abre assim que essas 2 consultas voltarem.
+   */
+  const fetchPublicMenuData = async () => {
+      setIsMenuLoading(true);
+      setMenuError(null);
+      try {
+          const [{ data: singleCompany, error: companyErr }, { data: storeProducts, error: productsErr }] =
+              await Promise.all([
+                  supabase.from('companies').select('*').eq('id', publicMenuCompanyId),
+                  supabase.from('products').select('*').eq('companyId', publicMenuCompanyId)
+              ]);
+
+          if (companyErr) throw companyErr;
+          if (productsErr) throw productsErr;
+
+          if (singleCompany) setCompanies(singleCompany);
+          if (storeProducts) setProducts(storeProducts);
+      } catch (error: any) {
+          console.error("Erro ao carregar cardápio digital:", error);
+          setMenuError(error.message || "Não foi possível carregar o cardápio agora.");
+      } finally {
+          setIsMenuLoading(false);
+      }
+  };
+
   const fetchInitialData = async () => {
       setIsLoading(true);
       setConnectionError(null);
       console.log("Iniciando carregamento de dados globais...");
       
       try {
-          // --- INÍCIO DO ATALHO DEFINITIVO ---
-          if (publicMenuCompanyId) {
-              // 1. Baixa APENAS a empresa dona do link
-              const { data: singleCompany } = await supabase.from('companies').select('*').eq('id', publicMenuCompanyId);
-              if (singleCompany) setCompanies(singleCompany);
-
-              // 2. Baixa APENAS os produtos dessa empresa
-              const { data: storeProducts } = await supabase.from('products').select('*').eq('companyId', publicMenuCompanyId);
-              if (storeProducts) setProducts(storeProducts);
-
-              return; // Encerra o carregamento do banco de dados aqui!
-          }
-          // --- FIM DO ATALHO ---
-
           // Busca de Empresas
           const { data: companiesData, error: companiesError } = await supabase.from('companies').select('*');
           if (companiesError) throw companiesError;
@@ -1205,50 +1237,41 @@ const handlePlaceOrder = async (
   // ---------------------------------------------------------------------------
 
   /**
-   * Tela de carregamento inicial
-   */
-  if (isLoading) {
-      return (
-          <div className="h-screen w-full flex flex-col items-center justify-center bg-gray-50">
-              <Loader2 className="w-12 h-12 text-red-600 animate-spin mb-6" />
-              <p className="text-gray-600 font-bold text-lg animate-pulse">
-                Carregando Chegoou...
-              </p>
-          </div>
-      );
-  }
-
-  /**
-   * Tela de erro de conexão com Supabase
-   */
-  if (connectionError) {
-      return (
-          <div className="h-screen w-full flex flex-col items-center justify-center bg-white p-8 text-center">
-              <div className="bg-red-50 p-6 rounded-full mb-6">
-                <AlertCircle className="w-16 h-16 text-red-600 mx-auto" />
-              </div>
-              <h2 className="text-2xl font-black text-gray-900 uppercase tracking-tighter">
-                {connectionError.title}
-              </h2>
-              <p className="text-gray-500 mt-4 max-w-sm font-medium">
-                {connectionError.message}
-              </p>
-              <button 
-                onClick={() => window.location.reload()} 
-                className="mt-10 bg-red-600 text-white px-10 py-4 rounded-2xl font-black shadow-lg shadow-red-200 hover:scale-105 active:scale-95 transition-all"
-              >
-                  TENTAR NOVAMENTE
-              </button>
-          </div>
-      );
-  }
-
-  /**
    * Cardápio Digital Público (Acesso via /cardapio/:companyId)
-   * Não exige login. Disponível tanto para visitantes quanto para
-   * usuários já autenticados que acessem o link diretamente.
+   * Não exige login e não depende do carregamento do painel (isLoading).
+   * Usa seu próprio estado (isMenuLoading/menuError) para abrir o mais
+   * rápido possível, com apenas 2 consultas em paralelo.
    */
   if (publicMenuCompanyId) {
+      if (isMenuLoading) {
+          return (
+              <div className="flex flex-col h-screen w-full items-center justify-center bg-white gap-4">
+                  <Loader2 className="w-12 h-12 text-red-600 animate-spin" />
+                  <p className="text-gray-500 font-medium">Carregando cardápio...</p>
+              </div>
+          );
+      }
+
+      if (menuError) {
+          return (
+              <div className="h-screen w-full flex flex-col items-center justify-center bg-white p-8 text-center">
+                  <div className="bg-red-50 p-6 rounded-full mb-6">
+                    <AlertCircle className="w-16 h-16 text-red-600 mx-auto" />
+                  </div>
+                  <h2 className="text-2xl font-black text-gray-900 uppercase tracking-tighter">
+                    Erro ao carregar
+                  </h2>
+                  <p className="text-gray-500 mt-4 max-w-sm font-medium">{menuError}</p>
+                  <button
+                    onClick={() => fetchPublicMenuData()}
+                    className="mt-10 bg-red-600 text-white px-10 py-4 rounded-2xl font-black shadow-lg shadow-red-200 hover:scale-105 active:scale-95 transition-all"
+                  >
+                      TENTAR NOVAMENTE
+                  </button>
+              </div>
+          );
+      }
+
       const publicMenuCompany = companies.find(c => c.id === publicMenuCompanyId);
 
       if (!publicMenuCompany) {
@@ -1285,6 +1308,10 @@ const handlePlaceOrder = async (
 
   /**
    * Tela de Autenticação
+   * Renderizada IMEDIATAMENTE, sem esperar o carregamento do painel
+   * (companies/products/orders/users/etc. seguem carregando em segundo
+   * plano via fetchInitialData). O login em si consulta o Supabase
+   * diretamente em handleLogin, então não depende desses dados.
    */
   if (!currentUser) {
     return (
@@ -1293,6 +1320,47 @@ const handlePlaceOrder = async (
             existingUsers={users} 
         />
     );
+  }
+
+  /**
+   * Tela de carregamento do painel (só aparece DEPOIS do login, e só se
+   * os dados do painel ainda não tiverem terminado de carregar em segundo
+   * plano — normalmente já estarão prontos nesse ponto).
+   */
+  if (isLoading) {
+      return (
+          <div className="h-screen w-full flex flex-col items-center justify-center bg-gray-50">
+              <Loader2 className="w-12 h-12 text-red-600 animate-spin mb-6" />
+              <p className="text-gray-600 font-bold text-lg animate-pulse">
+                Carregando Chegoou...
+              </p>
+          </div>
+      );
+  }
+
+  /**
+   * Tela de erro de conexão com Supabase
+   */
+  if (connectionError) {
+      return (
+          <div className="h-screen w-full flex flex-col items-center justify-center bg-white p-8 text-center">
+              <div className="bg-red-50 p-6 rounded-full mb-6">
+                <AlertCircle className="w-16 h-16 text-red-600 mx-auto" />
+              </div>
+              <h2 className="text-2xl font-black text-gray-900 uppercase tracking-tighter">
+                {connectionError.title}
+              </h2>
+              <p className="text-gray-500 mt-4 max-w-sm font-medium">
+                {connectionError.message}
+              </p>
+              <button 
+                onClick={() => window.location.reload()} 
+                className="mt-10 bg-red-600 text-white px-10 py-4 rounded-2xl font-black shadow-lg shadow-red-200 hover:scale-105 active:scale-95 transition-all"
+              >
+                  TENTAR NOVAMENTE
+              </button>
+          </div>
+      );
   }
 
   /**
