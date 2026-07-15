@@ -532,20 +532,6 @@ const App: React.FC = () => {
       setConnectionError(null);
       console.log("Iniciando carregamento de dados globais...");
       
-      try {
-          // Busca de Empresas
-          const { data: companiesData, error: companiesError } = await supabase.from('companies').select('*');
-          if (companiesError) throw companiesError;
-          if (companiesData) setCompanies(companiesData);
-
-          // --- INÍCIO DA CORREÇÃO DE VELOCIDADE (ATALHO PARA O CARDÁPIO) ---
-          if (publicMenuCompanyId) {
-              const { data: productsData } = await supabase.from('products').select('*').eq('companyId', publicMenuCompanyId);
-              if (productsData) setProducts(productsData);
-              return; // O segredo está aqui: Ele para de baixar dados e libera a tela imediatamente!
-          }
-          // --- FIM DA CORREÇÃO ---
-
           // Busca de Produtos (Continua normal para os donos e administradores)
           const { data: productsData, error: productsError } = await supabase.from('products').select('*').limit(5000);//limite de dados do banco
           if (productsError) throw productsError;
