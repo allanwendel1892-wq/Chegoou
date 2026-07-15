@@ -10,12 +10,10 @@ import {
     Wallet, 
     Clock, 
     Check,
-    AlertCircle,
     Send,
     XCircle,
     Loader2
 } from 'lucide-react';
-import { supabase } from '../services/supabaseClient';
 
 interface CourierViewProps {
   courier: User;
@@ -61,11 +59,11 @@ const CourierView: React.FC<CourierViewProps> = ({
     );
   }, [availableOrders, courier.id]);
 
-  // Solicitações de saque deste entregador
-  // BUG CORRIGIDO: antes não filtrava por courier.id e trazia saques de TODOS os motoboys
+  // CORREÇÃO CRÍTICA 1: O banco de dados usa "userId" para registrar o dono do saque. 
+  // Se o frontend tentar usar só courierId, ele não acha os saques antigos e o saldo fica infinito.
   const myWithdrawals = useMemo(() => {
     return (withdrawals || [])
-      .filter(w => w.courierId === courier.id)
+      .filter(w => w.courierId === courier.id || (w as any).userId === courier.id)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [withdrawals, courier.id]);
 
@@ -99,17 +97,39 @@ const CourierView: React.FC<CourierViewProps> = ({
   const availableBalance = Math.max(0, round2(totalProduzido - totalRecebido - totalEmAnalise));
   const walletBalance = availableBalance;
 
+  // CORREÇÃO CRÍTICA 2: Mapeamos exatamente QUAIS pedidos já foram sacados 
+  // para enviar ao backend. O banco usa "relatedOrderIds".
+  const withdrawnOrderIds = useMemo(() => {
+      const ids = new Set<string>();
+      myWithdrawals.forEach(w => {
+          if (w.status === 'pending' || w.status === 'paid') {
+              const relatedIds = (w as any).relatedOrderIds;
+              if (Array.isArray(relatedIds)) {
+                  relatedIds.forEach(id => ids.add(id));
+              }
+          }
+      });
+      return ids;
+  }, [myWithdrawals]);
+
+  // Lista de IDs apenas das corridas que ainda NÃO tiveram o dinheiro solicitado
+  const availableOrderIdsToWithdraw = useMemo(() => {
+      return myCompletedOrders
+          .filter(o => !withdrawnOrderIds.has(o.id))
+          .map(o => o.id);
+  }, [myCompletedOrders, withdrawnOrderIds]);
+
   const handleRequestWithdrawal = async () => {
       if (availableBalance <= 0) return;
       setRequestingWithdrawal(true);
       try {
-          // Pega a empresa da última entrega como referência
           const targetCompanyId = myCompletedOrders.length > 0 ? myCompletedOrders[myCompletedOrders.length - 1].companyId : undefined;
           
+          // Enviamos os IDs novamente! Isso previne que a mesma corrida seja sacada 2x
           await onRequestWithdrawal(
               courier.id, 
               availableBalance, 
-              [], // Não precisamos mais enviar os IDs das corridas
+              availableOrderIdsToWithdraw, 
               targetCompanyId
           );
       } finally {
@@ -290,7 +310,8 @@ const CourierView: React.FC<CourierViewProps> = ({
                 <div className="mt-6 pt-4 border-t border-gray-700 flex justify-between items-center">
                     <div>
                         <p className="text-gray-400 text-xs">Total já recebido</p>
-                        <p className="font-bold">R$ {totalEarned.toFixed(2)}</p>
+                        {/* CORREÇÃO CRÍTICA 3: Aqui estava escrito {totalEarned.toFixed(2)}, causando a tela branca porque essa variável não existia. Substituído corretamente por totalRecebido. */}
+                        <p className="font-bold">R$ {totalRecebido.toFixed(2)}</p>
                     </div>
                     <div className="text-right">
                         <p className="text-gray-400 text-xs">Total de entregas</p>
