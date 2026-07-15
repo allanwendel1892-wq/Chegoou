@@ -539,7 +539,14 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           `;
       }).join('') : `<p>${order.raw_description || 'Itens não estruturados'}</p>`;
 
-      const addressHtml = order.deliveryMethod === 'pickup' ? '<p style="text-align:center; font-weight:bold; font-size:14px; margin: 10px 0;">RETIRADA NO BALCÃO</p>' : <p style="font-weight:bold;">ENTREGA</p> <p>${order.deliveryAddress?.street}, ${order.deliveryAddress?.number}</p> <p>${order.deliveryAddress?.neighborhood} - ${order.deliveryAddress?.city}</p> ${order.deliveryAddress?.zipCode ? <p> CEP: ${order.deliveryAddress.zipCode}</p> : ''} ;
+          const addressHtml = order.deliveryMethod === 'pickup'
+      ? '<p style="text-align:center; font-weight:bold; font-size:14px; margin: 10px 0;">RETIRADA NO BALCÃO</p>'
+      : `
+          <p style="font-weight:bold;">ENTREGA</p>
+          <p>${order.deliveryAddress?.street}, ${order.deliveryAddress?.number}</p>
+          <p>${order.deliveryAddress?.neighborhood} - ${order.deliveryAddress?.city}</p>
+          ${order.deliveryAddress?.zipCode ? `<p>CEP: ${order.deliveryAddress.zipCode}</p>` : ''}
+        `;
       const paymentInfo = order.paymentMethod === 'cash' 
         ? `DINHEIRO ${order.changeFor ? `(Troco p/ R$ ${order.changeFor.toFixed(2)})` : ''}`
         : order.paymentMethod.toUpperCase();
