@@ -4,7 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     
-    <!-- FORÇA O CELULAR A TRATAR COMO APP NATIVO E NÃO FECHAR À TOA -->
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -12,92 +11,10 @@
     <meta name="theme-color" content="#ffffff">
 
     <title>Chegoou Delivery</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            colors: {
-              brand: '#EA1D2C', // iFood Official Red
-              brandHover: '#B9121F',
-              brandLight: '#FEF2F2'
-            },
-            spacing: {
-              'safe-top': 'env(safe-area-inset-top)',
-              'safe-bottom': 'env(safe-area-inset-bottom)',
-              'safe-left': 'env(safe-area-inset-left)',
-              'safe-right': 'env(safe-area-inset-right)',
-            }
-          }
-        }
-      }
-    </script>
+    
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB9p7q0aHBRrbP5cwdcqbx5oquc0HM32Us&libraries=places"></script>
     <script src="https://sdk.mercadopago.com/js/v2"></script>
-    <style>
-      :root {
-        --sat: env(safe-area-inset-top);
-        --sab: env(safe-area-inset-bottom);
-        --sal: env(safe-area-inset-left);
-        --sar: env(safe-area-inset-right);
-      }
-
-      body {
-        font-family: 'Inter', sans-serif;
-        background-color: #f3f4f6;
-        min-height: 100vh;
-        min-height: -webkit-fill-available;
-        padding-top: var(--sat);
-        padding-bottom: var(--sab);
-      }
-
-      /* Custom scrollbar for webkit */
-      ::-webkit-scrollbar {
-        width: 8px;
-      }
-      ::-webkit-scrollbar-track {
-        background: #f1f1f1; 
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #cbd5e1; 
-        border-radius: 4px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #94a3b8; 
-      }
-      
-      /* Animation Utilities */
-      @keyframes slideUp {
-        from { transform: translateY(100%); opacity: 0; }
-        to { transform: translateY(0); opacity: 1; }
-      }
-      .animate-slide-up {
-        animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-      }
-      @keyframes fadeIn {
-        from { opacity: 0; }
-        to { opacity: 1; }
-      }
-      .animate-fade-in {
-        animation: fadeIn 0.2s ease-out forwards;
-      }
-    </style>
-<script type="importmap">
-{
-  "imports": {
-    "react": "https://esm.sh/react@^19.2.3",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "@google/genai": "https://esm.sh/@google/genai@^1.35.0",
-    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
-    "recharts": "https://esm.sh/recharts@^3.6.0",
-    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.90.1",
-    "vite": "https://esm.sh/vite@^7.3.1",
-    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2"
-  }
-}
-</script>
   </head>
   <body>
     <div id="root"></div>
