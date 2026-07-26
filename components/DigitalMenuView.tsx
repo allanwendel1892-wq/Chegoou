@@ -20,7 +20,7 @@ interface DigitalMenuViewProps {
         changeFor?: number,
         couponCode?: string,
         discountAmount?: number,
-        customerData?: { name: string, phone: string, address: any } // Adicionado para suportar clientes sem login
+        customerData?: { name: string, phone: string, address: any } 
     ) => Promise<boolean>;
 }
 
@@ -62,25 +62,23 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
     const [customizingProduct, setCustomizingProduct] = useState<Product | null>(null);
     const [selections, setSelections] = useState<Record<string, ProductOption[]>>({});
 
-    // Categorias únicas baseadas nos produtos disponíveis (memoizado: só recalcula quando a lista de produtos muda)
     const categories = useMemo(() => ['Tudo', ...Array.from(new Set(products.map(p => p.category)))], [products]);
 
-    // --- CÁLCULOS FINANCEIROS (memoizados para evitar recomputar em cada render) ---
+    // --- CÁLCULOS FINANCEIROS ---
     const productTotal = useMemo(
         () => cart.reduce((acc, item) => acc + (item.finalPrice * item.quantity), 0),
         [cart]
     );
     const activeDeliveryFee = useMemo(
-        () => deliveryMethod === 'pickup' ? 0 : (company.deliveryType === 'own' ? (company.ownDeliveryFee || 0) : 5.00), // Ajuste a lógica de taxa padrão conforme necessário
+        () => deliveryMethod === 'pickup' ? 0 : (company.deliveryType === 'own' ? (company.ownDeliveryFee || 0) : 5.00),
         [deliveryMethod, company.deliveryType, company.ownDeliveryFee]
     );
-    const serviceFeeValue = 0.00; // Taxa de serviço zerada para o cliente final neste modelo? Se não, altere.
+    const serviceFeeValue = 0.00; 
     const finalTotal = useMemo(
         () => productTotal + activeDeliveryFee + serviceFeeValue,
         [productTotal, activeDeliveryFee]
     );
 
-    // Sempre que a sacola for aberta, reinicia o fluxo na primeira etapa
     useEffect(() => {
         if (isCartOpen) {
             setCheckoutStep(1);
@@ -184,9 +182,9 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
         setIsProcessing(true);
         setStepError(null);
 
-        // Objeto de dados do cliente offline
+        // MELHORIA 2: Adicionado "(Cardápio Digital)" ao nome do cliente para fácil identificação
         const guestData = {
-            name: customerName,
+            name: `${customerName.trim()} (Cardápio Digital)`,
             phone: customerPhone,
             address: deliveryMethod === 'delivery'
                 ? { street, number, complement, neighborhood, city: company.address?.city || '', zipCode: '', lat: 0, lng: 0 }
@@ -203,9 +201,9 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
             productTotal,
             paymentMethod,
             changeForValue,
-            undefined, // couponCode (cardápio digital não usa cupom por enquanto)
-            undefined, // discountAmount
-            guestData // Passando os dados do cliente para o App.tsx (agora na posição certa)
+            undefined, 
+            undefined, 
+            guestData 
         );
 
         setIsProcessing(false);
@@ -213,7 +211,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
         if (success) {
             setOrderSuccess(true);
             setCart([]);
-            // Limpa o carrinho e mantem os dados do cliente para um próximo pedido
         } else {
             setStepError("Houve um erro ao processar seu pedido. Tente novamente.");
         }
@@ -356,8 +353,16 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                                 })}
                                                 className={`p-3 border rounded-xl mt-2 flex justify-between items-center cursor-pointer transition-all ${isSelected ? 'bg-red-50 border-red-500 text-red-700' : 'bg-white border-gray-200 hover:bg-gray-50'}`}
                                             >
-                                                <span>{o.name}</span>
-                                                <span className="font-bold text-sm">
+                                                {/* MELHORIA 3: Exibição limpa do nome do sabor e ingredientes (descrição) */}
+                                                <div className="flex flex-col flex-1 pr-4">
+                                                    <span className="font-medium">{o.name}</span>
+                                                    {(o as any).description && (
+                                                        <span className={`text-[11px] mt-0.5 leading-tight ${isSelected ? 'text-red-600/80' : 'text-gray-400'}`}>
+                                                            {(o as any).description}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <span className="font-bold text-sm shrink-0">
                                                     {isSelected && <CheckCircle className="inline w-4 h-4 mr-1" />}
                                                     {o.price > 0 ? `+ R$ ${o.price.toFixed(2)}` : 'Grátis'}
                                                 </span>
@@ -380,7 +385,8 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
 
                                     const isPizzaMode = customizingProduct.isPizza || customizingProduct.name.toLowerCase().includes('pizza');
                                     const flatOptions: any[] = [];
-                                    let flavorsForTitle: string[] = [];
+                                    
+                                    // Removida a array flavorsForTitle que causava a duplicação no nome do produto
 
                                     customizingProduct.groups.forEach(g => {
                                         const selectedInGroup = selections[g.id] || [];
@@ -392,19 +398,15 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                                 const fraction = selectedInGroup.length > 1 ? `1/${selectedInGroup.length}` : '';
                                                 finalOptionName = `${fraction} ${o.name}`.trim();
                                                 finalOptionPrice = finalOptionPrice / selectedInGroup.length;
-                                                flavorsForTitle.push(finalOptionName);
                                             }
 
                                             flatOptions.push({ groupName: g.name, optionName: finalOptionName, price: finalOptionPrice });
                                         });
                                     });
 
-                                    let modifiedProduct = { ...customizingProduct };
-                                    if (isPizzaMode && flavorsForTitle.length > 0) {
-                                        modifiedProduct.name = `${customizingProduct.name} (${flavorsForTitle.join(', ')})`;
-                                    }
-
-                                    addToCart(modifiedProduct, currentPrice, flatOptions);
+                                    // MELHORIA 1: Mantém o nome do produto inalterado, removendo os parênteses do título.
+                                    // Em vez de enviar modifiedProduct, envia customizingProduct diretamente.
+                                    addToCart(customizingProduct, currentPrice, flatOptions);
                                     setCustomizingProduct(null);
                                 }}
                                 className="w-full bg-red-600 text-white font-bold py-3.5 rounded-xl shadow-lg hover:bg-red-700 flex justify-between px-6"
