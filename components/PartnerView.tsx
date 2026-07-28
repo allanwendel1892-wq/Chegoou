@@ -2781,27 +2781,73 @@ delete updated.mapLink;
 
                               <div className="border-t border-gray-100 pt-6">
                             <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-                                <Truck className="w-5 h-5 text-gray-500" /> Logística
+                                <Truck className="w-5 h-5 text-gray-500" /> Logística e Taxas
                              </h3>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-2 gap-4 mb-6">
                                 <div>
                                      <label className="text-sm font-bold text-gray-700">Raio de Entrega (km)</label>
                                     <input 
                                          type="number"
-                                        value={localCompany.deliveryRadiusKm} 
+                                        value={localCompany.deliveryRadiusKm || ''} 
                                         onChange={e => setLocalCompany({...localCompany, deliveryRadiusKm: parseFloat(e.target.value)})}
                                          className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" 
                                     />
                                  </div>
                                 <div>
-                                    <label className="text-sm font-bold text-gray-700">Taxa Própria (se aplicável)</label>
+                                    <label className="text-sm font-bold text-gray-700">Taxa Padrão (R$)</label>
                                      <input 
                                         type="number"
                                         value={localCompany.ownDeliveryFee || 0} 
                                         onChange={e => setLocalCompany({...localCompany, ownDeliveryFee: parseFloat(e.target.value)})}
                                         className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" 
+                                        placeholder="Ex: 5.00"
                                      />
                                 </div>
+                            </div>
+
+                            <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                                <label className="text-sm font-bold text-gray-700 block mb-3">Taxas Dinâmicas por Bairro</label>
+                                
+                                <div className="flex flex-wrap sm:flex-nowrap gap-2 mb-4">
+                                    <input 
+                                        type="text"
+                                        placeholder="Nome do Bairro"
+                                        value={newNeighborhood}
+                                        onChange={e => setNewNeighborhood(e.target.value)}
+                                        className="flex-1 min-w-[150px] border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-400"
+                                    />
+                                    <input 
+                                        type="number"
+                                        placeholder="R$ 0.00"
+                                        value={newFee}
+                                        onChange={e => setNewFee(e.target.value)}
+                                        className="w-24 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-400"
+                                    />
+                                    <button 
+                                        onClick={handleAddNeighborhoodFee}
+                                        className="bg-red-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-red-700 transition-colors"
+                                    >
+                                        Adicionar
+                                    </button>
+                                </div>
+
+                                {((localCompany as any).neighborhoodFees?.length > 0) ? (
+                                    <div className="space-y-2">
+                                        {(localCompany as any).neighborhoodFees.map((nf: any, idx: number) => (
+                                            <div key={idx} className="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
+                                                <span className="text-sm font-medium text-gray-800">{nf.neighborhood}</span>
+                                                <div className="flex items-center gap-4">
+                                                    <span className="text-sm font-bold text-red-600">R$ {nf.fee.toFixed(2)}</span>
+                                                    <button onClick={() => handleRemoveNeighborhoodFee(idx)} className="text-gray-400 hover:text-red-500 bg-gray-50 p-1.5 rounded">
+                                                        <Trash2 className="w-4 h-4"/>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-gray-500 text-center py-2">Nenhum bairro cadastrado. A Taxa Padrão será aplicada a todos os pedidos.</p>
+                                )}
                             </div>
                          </div>
                         
