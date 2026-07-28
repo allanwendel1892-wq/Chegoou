@@ -67,6 +67,9 @@ export interface Company {
   // --- NOVOS CAMPOS FINANCEIROS (PIX DO RESTAURANTE) ---
   pixKey?: string;
   pixKeyType?: 'cpf' | 'cnpj' | 'email' | 'phone' | 'random';
+  pixMerchantName?: string;
+  pixMerchantCity?: string;
+  neighborhood_fees?: { neighborhood: string; fee: number }[];
 
   // --- NOVOS CAMPOS DE MARKETING / WHATSAPP ---
   dailyMessageLimit?: number; 
