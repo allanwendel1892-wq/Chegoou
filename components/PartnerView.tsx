@@ -1145,23 +1145,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           alert("Pedido atualizado com sucesso!");
       }
   };
-const handleSaveEditingOrder = () => {
-      if (editingOrder) {
-          const itemsTotal = editingOrder.items.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-          const newTotal = itemsTotal + editingOrder.deliveryFee + editingOrder.serviceFee; 
-          const finalOrder = { ...editingOrder, total: newTotal, subtotal: itemsTotal };
-          
-          // NOVAS LINHAS: Verifica se o status mudou para disparar o webhook
-          const originalOrder = orders.find(o => o.id === finalOrder.id);
-          if (originalOrder && originalOrder.status !== finalOrder.status) {
-              notifyN8nWebhook(finalOrder, finalOrder.status);
-          }
-          
-          onUpdateFullOrder(finalOrder);
-          setEditingOrder(null);
-          alert("Pedido atualizado com sucesso!");
-      }
-  };
+
   const handleDeleteItem = (index: number) => {
       if (!editingOrder) return;
       const newItems = [...editingOrder.items];
@@ -1210,85 +1194,232 @@ const handleSaveEditingOrder = () => {
       setNewProduct(prev => ({ ...prev, groups: [...(prev.groups || []), newGroup] }));
       setActiveGroupIndex((newProduct.groups?.length || 0));
   };
-  <button 
+
+  const removeGroup = (index: number) => {
+      const groups = [...(newProduct.groups || [])];
+      groups.splice(index, 1);
+      setNewProduct(prev => ({ ...prev, groups }));
+      setActiveGroupIndex(null);
+  };
+  const addOptionToGroup = (groupIndex: number) => {
+      const groups = [...(newProduct.groups || [])];
+      groups[groupIndex].options.push({id: Date.now().toString(), name: '', price: 0, isAvailable: true});
+      setNewProduct(prev => ({ ...prev, groups }));
+  };
+
+  const updateOption = (groupIndex: number, optionIndex: number, field: keyof ProductOption, value: any) => {
+      const groups = [...(newProduct.groups || [])];
+      groups[groupIndex].options[optionIndex] = { ...groups[groupIndex].options[optionIndex], [field]: value };
+      setNewProduct(prev => ({ ...prev, groups }));
+  };
+
+  const handleEditProduct = (product: Product) => {
+      setNewProduct(product);
+      setProductImagePreview(product.image);
+      setEditingProductId(product.id);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleRequestDeleteProduct = (productId: string) => {
+      setProductToDelete(productId);
+  };
+
+  const handleConfirmDeleteProduct = () => {
+      if (productToDelete) {
+          onDeleteProduct(productToDelete);
+          if (editingProductId === productToDelete) {
+              handleCancelEdit();
+          }
+          setProductToDelete(null); 
+      }
+  };
+
+  const handleCancelEdit = () => {
+      setNewProduct({ isAvailable: true, price: 0, pricingMode: 'default', groups: [] });
+      setProductImagePreview('');
+      setEditingProductId(null);
+  };
+
+  const handleSaveProduct = async () => {
+      if (!newProduct.name || !newProduct.category) { alert("Preencha nome e categoria.");
+      return; }
+
+      setSavingProduct(true);
+      try {
+          // Se veio um arquivo novo (ou já melhorado pela IA), productImagePreview é uma
+          // data URL base64. uploadProductImage comprime e sobe pro Storage, retornando
+          // uma URL curta. Se já for uma URL (produto existente sem alteração de foto),
+          // ela é apenas reaproveitada sem novo upload.
+          const imageUrl = productImagePreview
+              ? await uploadProductImage(productImagePreview, company.id)
+              : 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c';
+
+          const productData: Product = {
+              id: editingProductId || Date.now().toString(),
+              companyId: company.id,
+              name: newProduct.name!,
+              description: newProduct.description || '',
+              category: newProduct.category!,
+              price: Number(newProduct.price),
+              image: imageUrl,
+              isAvailable: true,
+              pricingMode: newProduct.pricingMode || 'default',
+              groups: newProduct.groups || []
+          };
+          if (editingProductId) {
+              onUpdateProduct(productData);
+              alert("Produto updated!");
+          } else {
+              onAddProduct(productData);
+              alert("Produto criado!");
+          }
+
+          handleCancelEdit();
+      } catch (e: any) {
+          alert("Erro ao enviar a imagem do produto: " + (e.message || 'tente novamente.'));
+      } finally {
+          setSavingProduct(false);
+      }
+  };
+
+  const handleSaveSettings = async () => {
+    setSavingSettings(true);
+    try {
+        const updatedCompany = { ...localCompany };
+
+        // Só sobe pro Storage se logo/coverImage forem uma data URL nova (base64).
+        if (updatedCompany.logo && updatedCompany.logo.startsWith('data:')) {
+            updatedCompany.logo = await uploadCompanyImage(updatedCompany.logo, company.id, 'logo');
+        }
+        if (updatedCompany.coverImage && updatedCompany.coverImage.startsWith('data:')) {
+            updatedCompany.coverImage = await uploadCompanyImage(updatedCompany.coverImage, company.id, 'banner');
+        }
+
+        // 1. Atualiza a tela imediatamente (Otimista)
+        setLocalCompany(updatedCompany);
+        updateCompany(updatedCompany);
+
+        // 2. Garante o salvamento no banco de dados focando na coluna exata (snake_case)
+        try {
+            const { error } = await supabase
+                .from('companies') 
+                .update({ neighborhood_fees: (updatedCompany as any).neighborhoodFees })
+                .eq('id', company.id);
+            
+            if (error) {
+                console.error("Erro do Supabase ao salvar bairros:", error);
+                alert("Erro ao salvar os bairros no banco de dados. Verifique a coluna 'neighborhood_fees'.");
+            }
+        } catch (dbErr) {
+            console.error("Erro de conexão ao salvar bairros:", dbErr);
+        }
+
+        alert('Configurações salvas com sucesso!');
+    } catch (e: any) {
+        alert("Erro ao salvar: " + (e.message || 'Tente novamente.'));
+    } finally {
+        setSavingSettings(false);
+    }
+  };
+  const menuLink = `${window.location.origin}/cardapio/${company.id}`;
+
+  const handleCopyMenuLink = async () => {
+      try {
+          await navigator.clipboard.writeText(menuLink);
+      } catch {
+          // Fallback para navegadores sem suporte ao Clipboard API
+          const textarea = document.createElement('textarea');
+          textarea.value = menuLink;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textarea);
+      }
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2500);
+  };
+
+  const editingOrderPaymentMethod = editingOrder?.paymentMethod?.toLowerCase() || '';
+  const editingOrderOrigin = editingOrder?.origin?.toLowerCase() || '';
+
+  const currentBankFee = calculateBankFee(financialSummary.available, localCompany.serviceFeePercentage || 0);
+  const currentNet = Math.max(0, financialSummary.available - currentBankFee);
+
+  return (
+    <div className="flex h-screen bg-gray-50 relative">
+        
+        {/* Modal de Despacho Customizado Interceptado (Entrega) */}
+        {dispatchingOrder && (
+            <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+                <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-scale-in">
+                    <div className="w-12 h-12 bg-red-50 rounded-full flex items-center justify-center mb-4 mx-auto border border-red-100">
+                        <Truck className="w-6 h-6 text-red-600" />
+                    </div>
+                    <h3 className="text-xl font-bold text-gray-900 text-center mb-2">Despachar Pedido #{dispatchingOrder.id.slice(-4)}</h3>
+                    <p className="text-gray-500 text-sm text-center mb-6">Defina os detalhes operacionais da rota e repasse da entrega.</p>
+                    
+                    <div className="space-y-4 text-left">
+                        <div>
+                            <label className="text-xs font-bold text-gray-400 uppercase">Selecionar Entregador</label>
+                            <select 
+                                value={selectedCourierId}
+                                onChange={e => setSelectedCourierId(e.target.value)}
+                                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 mt-1 bg-white font-medium outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100"
+                            >
+                                <option value="">Nenhum / Escolha na Lista</option>
+                                {couriers.map(c => (
+                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label className="text-xs font-bold text-gray-400 uppercase">Endereço de Entrega</label>
+                            <input 
+                                type="text"
+                                value={deliveryAddressStr}
+                                onChange={e => setDeliveryAddressStr(e.target.value)}
+                                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 mt-1 font-medium outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100"
+                                placeholder="Rua, número, bairro..."
+                            />
+                        </div>
+                        
+                        <div>
+                            <label className="text-xs font-bold text-gray-400 uppercase">Link do Mapa (Rota GPS / WhatsApp)</label>
+                            <input 
+                                type="text"
+                                value={mapLink}
+                                onChange={e => setMapLink(e.target.value)}
+                                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 mt-1 font-medium outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100"
+                                placeholder="https://maps.google.com/..."
+                            />
+                        </div>
+                        
+                        <div>
+                            <label className="text-xs font-bold text-gray-400 uppercase">Valor de Taxa (Vai para Carteira do Entregador)</label>
+                            <input 
+                                type="number"
+                                value={deliveryFee || ''}
+                                onChange={e => setDeliveryFee(parseFloat(e.target.value) || 0)}
+                                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 mt-1 font-medium outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100 text-green-600 font-bold text-lg"
+                                placeholder="0.00"
+                            />
+                        </div>
+                    </div>
+                    
+                    <div className="flex gap-3 mt-6">
+                        <button 
+                            onClick={() => setDispatchingOrder(null)} 
+                            className="flex-1 py-3 rounded-xl bg-gray-100 font-bold text-gray-600 hover:bg-gray-200 transition-colors"
+                        >
+                            Cancelar
+                        </button>
+                        <button 
     onClick={() => {
         const novoStatus = selectedCourierId ? 'delivering' : 'waiting_courier';
 
-        const updated: any = {
-            ...dispatchingOrder,
-            status: novoStatus,
-            courierId: selectedCourierId || null,
-            deliveryFee: Number(deliveryFee),
-            deliveryType: 'chegoou'
-        };
-
-        if (dispatchingOrder.deliveryAddress) {
-            updated.deliveryAddress = {
-                ...dispatchingOrder.deliveryAddress,
-                mapLink: mapLink
-            };
-        } else {
-            // ... (código existente)
-        }
-
-        delete updated.mapLink;
-
-        // NOVA LINHA: Dispara o webhook com o pedido atualizado
-        notifyN8nWebhook(updated, novoStatus);
-
-        onUpdateFullOrder(updated);
-        setDispatchingOrder(null);
-        alert(selectedCourierId 
-            ? "Pedido despachado diretamente para o entregador!" 
-            : "Pedido liberado! Entregadores já podem aceitar a corrida.");
-    }} 
-    className="flex-1 py-3 rounded-xl bg-gray-900 font-bold text-white hover:bg-black transition-colors shadow-lg"
->
-    <button 
-                            onClick={() => {
-                                const novoStatus = selectedCourierId ? 'delivering' : 'waiting_courier';
-
-                                const updated: any = {
-                                    ...dispatchingOrder,
-                                    status: novoStatus,
-                                    courierId: selectedCourierId || null,
-                                    deliveryFee: Number(deliveryFee),
-                                    deliveryType: 'chegoou'
-                                };
-
-                                if (dispatchingOrder.deliveryAddress) {
-                                    updated.deliveryAddress = {
-                                        ...dispatchingOrder.deliveryAddress,
-                                        mapLink: mapLink
-                                    };
-                                } else {
-                                    updated.deliveryAddress = {
-                                        street: '',
-                                        number: '',
-                                        neighborhood: '',
-                                        city: '',
-                                        zipCode: '',
-                                        lat: 0,
-                                        lng: 0,
-                                        mapLink: mapLink
-                                    };
-                                }
-
-                                delete updated.mapLink;
-
-                                // NOVA LINHA: Dispara o webhook com o pedido atualizado
-                                notifyN8nWebhook(updated, novoStatus);
-
-                                onUpdateFullOrder(updated);
-                                setDispatchingOrder(null);
-                                alert(selectedCourierId 
-                                    ? "Pedido despachado diretamente para o entregador!" 
-                                    : "Pedido liberado! Entregadores já podem aceitar a corrida.");
-                            }} 
-                            className="flex-1 py-3 rounded-xl bg-gray-900 font-bold text-white hover:bg-black transition-colors shadow-lg"
-                        >
-                            Confirmar Rota
-                        </button>
 const updated: any = {
     ...dispatchingOrder,
     status: novoStatus,
