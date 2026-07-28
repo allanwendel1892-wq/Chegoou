@@ -119,7 +119,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
     // CÁLCULO DINÂMICO DE TAXA POR BAIRRO
     const activeDeliveryFee = useMemo(() => {
         if (deliveryMethod === 'pickup') return 0;
-        const neighborhoodFees = (company as any).neighborhoodFees || [];
+        const neighborhoodFees = (company as any).neighborhood_fees || (company as any).neighborhoodFees || [];
         
         if (neighborhood && neighborhoodFees.length > 0) {
             const found = neighborhoodFees.find((n: any) => n.neighborhood === neighborhood);
@@ -525,7 +525,8 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                                     className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-3 text-sm outline-none focus:border-red-400 text-gray-700"
                                                 >
                                                     <option value="">Selecione o Bairro da Entrega...</option>
-                                                    {((company as any).neighborhoodFees || []).map((n: any) => (
+                                                    //Corrigido
+                                                    {((company as any).neighborhood_fees || (company as any).neighborhoodFees || []).map((n: any) => (
                                                         <option key={n.neighborhood} value={n.neighborhood}>{n.neighborhood} (Taxa: R$ {n.fee.toFixed(2)})</option>
                                                     ))}
                                                 </select>
