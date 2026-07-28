@@ -1288,24 +1288,39 @@ const PartnerView: React.FC<PartnerViewProps> = ({
         const updatedCompany = { ...localCompany };
 
         // Só sobe pro Storage se logo/coverImage forem uma data URL nova (base64).
-        // Se já forem URLs (sem alteração), são reaproveitadas sem re-upload.
-        if (updatedCompany.logo) {
+        if (updatedCompany.logo && updatedCompany.logo.startsWith('data:')) {
             updatedCompany.logo = await uploadCompanyImage(updatedCompany.logo, company.id, 'logo');
         }
-        if (updatedCompany.coverImage) {
+        if (updatedCompany.coverImage && updatedCompany.coverImage.startsWith('data:')) {
             updatedCompany.coverImage = await uploadCompanyImage(updatedCompany.coverImage, company.id, 'banner');
         }
 
+        // 1. Atualiza a tela imediatamente (Otimista)
         setLocalCompany(updatedCompany);
         updateCompany(updatedCompany);
+
+        // 2. Garante o salvamento no banco de dados focando na coluna exata (snake_case)
+        try {
+            const { error } = await supabase
+                .from('companies') 
+                .update({ neighborhood_fees: (updatedCompany as any).neighborhoodFees })
+                .eq('id', company.id);
+            
+            if (error) {
+                console.error("Erro do Supabase ao salvar bairros:", error);
+                alert("Erro ao salvar os bairros no banco de dados. Verifique a coluna 'neighborhood_fees'.");
+            }
+        } catch (dbErr) {
+            console.error("Erro de conexão ao salvar bairros:", dbErr);
+        }
+
         alert('Configurações salvas com sucesso!');
     } catch (e: any) {
-        alert("Erro ao enviar logo/banner: " + (e.message || 'tente novamente.'));
+        alert("Erro ao salvar: " + (e.message || 'Tente novamente.'));
     } finally {
         setSavingSettings(false);
     }
   };
-
   const menuLink = `${window.location.origin}/cardapio/${company.id}`;
 
   const handleCopyMenuLink = async () => {
