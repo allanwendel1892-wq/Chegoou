@@ -532,7 +532,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                                 </select>
                                                 
                                                 {((company as any).neighborhoodFees || []).length === 0 && (
-                                                    <p className="text-[10px] text-red-500 text-center font-bold">Nenhum bairro cadastrado pela loja no momento.</p>
+                                                    <p className="text-[10px] text-red-500 text-center font-bold"></p>
                                                 )}
 
                                                 <div className="flex gap-2">
