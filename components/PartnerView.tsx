@@ -418,6 +418,36 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
   const [compositions, setCompositions] = useState<any[]>([]);
   const [dashboardInventoryItems, setDashboardInventoryItems] = useState<any[]>([]);
+  
+    // --- INÍCIO: ESTADOS PARA TAXA DE BAIRRO ---
+  const [newNeighborhood, setNewNeighborhood] = useState('');
+  const [newFee, setNewFee] = useState('');
+
+  const handleAddNeighborhoodFee = () => {
+      if (!newNeighborhood.trim() || !newFee) return;
+      const feeVal = parseFloat(newFee.replace(',', '.'));
+      const currentList = (localCompany as any).neighborhoodFees || [];
+      
+      const existingIdx = currentList.findIndex((n: any) => n.neighborhood.toLowerCase() === newNeighborhood.trim().toLowerCase());
+      let updatedList = [...currentList];
+      
+      if (existingIdx >= 0) {
+          updatedList[existingIdx].fee = feeVal;
+      } else {
+          updatedList.push({ neighborhood: newNeighborhood.trim(), fee: feeVal });
+      }
+      
+      setLocalCompany({ ...localCompany, neighborhoodFees: updatedList } as any);
+      setNewNeighborhood('');
+      setNewFee('');
+  };
+
+  const handleRemoveNeighborhoodFee = (idx: number) => {
+      const currentList = [...((localCompany as any).neighborhoodFees || [])];
+      currentList.splice(idx, 1);
+      setLocalCompany({ ...localCompany, neighborhoodFees: currentList } as any);
+  };
+  // --- FIM: ESTADOS PARA TAXA DE BAIRRO ---
 
   useEffect(() => {
       const fetchDashboardData = async () => {
