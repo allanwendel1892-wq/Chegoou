@@ -59,6 +59,34 @@ interface PartnerViewProps {
   onDeleteOrder: (orderId: string) => void;
 }
 
+// URL do Webhook do n8n (fluxo Evolution API / WhatsApp)
+const N8N_NOTIFY_WEBHOOK_URL = 'https://n8n-webhook.znzrqn.easypanel.host/webhook/6403e26a-5410-4756-a4db-7f3c3d2edeb0';
+
+// Dispara a notificação de WhatsApp via n8n. Não bloqueia a UI e não quebra o fluxo se falhar.
+const notifyCustomerWhatsApp = (order: Order, event: 'preparing' | 'delivering', companyName: string) => {
+    if (!order.customerPhone) return;
+
+    const shortId = order.id.slice(-4);
+    const message = event === 'preparing'
+        ? `Oi, ${order.customerName}! Seu pedido #${shortId} em ${companyName} acabou de entrar em preparo. 👨‍🍳🍽️`
+        : `Oi, ${order.customerName}! Seu pedido #${shortId} de ${companyName} saiu para entrega. 🛵💨`;
+
+    fetch(N8N_NOTIFY_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            event,
+            orderId: order.id,
+            customerName: order.customerName,
+            customerPhone: order.customerPhone,
+            companyName,
+            message,
+        }),
+    }).catch(err => {
+        console.error('Falha ao notificar cliente via WhatsApp (n8n):', err);
+    });
+};
+
 const COMPANY_CATEGORIES = [
     "Lanches", "Pizza", "Japonesa", "Brasileira", "Açaí", 
     "Doces & Bolos", "Saudável", "Italiana", "Bebidas", "Padaria", 
@@ -1183,6 +1211,10 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           return;
       }
       updateOrderStatus(orderId, status);
+
+      if (status === 'preparing' && order) {
+          notifyCustomerWhatsApp(order, 'preparing', company.name);
+      }
   };
 
   const addGroup = () => {
@@ -1450,6 +1482,11 @@ delete updated.mapLink;
 
         onUpdateFullOrder(updated);
         setDispatchingOrder(null);
+
+        if (novoStatus === 'delivering') {
+            notifyCustomerWhatsApp(dispatchingOrder, 'delivering', company.name);
+        }
+
         alert(selectedCourierId 
             ? "Pedido despachado diretamente para o entregador!" 
             : "Pedido liberado! Entregadores já podem aceitar a corrida.");
