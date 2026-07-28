@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Company, Product, ProductOption } from '../types';
 import {
     ShoppingBag, MapPin, Bike, Clock, ChevronRight, ChevronLeft,
-    X, CheckCircle, Store, DollarSign, CreditCard, QrCode, Loader2, User, Truck
+    X, CheckCircle, Store, DollarSign, CreditCard, QrCode, Loader2, User, Truck, AlertTriangle
 } from 'lucide-react';
 
 interface DigitalMenuViewProps {
@@ -24,7 +24,42 @@ interface DigitalMenuViewProps {
     ) => Promise<boolean>;
 }
 
-// --- CONFIGURAÇÃO DAS ETAPAS DO CHECKOUT ---
+// --- FUNÇÃO GERADORA DE PAYLOAD PIX (BR CODE EMV) ---
+const generatePixPayload = (pixKey: string, name: string, city: string, amount: number) => {
+    if (!pixKey) return '';
+    const format = (id: string, value: string) => {
+        const len = value.length.toString().padStart(2, '0');
+        return `${id}${len}${value}`;
+    };
+    
+    const payloadKey = format('00', 'br.gov.bcb.pix') + format('01', pixKey);
+    const merchantAccInfo = format('26', payloadKey);
+    const mcc = format('52', '0000');
+    const currency = format('53', '986');
+    const amt = format('54', amount.toFixed(2));
+    const country = format('58', 'BR');
+    
+    const cleanStr = (s: string, max: number) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").substring(0, max).toUpperCase();
+    const mName = format('59', cleanStr(name || 'Restaurante', 25));
+    const mCity = format('60', cleanStr(city || 'Cidade', 15));
+    const addData = format('62', format('05', '***'));
+    
+    const payloadStart = `000201010211${merchantAccInfo}${mcc}${currency}${amt}${country}${mName}${mCity}${addData}6304`;
+    
+    let crc = 0xFFFF;
+    for (let i = 0; i < payloadStart.length; i++) {
+        crc ^= payloadStart.charCodeAt(i) << 8;
+        for (let j = 0; j < 8; j++) {
+            if ((crc & 0x8000) !== 0) {
+                crc = (crc << 1) ^ 0x1021;
+            } else {
+                crc = crc << 1;
+            }
+        }
+    }
+    return payloadStart + (crc & 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
+};
+
 const CHECKOUT_STEPS = [
     { id: 1, label: 'Sacola' },
     { id: 2, label: 'Seus dados' },
@@ -34,59 +69,59 @@ const CHECKOUT_STEPS = [
 const TOTAL_STEPS = CHECKOUT_STEPS.length;
 
 const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, onPlaceOrder }) => {
-    // --- ESTADOS DO CARRINHO E CHECKOUT ---
     const [cart, setCart] = useState<{ product: Product, quantity: number, selectedOptions?: { groupName: string, optionName: string, price: number }[], finalPrice: number }[]>([]);
     const [isCartOpen, setIsCartOpen] = useState(false);
     const [checkoutStep, setCheckoutStep] = useState(1);
     const [stepError, setStepError] = useState<string | null>(null);
 
-    // --- ESTADOS DO CLIENTE (GUEST) ---
     const [customerName, setCustomerName] = useState('');
     const [customerPhone, setCustomerPhone] = useState('');
     const [deliveryMethod, setDeliveryMethod] = useState<'delivery' | 'pickup'>('delivery');
 
-    // Endereço
     const [street, setStreet] = useState('');
     const [number, setNumber] = useState('');
     const [complement, setComplement] = useState('');
     const [neighborhood, setNeighborhood] = useState('');
 
-    // Pagamento
     const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'pix'>('pix');
     const [changeAmount, setChangeAmount] = useState<string>('');
     const [isProcessing, setIsProcessing] = useState(false);
     const [orderSuccess, setOrderSuccess] = useState(false);
 
-    // --- ESTADOS DE PRODUTO E CUSTOMIZAÇÃO ---
     const [selectedCategory, setSelectedCategory] = useState<string>('Tudo');
     const [customizingProduct, setCustomizingProduct] = useState<Product | null>(null);
     const [selections, setSelections] = useState<Record<string, ProductOption[]>>({});
 
     const categories = useMemo(() => ['Tudo', ...Array.from(new Set(products.map(p => p.category)))], [products]);
 
-    // --- CÁLCULOS FINANCEIROS ---
-    const productTotal = useMemo(
-        () => cart.reduce((acc, item) => acc + (item.finalPrice * item.quantity), 0),
-        [cart]
-    );
-    const activeDeliveryFee = useMemo(
-        () => deliveryMethod === 'pickup' ? 0 : (company.deliveryType === 'own' ? (company.ownDeliveryFee || 0) : 5.00),
-        [deliveryMethod, company.deliveryType, company.ownDeliveryFee]
-    );
+    const productTotal = useMemo(() => cart.reduce((acc, item) => acc + (item.finalPrice * item.quantity), 0), [cart]);
+    
+    // CÁLCULO DINÂMICO DE TAXA POR BAIRRO
+    const activeDeliveryFee = useMemo(() => {
+        if (deliveryMethod === 'pickup') return 0;
+        const neighborhoodFees = (company as any).neighborhoodFees || [];
+        
+        if (neighborhood && neighborhoodFees.length > 0) {
+            const found = neighborhoodFees.find((n: any) => n.neighborhood === neighborhood);
+            if (found) return found.fee;
+        }
+        
+        return company.deliveryType === 'own' ? (company.ownDeliveryFee || 0) : 5.00;
+    }, [deliveryMethod, neighborhood, company]);
+
     const serviceFeeValue = 0.00; 
-    const finalTotal = useMemo(
-        () => productTotal + activeDeliveryFee + serviceFeeValue,
-        [productTotal, activeDeliveryFee]
-    );
+    const finalTotal = useMemo(() => productTotal + activeDeliveryFee + serviceFeeValue, [productTotal, activeDeliveryFee]);
+
+    // PAYLOAD PIX MEMORIZADO PARA QR CODE
+    const pixPayload = useMemo(() => {
+        if (paymentMethod !== 'pix' || !company.pixKey) return '';
+        return generatePixPayload(company.pixKey, company.name, company.address?.city || 'Brasil', finalTotal);
+    }, [paymentMethod, company.pixKey, company.name, company.address?.city, finalTotal]);
 
     useEffect(() => {
-        if (isCartOpen) {
-            setCheckoutStep(1);
-            setStepError(null);
-        }
+        if (isCartOpen) { setCheckoutStep(1); setStepError(null); }
     }, [isCartOpen]);
 
-    // --- LÓGICA DE PRODUTOS ---
     const openProductModal = (product: Product) => {
         if (!product.groups || product.groups.length === 0) {
             addToCart(product, product.price, []);
@@ -128,35 +163,27 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
         if (newCart.length === 0) setIsCartOpen(false);
     };
 
-    // --- VALIDAÇÃO POR ETAPA ---
     const validateStep = (step: number): string | null => {
-        if (step === 1) {
-            if (cart.length === 0) return "Sua sacola está vazia.";
-        }
+        if (step === 1 && cart.length === 0) return "Sua sacola está vazia.";
         if (step === 2) {
             if (!customerName.trim()) return "Informe seu nome.";
             if (!customerPhone.trim()) return "Informe seu WhatsApp.";
         }
-        if (step === 3) {
-            if (deliveryMethod === 'delivery' && (!street.trim() || !number.trim() || !neighborhood.trim())) {
+        if (step === 3 && deliveryMethod === 'delivery') {
+            if (!street.trim() || !number.trim() || !neighborhood.trim()) {
                 return "Preencha o endereço completo para entrega.";
             }
         }
-        if (step === 4) {
-            if (paymentMethod === 'cash' && changeAmount) {
-                const changeForValue = parseFloat(changeAmount.replace(',', '.'));
-                if (changeForValue < finalTotal) return "O valor do troco deve ser maior que o total do pedido.";
-            }
+        if (step === 4 && paymentMethod === 'cash' && changeAmount) {
+            const changeForValue = parseFloat(changeAmount.replace(',', '.'));
+            if (changeForValue < finalTotal) return "O valor do troco deve ser maior que o total do pedido.";
         }
         return null;
     };
 
     const goToNextStep = () => {
         const error = validateStep(checkoutStep);
-        if (error) {
-            setStepError(error);
-            return;
-        }
+        if (error) { setStepError(error); return; }
         setStepError(null);
         setCheckoutStep(prev => Math.min(prev + 1, TOTAL_STEPS));
     };
@@ -166,13 +193,9 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
         setCheckoutStep(prev => Math.max(prev - 1, 1));
     };
 
-    // --- SUBMISSÃO DO PEDIDO ---
     const handleFinalizeOrder = async () => {
         const error = validateStep(4);
-        if (error) {
-            setStepError(error);
-            return;
-        }
+        if (error) { setStepError(error); return; }
 
         let changeForValue = 0;
         if (paymentMethod === 'cash' && changeAmount) {
@@ -182,7 +205,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
         setIsProcessing(true);
         setStepError(null);
 
-        // MELHORIA 2: Adicionado "(Cardápio Digital)" ao nome do cliente para fácil identificação
         const guestData = {
             name: `${customerName.trim()} (Cardápio Digital)`,
             phone: customerPhone,
@@ -216,7 +238,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
         }
     };
 
-    // --- TELA DE SUCESSO ---
     if (orderSuccess) {
         return (
             <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6 text-center">
@@ -237,7 +258,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
 
     return (
         <div className="pb-32 bg-gray-50 min-h-screen font-sans">
-            {/* HEADER E BANNER */}
             <div className="relative h-48 md:h-64 bg-gray-900">
                 {company.coverImage ? (
                     <img src={company.coverImage} className="w-full h-full object-cover opacity-80" alt="Capa" />
@@ -259,7 +279,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                     </div>
                 </div>
 
-                {/* CATEGORIAS */}
                 <div className="mt-8 overflow-x-auto no-scrollbar flex gap-2 pb-2">
                     {categories.map(cat => (
                         <button
@@ -272,7 +291,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                     ))}
                 </div>
 
-                {/* LISTA DE PRODUTOS */}
                 <div className="mt-6 space-y-8">
                     {categories.filter(c => c !== 'Tudo').map(cat => {
                         const catProducts = products.filter(p => p.category === cat && p.isAvailable);
@@ -305,7 +323,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                 </div>
             </div>
 
-            {/* BOTÃO FLUTUANTE CARRINHO */}
             {cart.length > 0 && !isCartOpen && (
                 <div className="fixed bottom-6 left-0 right-0 px-4 z-20 flex justify-center">
                     <button onClick={() => setIsCartOpen(true)} className="bg-red-600 text-white w-full max-w-md shadow-xl shadow-red-200 rounded-xl p-4 flex justify-between items-center font-bold hover:bg-red-700 transition-all">
@@ -321,7 +338,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                 </div>
             )}
 
-            {/* MODAL DE CUSTOMIZAÇÃO DE PRODUTO */}
             {customizingProduct && (
                 <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4 animate-fade-in">
                     <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl relative flex flex-col max-h-[90vh] overflow-hidden">
@@ -353,7 +369,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                                 })}
                                                 className={`p-3 border rounded-xl mt-2 flex justify-between items-center cursor-pointer transition-all ${isSelected ? 'bg-red-50 border-red-500 text-red-700' : 'bg-white border-gray-200 hover:bg-gray-50'}`}
                                             >
-                                                {/* MELHORIA 3: Exibição limpa do nome do sabor e ingredientes (descrição) */}
                                                 <div className="flex flex-col flex-1 pr-4">
                                                     <span className="font-medium">{o.name}</span>
                                                     {(o as any).description && (
@@ -385,8 +400,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
 
                                     const isPizzaMode = customizingProduct.isPizza || customizingProduct.name.toLowerCase().includes('pizza');
                                     const flatOptions: any[] = [];
-                                    
-                                    // Removida a array flavorsForTitle que causava a duplicação no nome do produto
 
                                     customizingProduct.groups.forEach(g => {
                                         const selectedInGroup = selections[g.id] || [];
@@ -404,8 +417,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                         });
                                     });
 
-                                    // MELHORIA 1: Mantém o nome do produto inalterado, removendo os parênteses do título.
-                                    // Em vez de enviar modifiedProduct, envia customizingProduct diretamente.
                                     addToCart(customizingProduct, currentPrice, flatOptions);
                                     setCustomizingProduct(null);
                                 }}
@@ -419,13 +430,14 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                 </div>
             )}
 
-            {/* MODAL DO CARRINHO E CHECKOUT EM ETAPAS */}
+            {/* MODAL DO CARRINHO E CHECKOUT */}
             {isCartOpen && (
                 <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4 animate-fade-in">
-                    <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[92vh]">
+                    
+                    {/* TELA COMPLETA NO MOBILE h-[100dvh], ARREDONDAMENTO REMOVIDO NO MOBILE */}
+                    <div className="bg-white w-full max-w-md h-[100dvh] sm:h-auto sm:max-h-[92vh] rounded-none sm:rounded-2xl shadow-2xl flex flex-col">
 
-                        {/* CABEÇALHO COM TÍTULO DINÂMICO */}
-                        <div className="px-5 pt-4 pb-3 border-b border-gray-100 shrink-0">
+                        <div className="px-5 pt-6 sm:pt-4 pb-3 border-b border-gray-100 shrink-0">
                             <div className="flex justify-between items-center mb-3">
                                 <h2 className="font-bold text-lg text-gray-900 flex items-center gap-2">
                                     {checkoutStep === 1 && <><ShoppingBag className="w-5 h-5 text-red-600" /> Sua Sacola</>}
@@ -433,65 +445,54 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                     {checkoutStep === 3 && <><Truck className="w-5 h-5 text-red-600" /> Entrega</>}
                                     {checkoutStep === 4 && <><CreditCard className="w-5 h-5 text-red-600" /> Pagamento</>}
                                 </h2>
-                                <button onClick={() => setIsCartOpen(false)} className="p-1.5 bg-gray-100 rounded-full shrink-0"><X className="w-4 h-4 text-gray-600" /></button>
+                                <button onClick={() => setIsCartOpen(false)} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full shrink-0"><X className="w-5 h-5 text-gray-600" /></button>
                             </div>
-
-                            {/* BARRA DE PROGRESSO */}
                             <div>
                                 <div className="flex justify-between items-center mb-1.5">
-                                    <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
-                                        Etapa {checkoutStep}/{TOTAL_STEPS}
-                                    </span>
-                                    <span className="text-[11px] font-bold text-red-600">
-                                        {CHECKOUT_STEPS[checkoutStep - 1].label}
-                                    </span>
+                                    <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Etapa {checkoutStep}/{TOTAL_STEPS}</span>
+                                    <span className="text-[11px] font-bold text-red-600">{CHECKOUT_STEPS[checkoutStep - 1].label}</span>
                                 </div>
                                 <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden flex gap-1">
-                                    {CHECKOUT_STEPS.map(s => (
-                                        <div
-                                            key={s.id}
-                                            className={`h-full flex-1 rounded-full transition-colors duration-300 ${s.id <= checkoutStep ? 'bg-red-600' : 'bg-gray-100'}`}
-                                        />
-                                    ))}
+                                    {CHECKOUT_STEPS.map(s => (<div key={s.id} className={`h-full flex-1 rounded-full transition-colors duration-300 ${s.id <= checkoutStep ? 'bg-red-600' : 'bg-gray-100'}`} />))}
                                 </div>
                             </div>
                         </div>
 
-                        {/* CONTEÚDO DA ETAPA ATUAL */}
                         <div className="overflow-y-auto p-5 flex-1 bg-gray-50">
                             <div key={checkoutStep} className="animate-fade-in space-y-4">
 
-                                {/* ETAPA 1: SACOLA */}
                                 {checkoutStep === 1 && (
                                     <div className="bg-white p-4 rounded-xl border border-gray-100">
                                         {cart.map((i, idx) => (
-                                            <div key={idx} className="flex justify-between items-start border-b border-gray-50 pb-3 mb-3 last:border-0 last:pb-0 last:mb-0">
-                                                <div>
+                                            <div key={idx} className="flex justify-between items-start border-b border-gray-50 pb-4 mb-4 last:border-0 last:pb-0 last:mb-0">
+                                                <div className="flex-1 pr-4">
                                                     <div className="font-bold text-gray-800 text-sm">{i.quantity}x {i.product.name}</div>
                                                     {i.selectedOptions && i.selectedOptions.length > 0 && !i.product.name.includes('1/') && (
-                                                        <div className="text-[11px] text-gray-500 mt-0.5">
+                                                        <div className="text-[11px] text-gray-500 mt-1 leading-relaxed">
                                                             {i.selectedOptions.map(o => `+ ${o.optionName}`).join(', ')}
                                                         </div>
                                                     )}
                                                 </div>
-                                                <div className="flex flex-col items-end gap-1">
+                                                <div className="flex flex-col items-end gap-2 shrink-0">
                                                     <span className="font-bold text-red-600 text-sm">R$ {(i.finalPrice * i.quantity).toFixed(2)}</span>
-                                                    <button onClick={() => removeFromCart(idx)} className="text-[10px] text-gray-400 hover:text-red-500 underline">Remover</button>
+                                                    
+                                                    {/* BOTÃO REMOVER DESTACADO */}
+                                                    <button onClick={() => removeFromCart(idx)} className="text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors border border-red-100">
+                                                        Remover
+                                                    </button>
                                                 </div>
                                             </div>
                                         ))}
                                     </div>
                                 )}
 
-                                {/* ETAPA 2: SEUS DADOS */}
                                 {checkoutStep === 2 && (
-                                    <div className="bg-white p-4 rounded-xl border border-gray-100 space-y-3">
-                                        <input type="text" placeholder="Nome" value={customerName} onChange={e => setCustomerName(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-red-400" />
-                                        <input type="tel" placeholder="WhatsApp (DDD + Número)" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-red-400" />
-                                    </div>
+                                     <div className="bg-white p-4 rounded-xl border border-gray-100 space-y-3">
+                                         <input type="text" placeholder="Seu Nome" value={customerName} onChange={e => setCustomerName(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-sm outline-none focus:border-red-400" />
+                                         <input type="tel" placeholder="WhatsApp (DDD + Número)" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-sm outline-none focus:border-red-400" />
+                                     </div>
                                 )}
 
-                                {/* ETAPA 3: ENTREGA */}
                                 {checkoutStep === 3 && (
                                     <div className="bg-white p-4 rounded-xl border border-gray-100">
                                         <div className="flex bg-gray-100 p-1 rounded-lg mb-4">
@@ -501,86 +502,117 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
 
                                         {deliveryMethod === 'delivery' ? (
                                             <div className="space-y-3 animate-fade-in">
+                                                {/* SELEÇÃO DE BAIRRO DINÂMICA */}
+                                                {((company as any).neighborhoodFees?.length > 0) ? (
+                                                    <select
+                                                        value={neighborhood}
+                                                        onChange={e => setNeighborhood(e.target.value)}
+                                                        className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-3 text-sm outline-none focus:border-red-400 text-gray-700"
+                                                    >
+                                                        <option value="">Selecione seu Bairro...</option>
+                                                        {(company as any).neighborhoodFees.map((n: any) => (
+                                                            <option key={n.neighborhood} value={n.neighborhood}>{n.neighborhood} (Taxa: R$ {n.fee.toFixed(2)})</option>
+                                                        ))}
+                                                    </select>
+                                                ) : (
+                                                    <input placeholder="Bairro" value={neighborhood} onChange={e => setNeighborhood(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-3 text-sm outline-none focus:border-red-400" />
+                                                )}
+
                                                 <div className="flex gap-2">
-                                                    <input placeholder="Rua" value={street} onChange={e => setStreet(e.target.value)} className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-400" />
-                                                    <input placeholder="Nº" value={number} onChange={e => setNumber(e.target.value)} className="w-20 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-400" />
+                                                    <input placeholder="Rua" value={street} onChange={e => setStreet(e.target.value)} className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-3 text-sm outline-none focus:border-red-400" />
+                                                    <input placeholder="Nº" value={number} onChange={e => setNumber(e.target.value)} className="w-24 bg-gray-50 border border-gray-200 rounded-lg px-3 py-3 text-sm outline-none focus:border-red-400" />
                                                 </div>
-                                                <input placeholder="Complemento (opcional)" value={complement} onChange={e => setComplement(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-400" />
-                                                <input placeholder="Bairro" value={neighborhood} onChange={e => setNeighborhood(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-400" />
+                                                <input placeholder="Complemento (opcional)" value={complement} onChange={e => setComplement(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-3 text-sm outline-none focus:border-red-400" />
                                             </div>
                                         ) : (
-                                            <div className="bg-orange-50 p-3 rounded-lg border border-orange-100 text-sm">
-                                                <p className="font-bold text-orange-800 flex items-center gap-1 mb-1"><Store className="w-4 h-4" /> Retirar em:</p>
-                                                <p className="text-gray-700">{company.address?.street}, {company.address?.number} <br /> {company.address?.neighborhood}</p>
+                                            <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 text-sm">
+                                                <p className="font-bold text-orange-800 flex items-center gap-1 mb-2"><Store className="w-4 h-4" /> Retirar no Endereço:</p>
+                                                <p className="text-gray-700 leading-relaxed">{company.address?.street}, {company.address?.number} <br /> {company.address?.neighborhood}</p>
                                             </div>
                                         )}
                                     </div>
                                 )}
 
-                                {/* ETAPA 4: PAGAMENTO */}
                                 {checkoutStep === 4 && (
                                     <div className="bg-white p-4 rounded-xl border border-gray-100">
-                                        <p className="text-[10px] text-gray-500 mb-3">O pagamento é feito diretamente ao restaurante (na entrega ou retirada).</p>
+                                        <p className="text-xs text-gray-500 mb-3 font-medium">Como você deseja pagar o pedido?</p>
                                         <div className="flex gap-2 mb-3">
-                                            <button onClick={() => setPaymentMethod('pix')} className={`flex-1 flex flex-col items-center py-3 rounded-lg border-2 ${paymentMethod === 'pix' ? 'border-teal-500 bg-teal-50 text-teal-700' : 'border-gray-100 text-gray-500'}`}><QrCode className="w-5 h-5 mb-1" /><span className="text-[10px] font-bold">Pix</span></button>
-                                            <button onClick={() => setPaymentMethod('card')} className={`flex-1 flex flex-col items-center py-3 rounded-lg border-2 ${paymentMethod === 'card' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-100 text-gray-500'}`}><CreditCard className="w-5 h-5 mb-1" /><span className="text-[10px] font-bold">Cartão</span></button>
-                                            <button onClick={() => setPaymentMethod('cash')} className={`flex-1 flex flex-col items-center py-3 rounded-lg border-2 ${paymentMethod === 'cash' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-100 text-gray-500'}`}><DollarSign className="w-5 h-5 mb-1" /><span className="text-[10px] font-bold">Dinheiro</span></button>
+                                            <button onClick={() => setPaymentMethod('pix')} className={`flex-1 flex flex-col items-center py-4 rounded-xl border-2 transition-all ${paymentMethod === 'pix' ? 'border-teal-500 bg-teal-50 text-teal-700 shadow-sm' : 'border-gray-100 text-gray-500 hover:bg-gray-50'}`}><QrCode className="w-6 h-6 mb-1.5" /><span className="text-[11px] font-bold">Pix</span></button>
+                                            <button onClick={() => setPaymentMethod('card')} className={`flex-1 flex flex-col items-center py-4 rounded-xl border-2 transition-all ${paymentMethod === 'card' ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm' : 'border-gray-100 text-gray-500 hover:bg-gray-50'}`}><CreditCard className="w-6 h-6 mb-1.5" /><span className="text-[11px] font-bold">Cartão</span></button>
+                                            <button onClick={() => setPaymentMethod('cash')} className={`flex-1 flex flex-col items-center py-4 rounded-xl border-2 transition-all ${paymentMethod === 'cash' ? 'border-green-500 bg-green-50 text-green-700 shadow-sm' : 'border-gray-100 text-gray-500 hover:bg-gray-50'}`}><DollarSign className="w-6 h-6 mb-1.5" /><span className="text-[11px] font-bold">Dinheiro</span></button>
                                         </div>
 
                                         {paymentMethod === 'cash' && (
-                                            <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200 animate-fade-in">
-                                                <label className="text-xs font-bold text-yellow-800 block mb-1">Precisa de troco para quanto?</label>
-                                                <input type="number" placeholder="Ex: 50,00" value={changeAmount} onChange={e => setChangeAmount(e.target.value)} className="w-full bg-transparent border-b border-yellow-300 py-1 text-sm font-bold text-gray-800 outline-none" />
+                                            <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 animate-fade-in mt-4">
+                                                <label className="text-sm font-bold text-yellow-900 block mb-2">Precisa de troco para quanto?</label>
+                                                <input type="number" placeholder="Ex: 50.00" value={changeAmount} onChange={e => setChangeAmount(e.target.value)} className="w-full bg-white border border-yellow-300 rounded-lg px-4 py-3 text-sm font-bold text-gray-800 outline-none focus:ring-2 focus:ring-yellow-400" />
+                                            </div>
+                                        )}
+
+                                        {/* AVISO DISCRETO MÁQUINA DE CARTÃO */}
+                                        {paymentMethod === 'card' && deliveryMethod === 'delivery' && (
+                                            <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 animate-fade-in mt-4 text-center">
+                                                <p className="text-sm font-bold text-blue-900">
+                                                    Não se preocupe, o entregador levará a maquineta de cartão até você!
+                                                </p>
+                                            </div>
+                                        )}
+
+                                        {/* PIX QR CODE & COPIA E COLA DINÂMICO */}
+                                        {paymentMethod === 'pix' && pixPayload && (
+                                            <div className="bg-teal-50 p-5 rounded-xl border border-teal-200 animate-fade-in mt-4 flex flex-col items-center">
+                                                <p className="text-sm font-bold text-teal-900 mb-4 text-center">Use o QR Code abaixo para pagar, ou copie o código Pix:</p>
+                                                
+                                                <div className="bg-white p-2 rounded-xl shadow-sm border border-teal-100 mb-4">
+                                                    <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(pixPayload)}`} alt="PIX QR Code" className="w-40 h-40" />
+                                                </div>
+                                                
+                                                <div className="flex w-full gap-2">
+                                                    <input type="text" readOnly value={pixPayload} className="flex-1 text-xs bg-white border border-teal-200 rounded-lg px-3 py-2 outline-none font-mono text-gray-500" />
+                                                    <button onClick={() => { navigator.clipboard.writeText(pixPayload); alert('Código PIX Copiado!'); }} className="bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors shadow-sm">
+                                                        Copiar
+                                                    </button>
+                                                </div>
+                                                <p className="text-[10px] text-teal-700 text-center mt-3 font-medium">Após o pagamento, confirme o pedido abaixo.</p>
                                             </div>
                                         )}
                                     </div>
                                 )}
 
                                 {stepError && (
-                                    <div className="bg-red-50 border border-red-100 text-red-600 text-xs font-semibold rounded-lg px-3 py-2 animate-fade-in">
-                                        {stepError}
+                                    <div className="bg-red-50 border border-red-100 text-red-600 text-xs font-bold rounded-lg px-4 py-3 animate-fade-in flex items-center gap-2">
+                                        <AlertTriangle className="w-4 h-4 shrink-0" /> {stepError}
                                     </div>
                                 )}
                             </div>
                         </div>
 
-                        {/* RODAPÉ: TOTAL + NAVEGAÇÃO */}
-                        <div className="p-5 border-t border-gray-100 bg-white shrink-0 space-y-3">
-                            <div className="space-y-1 text-sm text-gray-600">
+                        {/* RODAPÉ E TOTALIZADORES */}
+                        <div className="p-5 pb-8 sm:pb-5 border-t border-gray-100 bg-white shrink-0 space-y-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] sm:shadow-none">
+                            <div className="space-y-1.5 text-sm text-gray-600">
                                 <div className="flex justify-between"><span>Subtotal</span><span>R$ {productTotal.toFixed(2)}</span></div>
                                 {deliveryMethod === 'delivery' && <div className="flex justify-between"><span>Taxa de Entrega</span><span>R$ {activeDeliveryFee.toFixed(2)}</span></div>}
                             </div>
-                            <div className="flex justify-between font-bold text-lg text-gray-900 border-t border-gray-100 pt-2">
+                            <div className="flex justify-between font-bold text-xl text-gray-900 border-t border-gray-100 pt-3">
                                 <span>Total a Pagar</span>
                                 <span>R$ {finalTotal.toFixed(2)}</span>
                             </div>
 
-                            <div className="flex gap-2 pt-1">
+                            <div className="flex gap-3 pt-2">
                                 {checkoutStep > 1 && (
-                                    <button
-                                        onClick={goToPreviousStep}
-                                        disabled={isProcessing}
-                                        className="flex items-center justify-center gap-1 px-4 py-3.5 rounded-xl font-bold text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 transition-all shrink-0"
-                                    >
-                                        <ChevronLeft className="w-4 h-4" /> Voltar
+                                    <button onClick={goToPreviousStep} disabled={isProcessing} className="flex items-center justify-center gap-1 px-5 py-4 rounded-xl font-bold text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 transition-all shrink-0">
+                                        <ChevronLeft className="w-5 h-5" />
                                     </button>
                                 )}
 
                                 {checkoutStep < TOTAL_STEPS ? (
-                                    <button
-                                        onClick={goToNextStep}
-                                        className="flex-1 text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all bg-red-600 hover:bg-red-700 shadow-red-200"
-                                    >
-                                        Continuar <ChevronRight className="w-4 h-4" />
+                                    <button onClick={goToNextStep} className="flex-1 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all bg-red-600 hover:bg-red-700 shadow-red-200 text-lg">
+                                        Avançar <ChevronRight className="w-5 h-5" />
                                     </button>
                                 ) : (
-                                    <button
-                                        onClick={handleFinalizeOrder}
-                                        disabled={isProcessing}
-                                        className={`flex-1 text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all ${isProcessing ? 'bg-gray-400' : 'bg-red-600 hover:bg-red-700 shadow-red-200'}`}
-                                    >
+                                    <button onClick={handleFinalizeOrder} disabled={isProcessing} className={`flex-1 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all text-lg ${isProcessing ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700 shadow-green-200'}`}>
                                         {isProcessing && <Loader2 className="w-5 h-5 animate-spin" />}
-                                        {isProcessing ? 'Enviando Pedido...' : 'Confirmar Pedido'}
+                                        {isProcessing ? 'Enviando...' : 'Confirmar Pedido'}
                                     </button>
                                 )}
                             </div>
