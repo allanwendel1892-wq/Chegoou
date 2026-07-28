@@ -62,7 +62,7 @@ interface PartnerViewProps {
 const COMPANY_CATEGORIES = [
     "Lanches", "Pizza", "Japonesa", "Brasileira", "Açaí", 
     "Doces & Bolos", "Saudável", "Italiana", "Bebidas", "Padaria", 
-    "Sorvetes", "Carnes", "Mercado", "Asiática"
+    "Sorvetes", "Carnes", "Mercado", "Asiática","Combos",
 ];
 const PROTECTED_VIEWS = [
     ViewState.DASHBOARD, 
