@@ -2822,32 +2822,112 @@ delete updated.mapLink;
                         </div>
 
                               <div className="border-t border-gray-100 pt-6">
-    <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-        <Truck className="w-5 h-5 text-gray-500" /> Logística e Taxas
-    </h3>
-    
-    <div className="grid grid-cols-2 gap-4 mb-6">
-        <div>
-            <label className="text-sm font-bold text-gray-700">Raio de Entrega (km)</label>
-            <input 
-                type="number"
-                value={localCompany.deliveryRadiusKm || ''} 
-                onChange={e => setLocalCompany({...localCompany, deliveryRadiusKm: parseFloat(e.target.value)})}
-                className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" 
-            />
-        </div>
-        <div>
-            <label className="text-sm font-bold text-gray-700">Taxa Própria Padrão</label>
-            <input 
-                type="number"
-                value={localCompany.ownDeliveryFee || 0} 
-                onChange={e => setLocalCompany({...localCompany, ownDeliveryFee: parseFloat(e.target.value)})}
-                className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" 
-                placeholder="R$ 0,00"
-            />
-        </div>
-    </div>
+                            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                                <Truck className="w-5 h-5 text-gray-500" /> Logística e Taxas
+                            </h3>
+                            
+                            <div className="grid grid-cols-2 gap-4 mb-6">
+                                <div>
+                                    <label className="text-sm font-bold text-gray-700">Raio de Entrega (km)</label>
+                                    <input 
+                                        type="number"
+                                        value={localCompany.deliveryRadiusKm || ''} 
+                                        onChange={e => setLocalCompany({...localCompany, deliveryRadiusKm: parseFloat(e.target.value)})}
+                                        className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" 
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-sm font-bold text-gray-700">Taxa Própria Padrão (R$)</label>
+                                    <input 
+                                        type="number"
+                                        value={localCompany.ownDeliveryFee || 0} 
+                                        onChange={e => setLocalCompany({...localCompany, ownDeliveryFee: parseFloat(e.target.value)})}
+                                        className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" 
+                                        placeholder="Ex: 5.00"
+                                    />
+                                </div>
+                            </div>
 
+                            {/* GERENCIADOR DE TAXAS POR BAIRRO (JSONB) */}
+                            <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                                <div className="flex justify-between items-center mb-3">
+                                    <label className="text-sm font-bold text-gray-700 flex items-center gap-2">
+                                        <MapIcon className="w-4 h-4 text-gray-500" /> Taxas Personalizadas por Bairro
+                                    </label>
+                                    <button 
+                                        onClick={() => {
+                                            const newFees = [...(localCompany.neighborhood_fees || []), { neighborhood: '', fee: 0 }];
+                                            setLocalCompany({...localCompany, neighborhood_fees: newFees});
+                                        }}
+                                        className="text-xs bg-gray-900 text-white hover:bg-black px-3 py-1.5 rounded-lg font-bold transition-colors"
+                                    >
+                                        + Adicionar Bairro
+                                    </button>
+                                </div>
+                                
+                                {(!localCompany.neighborhood_fees || localCompany.neighborhood_fees.length === 0) ? (
+                                    <p className="text-xs text-gray-500 italic">Nenhum bairro cadastrado. A taxa padrão será usada.</p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {localCompany.neighborhood_fees.map((item, index) => (
+                                            <div key={index} className="flex items-center gap-2 bg-white p-2 rounded-lg border border-gray-200">
+                                                <input 
+                                                    type="text" 
+                                                    placeholder="Nome do Bairro (Ex: Centro)"
+                                                    value={item.neighborhood}
+                                                    onChange={(e) => {
+                                                        const newFees = [...(localCompany.neighborhood_fees || [])];
+                                                        newFees[index].neighborhood = e.target.value;
+                                                        setLocalCompany({...localCompany, neighborhood_fees: newFees});
+                                                    }}
+                                                    className="flex-1 text-sm border-none bg-gray-50 rounded px-3 py-2 outline-none focus:ring-1 focus:ring-red-400"
+                                                />
+                                                <input 
+                                                    type="number" 
+                                                    placeholder="R$"
+                                                    value={item.fee}
+                                                    onChange={(e) => {
+                                                        const newFees = [...(localCompany.neighborhood_fees || [])];
+                                                        newFees[index].fee = parseFloat(e.target.value) || 0;
+                                                        setLocalCompany({...localCompany, neighborhood_fees: newFees});
+                                                    }}
+                                                    className="w-24 text-sm border-none bg-gray-50 rounded px-3 py-2 outline-none focus:ring-1 focus:ring-red-400 font-bold"
+                                                />
+                                                <button 
+                                                    onClick={() => {
+                                                        const newFees = [...(localCompany.neighborhood_fees || [])];
+                                                        newFees.splice(index, 1);
+                                                        setLocalCompany({...localCompany, neighborhood_fees: newFees});
+                                                    }}
+                                                    className="p-2 text-gray-400 hover:bg-red-50 hover:text-red-600 rounded transition-colors"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* O botão de Salvar Alterações deve ficar logo abaixo do código acima */}
+                        <div className="flex justify-end pt-4">
+                            <button 
+                                 onClick={handleSaveSettings}
+                                disabled={savingSettings}
+                                className={`text-white font-bold px-8 py-3 rounded-xl shadow-lg shadow-red-200 transition-all flex items-center justify-center gap-2 ${savingSettings ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700'}`}
+                            >
+                                 {savingSettings ? (
+                                     <><Loader2 className="w-4 h-4 animate-spin" /> Enviando imagens...</>
+                                 ) : (
+                                     'Salvar Alterações'
+                                 )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
     {/* GERENCIADOR DE TAXAS POR BAIRRO (JSONB) */}
     <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
         <div className="flex justify-between items-center mb-3">
