@@ -24,40 +24,60 @@ interface DigitalMenuViewProps {
     ) => Promise<boolean>;
 }
 
-// --- FUNÇÃO GERADORA DE PAYLOAD PIX (BR CODE EMV) ---
-const generatePixPayload = (pixKey: string, name: string, city: string, amount: number) => {
+// --- GERADOR PIX (BR CODE EMV) - VALIDADO BACEN ---
+const generatePixPayload = (pixKey: string, pixKeyType: string, merchantName: string, merchantCity: string, amount: number, customerName: string) => {
     if (!pixKey) return '';
+    
+    // 1. Tratamento da Chave Pix conforme exigência do Banco Central
+    let formattedKey = pixKey.trim();
+    if (pixKeyType === 'phone' || pixKeyType === 'celular') {
+        formattedKey = formattedKey.replace(/\D/g, ''); // Remove tudo que não é número
+        if (!formattedKey.startsWith('55')) formattedKey = '55' + formattedKey;
+        formattedKey = '+' + formattedKey;
+    } else if (pixKeyType === 'cpf' || pixKeyType === 'cnpj') {
+        formattedKey = formattedKey.replace(/\D/g, '');
+    }
+
     const format = (id: string, value: string) => {
         const len = value.length.toString().padStart(2, '0');
         return `${id}${len}${value}`;
     };
     
-    const payloadKey = format('00', 'br.gov.bcb.pix') + format('01', pixKey);
+    const payloadKey = format('00', 'br.gov.bcb.pix') + format('01', formattedKey);
     const merchantAccInfo = format('26', payloadKey);
     const mcc = format('52', '0000');
     const currency = format('53', '986');
     const amt = format('54', amount.toFixed(2));
     const country = format('58', 'BR');
     
-    const cleanStr = (s: string, max: number) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").substring(0, max).toUpperCase();
-    const mName = format('59', cleanStr(name || 'Restaurante', 25));
-    const mCity = format('60', cleanStr(city || 'Cidade', 15));
-    const addData = format('62', format('05', '***'));
+    // 2. Tratamento rigoroso de caracteres para evitar invalidação
+    const cleanStr = (s: string, max: number) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9 ]/gi, '').substring(0, max).toUpperCase().trim();
+    
+    const mName = format('59', cleanStr(merchantName || 'RESTAURANTE', 25));
+    const mCity = format('60', cleanStr(merchantCity || 'CIDADE', 15));
+    
+    // 3. Injeção do Nome do Cliente como TXID (Facilita conferência no banco)
+    // Remove espaços e acentos, limite de 25 caracteres imposto pelo BCB
+    const txidStr = customerName ? customerName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/gi, '').substring(0, 25).toUpperCase() : 'PGTOAPP';
+    const txid = txidStr.length > 0 ? txidStr : 'PGTOAPP';
+    
+    const addData = format('62', format('05', txid));
     
     const payloadStart = `000201010211${merchantAccInfo}${mcc}${currency}${amt}${country}${mName}${mCity}${addData}6304`;
     
+    // 4. Cálculo de Checksum CRC16
     let crc = 0xFFFF;
     for (let i = 0; i < payloadStart.length; i++) {
-        crc ^= payloadStart.charCodeAt(i) << 8;
+        crc ^= (payloadStart.charCodeAt(i) << 8);
         for (let j = 0; j < 8; j++) {
             if ((crc & 0x8000) !== 0) {
-                crc = (crc << 1) ^ 0x1021;
+                crc = ((crc << 1) ^ 0x1021) & 0xFFFF;
             } else {
-                crc = crc << 1;
+                crc = (crc << 1) & 0xFFFF;
             }
         }
     }
-    return payloadStart + (crc & 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
+    return payloadStart + crc.toString(16).toUpperCase().padStart(4, '0');
 };
 
 const CHECKOUT_STEPS = [
@@ -112,11 +132,11 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
     const serviceFeeValue = 0.00; 
     const finalTotal = useMemo(() => productTotal + activeDeliveryFee + serviceFeeValue, [productTotal, activeDeliveryFee]);
 
-    // PAYLOAD PIX MEMORIZADO PARA QR CODE
+    // PAYLOAD PIX MEMORIZADO - AGORA INCLUI O NOME DO CLIENTE COMO TXID
     const pixPayload = useMemo(() => {
         if (paymentMethod !== 'pix' || !company.pixKey) return '';
-        return generatePixPayload(company.pixKey, company.name, company.address?.city || 'Brasil', finalTotal);
-    }, [paymentMethod, company.pixKey, company.name, company.address?.city, finalTotal]);
+        return generatePixPayload(company.pixKey, company.pixKeyType || 'email', company.name, company.address?.city || 'Brasil', finalTotal, customerName);
+    }, [paymentMethod, company.pixKey, company.pixKeyType, company.name, company.address?.city, finalTotal, customerName]);
 
     useEffect(() => {
         if (isCartOpen) { setCheckoutStep(1); setStepError(null); }
@@ -166,13 +186,12 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
     const validateStep = (step: number): string | null => {
         if (step === 1 && cart.length === 0) return "Sua sacola está vazia.";
         if (step === 2) {
-            if (!customerName.trim()) return "Informe seu nome.";
+            if (!customerName.trim()) return "Informe seu nome completo.";
             if (!customerPhone.trim()) return "Informe seu WhatsApp.";
         }
         if (step === 3 && deliveryMethod === 'delivery') {
-            if (!street.trim() || !number.trim() || !neighborhood.trim()) {
-                return "Preencha o endereço completo para entrega.";
-            }
+            if (!neighborhood.trim()) return "Selecione o bairro para entrega.";
+            if (!street.trim() || !number.trim()) return "Preencha a rua e o número para entrega.";
         }
         if (step === 4 && paymentMethod === 'cash' && changeAmount) {
             const changeForValue = parseFloat(changeAmount.replace(',', '.'));
@@ -434,7 +453,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
             {isCartOpen && (
                 <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4 animate-fade-in">
                     
-                    {/* TELA COMPLETA NO MOBILE h-[100dvh], ARREDONDAMENTO REMOVIDO NO MOBILE */}
                     <div className="bg-white w-full max-w-md h-[100dvh] sm:h-auto sm:max-h-[92vh] rounded-none sm:rounded-2xl shadow-2xl flex flex-col">
 
                         <div className="px-5 pt-6 sm:pt-4 pb-3 border-b border-gray-100 shrink-0">
@@ -475,8 +493,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                                 </div>
                                                 <div className="flex flex-col items-end gap-2 shrink-0">
                                                     <span className="font-bold text-red-600 text-sm">R$ {(i.finalPrice * i.quantity).toFixed(2)}</span>
-                                                    
-                                                    {/* BOTÃO REMOVER DESTACADO */}
                                                     <button onClick={() => removeFromCart(idx)} className="text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors border border-red-100">
                                                         Remover
                                                     </button>
@@ -488,7 +504,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
 
                                 {checkoutStep === 2 && (
                                      <div className="bg-white p-4 rounded-xl border border-gray-100 space-y-3">
-                                         <input type="text" placeholder="Seu Nome" value={customerName} onChange={e => setCustomerName(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-sm outline-none focus:border-red-400" />
+                                         <input type="text" placeholder="Seu Nome Completo" value={customerName} onChange={e => setCustomerName(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-sm outline-none focus:border-red-400" />
                                          <input type="tel" placeholder="WhatsApp (DDD + Número)" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-sm outline-none focus:border-red-400" />
                                      </div>
                                 )}
@@ -502,20 +518,20 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
 
                                         {deliveryMethod === 'delivery' ? (
                                             <div className="space-y-3 animate-fade-in">
-                                                {/* SELEÇÃO DE BAIRRO DINÂMICA */}
-                                                {((company as any).neighborhoodFees?.length > 0) ? (
-                                                    <select
-                                                        value={neighborhood}
-                                                        onChange={e => setNeighborhood(e.target.value)}
-                                                        className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-3 text-sm outline-none focus:border-red-400 text-gray-700"
-                                                    >
-                                                        <option value="">Selecione seu Bairro...</option>
-                                                        {(company as any).neighborhoodFees.map((n: any) => (
-                                                            <option key={n.neighborhood} value={n.neighborhood}>{n.neighborhood} (Taxa: R$ {n.fee.toFixed(2)})</option>
-                                                        ))}
-                                                    </select>
-                                                ) : (
-                                                    <input placeholder="Bairro" value={neighborhood} onChange={e => setNeighborhood(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-3 text-sm outline-none focus:border-red-400" />
+                                                
+                                                <select
+                                                    value={neighborhood}
+                                                    onChange={e => setNeighborhood(e.target.value)}
+                                                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-3 text-sm outline-none focus:border-red-400 text-gray-700"
+                                                >
+                                                    <option value="">Selecione o Bairro da Entrega...</option>
+                                                    {((company as any).neighborhoodFees || []).map((n: any) => (
+                                                        <option key={n.neighborhood} value={n.neighborhood}>{n.neighborhood} (Taxa: R$ {n.fee.toFixed(2)})</option>
+                                                    ))}
+                                                </select>
+                                                
+                                                {((company as any).neighborhoodFees || []).length === 0 && (
+                                                    <p className="text-[10px] text-red-500 text-center font-bold">Nenhum bairro cadastrado pela loja no momento.</p>
                                                 )}
 
                                                 <div className="flex gap-2">
@@ -549,7 +565,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                             </div>
                                         )}
 
-                                        {/* AVISO DISCRETO MÁQUINA DE CARTÃO */}
                                         {paymentMethod === 'card' && deliveryMethod === 'delivery' && (
                                             <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 animate-fade-in mt-4 text-center">
                                                 <p className="text-sm font-bold text-blue-900">
@@ -558,7 +573,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                             </div>
                                         )}
 
-                                        {/* PIX QR CODE & COPIA E COLA DINÂMICO */}
                                         {paymentMethod === 'pix' && pixPayload && (
                                             <div className="bg-teal-50 p-5 rounded-xl border border-teal-200 animate-fade-in mt-4 flex flex-col items-center">
                                                 <p className="text-sm font-bold text-teal-900 mb-4 text-center">Use o QR Code abaixo para pagar, ou copie o código Pix:</p>
@@ -587,7 +601,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                             </div>
                         </div>
 
-                        {/* RODAPÉ E TOTALIZADORES */}
                         <div className="p-5 pb-8 sm:pb-5 border-t border-gray-100 bg-white shrink-0 space-y-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] sm:shadow-none">
                             <div className="space-y-1.5 text-sm text-gray-600">
                                 <div className="flex justify-between"><span>Subtotal</span><span>R$ {productTotal.toFixed(2)}</span></div>
