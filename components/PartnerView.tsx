@@ -2686,40 +2686,67 @@ delete updated.mapLink;
                        </div>
 
                         <div className="border-t border-gray-100 pt-6">
-                             <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-                                 <Wallet className="w-5 h-5 text-gray-500" /> Dados Financeiros (Recebimento)
-                            </h3>
-                            <div className="grid grid-cols-3 gap-4">
-                                  <div>
-                                    <label className="text-sm font-bold text-gray-700">Tipo Chave Pix</label>
-                                    <select 
-                                         value={localCompany.pixKeyType || 'email'} 
-                                        onChange={e => setLocalCompany({...localCompany, pixKeyType: e.target.value as any})}
-                                        className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5 bg-white" 
-                                     >
-                                        <option value="cpf">CPF</option>
-                                         <option value="cnpj">CNPJ</option>
-                                        <option value="email">E-mail</option>
-                                        <option value="phone">Celular</option>
-                                         <option value="random">Chave Aleatória</option>
-                                    </select>
-                                 </div>
-                                <div className="col-span-2">
-                                    <label className="text-sm font-bold text-gray-700">Chave Pix</label>
-                                     <input 
-                                        type="text"
-                                        placeholder="Chave para receber repasses"
-                                         value={localCompany.pixKey || ''} 
-                                        onChange={e => setLocalCompany({...localCompany, pixKey: e.target.value})}
-                                        className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5 font-mono" 
-                                     />
-                                </div>
-                            </div>
-                             <p className="text-xs text-gray-500 mt-2">
-                                * Seus pagamentos online serão transferidos automaticamente para esta chave.
-                             </p>
-                        </div>
+    <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+        <Wallet className="w-5 h-5 text-gray-500" /> Dados Financeiros (Recebimento Pix)
+    </h3>
+    
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
+            <label className="text-sm font-bold text-gray-700">Tipo Chave Pix</label>
+            <select 
+                value={localCompany.pixKeyType || 'email'} 
+                onChange={e => setLocalCompany({...localCompany, pixKeyType: e.target.value as any})}
+                className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5 bg-white" 
+            >
+                <option value="cpf">CPF</option>
+                <option value="cnpj">CNPJ</option>
+                <option value="email">E-mail</option>
+                <option value="phone">Celular</option>
+                <option value="random">Chave Aleatória</option>
+            </select>
+        </div>
+        <div>
+            <label className="text-sm font-bold text-gray-700">Chave Pix</label>
+            <input 
+                type="text"
+                placeholder="Chave para receber repasses"
+                value={localCompany.pixKey || ''} 
+                onChange={e => setLocalCompany({...localCompany, pixKey: e.target.value})}
+                className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5 font-mono" 
+            />
+        </div>
+    </div>
 
+    <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl mb-2">
+        <p className="text-xs text-blue-800 font-bold mb-3 flex items-center gap-1">
+            <Info className="w-4 h-4 shrink-0" /> Obrigatório pelo Banco Central para gerar o QR Code:
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <label className="text-xs font-bold text-gray-700 uppercase">Nome do Titular da Conta</label>
+                <input 
+                    type="text"
+                    placeholder="Nome exato como no banco"
+                    value={localCompany.pixMerchantName || ''} 
+                    onChange={e => setLocalCompany({...localCompany, pixMerchantName: e.target.value})}
+                    className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" 
+                    maxLength={25}
+                />
+            </div>
+            <div>
+                <label className="text-xs font-bold text-gray-700 uppercase">Cidade da Conta</label>
+                <input 
+                    type="text"
+                    placeholder="Ex: Sao Paulo (Sem acentos)"
+                    value={localCompany.pixMerchantCity || ''} 
+                    onChange={e => setLocalCompany({...localCompany, pixMerchantCity: e.target.value})}
+                    className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" 
+                    maxLength={15}
+                />
+            </div>
+        </div>
+    </div>
+</div>
                         <div className="border-t border-gray-100 pt-6">
                             <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
                                  <MapPin className="w-5 h-5 text-gray-500" /> Endereço e Localização
