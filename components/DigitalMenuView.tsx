@@ -388,14 +388,21 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                                 })}
                                                 className={`p-3 border rounded-xl mt-2 flex justify-between items-center cursor-pointer transition-all ${isSelected ? 'bg-red-50 border-red-500 text-red-700' : 'bg-white border-gray-200 hover:bg-gray-50'}`}
                                             >
-                                                <div className="flex flex-col flex-1 pr-4">
-                                                    <span className="font-medium">{o.name}</span>
+                                                {/* INÍCIO DA ALTERAÇÃO: Hierarquia visual e truncamento de ingredientes */}
+                                                <div className="flex flex-col flex-1 pr-4 overflow-hidden">
+                                                    <span className="font-medium text-gray-800">{o.name}</span>
                                                     {(o as any).description && (
-                                                        <span className={`text-[11px] mt-0.5 leading-tight ${isSelected ? 'text-red-600/80' : 'text-gray-400'}`}>
+                                                        <span 
+                                                            className={`text-[11px] mt-0.5 leading-tight line-clamp-2 transition-colors ${
+                                                                isSelected ? 'text-red-600/90 font-medium' : 'text-gray-400'
+                                                            }`}
+                                                            title={(o as any).description}
+                                                        >
                                                             {(o as any).description}
                                                         </span>
                                                     )}
                                                 </div>
+                                                {/* FIM DA ALTERAÇÃO */}
                                                 <span className="font-bold text-sm shrink-0">
                                                     {isSelected && <CheckCircle className="inline w-4 h-4 mr-1" />}
                                                     {o.price > 0 ? `+ R$ ${o.price.toFixed(2)}` : 'Grátis'}
