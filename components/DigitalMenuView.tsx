@@ -2,21 +2,17 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Company, Product, ProductOption } from '../types';
 import {
     ShoppingBag, MapPin, Bike, Clock, ChevronRight, ChevronLeft,
-    X, CheckCircle, Store, DollarSign, CreditCard, QrCode, Loader2, User, Truck, AlertTriangle
+    X, CheckCircle, Store, DollarSign, CreditCard, QrCode, Loader2, User, Truck, AlertTriangle, Search, RefreshCw, Copy
 } from 'lucide-react';
 
-// --- SISTEMA DE SOBREVIVÊNCIA DO PEDIDO (localStorage) ---
 export interface ActiveOrder {
     id: string;
     total: number;
     paymentMethod: 'cash' | 'card' | 'pix';
     customerName: string;
     status: 'pending_payment' | 'preparing' | 'dispatched';
-    timestamp: number; // Essencial para o controle de cache (ex: 2 horas)
+    timestamp: number;
 }
-
-const ACTIVE_ORDER_STORAGE_KEY = '@MenuApp:activeOrder';
-const ACTIVE_ORDER_TTL_MS = 2 * 60 * 60 * 1000; // 2 horas
 
 interface DigitalMenuViewProps {
     company: Company;
@@ -33,19 +29,18 @@ interface DigitalMenuViewProps {
         changeFor?: number,
         couponCode?: string,
         discountAmount?: number,
-        customerData?: { name: string, phone: string, address: any } 
-    ) => Promise<string | null>;
-    onTrackOrderByPhone?: (phone: string) => Promise<ActiveOrder | null>;
+        customerData?: { name: string, phone: string, address: any }
+    ) => Promise<string | null>; // Alterado para retornar o ID do pedido
+    onTrackOrderByPhone?: (phone: string) => Promise<ActiveOrder | null>; // Nova prop adicionada
 }
 
 // --- GERADOR PIX (BR CODE EMV) - VALIDADO BACEN ---
 const generatePixPayload = (pixKey: string, pixKeyType: string, merchantName: string, merchantCity: string, amount: number, customerName: string) => {
     if (!pixKey) return '';
     
-    // 1. Tratamento da Chave Pix conforme exigência do Banco Central
     let formattedKey = pixKey.trim();
     if (pixKeyType === 'phone' || pixKeyType === 'celular') {
-        formattedKey = formattedKey.replace(/\D/g, ''); // Remove tudo que não é número
+        formattedKey = formattedKey.replace(/\D/g, ''); 
         if (!formattedKey.startsWith('55')) formattedKey = '55' + formattedKey;
         formattedKey = '+' + formattedKey;
     } else if (pixKeyType === 'cpf' || pixKeyType === 'cnpj') {
@@ -64,14 +59,11 @@ const generatePixPayload = (pixKey: string, pixKeyType: string, merchantName: st
     const amt = format('54', amount.toFixed(2));
     const country = format('58', 'BR');
     
-    // 2. Tratamento rigoroso de caracteres para evitar invalidação
     const cleanStr = (s: string, max: number) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9 ]/gi, '').substring(0, max).toUpperCase().trim();
     
     const mName = format('59', cleanStr(merchantName || 'RESTAURANTE', 25));
     const mCity = format('60', cleanStr(merchantCity || 'CIDADE', 15));
     
-    // 3. Injeção do Nome do Cliente como TXID (Facilita conferência no banco)
-    // Remove espaços e acentos, limite de 25 caracteres imposto pelo BCB
     const txidStr = customerName ? customerName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]/gi, '').substring(0, 25).toUpperCase() : 'PGTOAPP';
     const txid = txidStr.length > 0 ? txidStr : 'PGTOAPP';
     
@@ -79,7 +71,6 @@ const generatePixPayload = (pixKey: string, pixKeyType: string, merchantName: st
     
     const payloadStart = `000201010211${merchantAccInfo}${mcc}${currency}${amt}${country}${mName}${mCity}${addData}6304`;
     
-    // 4. Cálculo de Checksum CRC16
     let crc = 0xFFFF;
     for (let i = 0; i < payloadStart.length; i++) {
         crc ^= (payloadStart.charCodeAt(i) << 8);
@@ -103,82 +94,84 @@ const CHECKOUT_STEPS = [
 const TOTAL_STEPS = CHECKOUT_STEPS.length;
 
 const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, onPlaceOrder, onTrackOrderByPhone }) => {
+    // Estados do Carrinho
     const [cart, setCart] = useState<{ product: Product, quantity: number, selectedOptions?: { groupName: string, optionName: string, price: number }[], finalPrice: number }[]>([]);
     const [isCartOpen, setIsCartOpen] = useState(false);
     const [checkoutStep, setCheckoutStep] = useState(1);
     const [stepError, setStepError] = useState<string | null>(null);
 
+    // Estados do Cliente
     const [customerName, setCustomerName] = useState('');
     const [customerPhone, setCustomerPhone] = useState('');
     const [deliveryMethod, setDeliveryMethod] = useState<'delivery' | 'pickup'>('delivery');
-
     const [street, setStreet] = useState('');
     const [number, setNumber] = useState('');
     const [complement, setComplement] = useState('');
     const [neighborhood, setNeighborhood] = useState('');
 
+    // Estados de Pagamento e Processamento
     const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'pix'>('pix');
     const [changeAmount, setChangeAmount] = useState<string>('');
     const [isProcessing, setIsProcessing] = useState(false);
 
+    // Novos Estados Arquiteturais (Acompanhamento e Cache)
+    const [activeOrder, setActiveOrder] = useState<ActiveOrder | null>(null);
+    const [isTrackingViewOpen, setIsTrackingViewOpen] = useState(false);
+    const [isTrackModalOpen, setIsTrackModalOpen] = useState(false);
+    const [trackPhoneInput, setTrackPhoneInput] = useState('');
+    const [isSearchingPhone, setIsSearchingPhone] = useState(false);
+    const [trackModalError, setTrackModalError] = useState('');
+
+    // Estados do Menu
     const [selectedCategory, setSelectedCategory] = useState<string>('Tudo');
     const [customizingProduct, setCustomizingProduct] = useState<Product | null>(null);
     const [selections, setSelections] = useState<Record<string, ProductOption[]>>({});
 
-    // --- ESTADOS DO SISTEMA DE ACOMPANHAMENTO / SOBREVIVÊNCIA DO PEDIDO ---
-    const [activeOrder, setActiveOrder] = useState<ActiveOrder | null>(null);
-    const [isTrackingViewOpen, setIsTrackingViewOpen] = useState(false);
-    const [isPhoneTrackModalOpen, setIsPhoneTrackModalOpen] = useState(false);
-    const [trackPhoneInput, setTrackPhoneInput] = useState('');
-    const [isTrackingLookupLoading, setIsTrackingLookupLoading] = useState(false);
-    const [trackLookupError, setTrackLookupError] = useState<string | null>(null);
-
     const categories = useMemo(() => ['Tudo', ...Array.from(new Set(products.map(p => p.category)))], [products]);
-
-    // --- HIDRATAÇÃO DO CACHE LOCAL (SOBREVIVE A F5 E TROCA DE APP PARA PAGAR O PIX) ---
-    useEffect(() => {
-        try {
-            const raw = localStorage.getItem(ACTIVE_ORDER_STORAGE_KEY);
-            if (!raw) return;
-
-            const parsed: ActiveOrder = JSON.parse(raw);
-            const isValid = parsed && typeof parsed.timestamp === 'number' && (Date.now() - parsed.timestamp) < ACTIVE_ORDER_TTL_MS;
-
-            if (isValid) {
-                setActiveOrder(parsed);
-            } else {
-                localStorage.removeItem(ACTIVE_ORDER_STORAGE_KEY);
-            }
-        } catch {
-            localStorage.removeItem(ACTIVE_ORDER_STORAGE_KEY);
-        }
-    }, []);
-
     const productTotal = useMemo(() => cart.reduce((acc, item) => acc + (item.finalPrice * item.quantity), 0), [cart]);
     
-    // CÁLCULO DINÂMICO DE TAXA POR BAIRRO
+    // CÁLCULO DINÂMICO DE TAXA
     const activeDeliveryFee = useMemo(() => {
         if (deliveryMethod === 'pickup') return 0;
         const neighborhoodFees = (company as any).neighborhood_fees || (company as any).neighborhoodFees || [];
-        
         if (neighborhood && neighborhoodFees.length > 0) {
             const found = neighborhoodFees.find((n: any) => n.neighborhood === neighborhood);
             if (found) return found.fee;
         }
-        
         return company.deliveryType === 'own' ? (company.ownDeliveryFee || 0) : 5.00;
     }, [deliveryMethod, neighborhood, company]);
 
     const serviceFeeValue = 0.00; 
     const finalTotal = useMemo(() => productTotal + activeDeliveryFee + serviceFeeValue, [productTotal, activeDeliveryFee]);
 
-    // PAYLOAD PIX DA TELA DE ACOMPANHAMENTO - GERADO A PARTIR DO PEDIDO JÁ SALVO NO BACKEND
-    // (o QR Code não é mais exibido na Etapa 4 do checkout; ele só aparece após o pedido
-    // ser persistido, dentro da Tela de Acompanhamento)
+    // PAYLOAD PIX (Agora restrito apenas à view de rastreio, usando dados persistidos)
     const trackingPixPayload = useMemo(() => {
         if (!activeOrder || activeOrder.paymentMethod !== 'pix' || !company.pixKey) return '';
         return generatePixPayload(company.pixKey, company.pixKeyType || 'email', company.name, company.address?.city || 'Brasil', activeOrder.total, activeOrder.customerName);
-    }, [activeOrder, company.pixKey, company.pixKeyType, company.name, company.address?.city]);
+    }, [activeOrder, company]);
+
+    // SISTEMA DE SOBREVIVÊNCIA (Cache de 2h via localStorage)
+    useEffect(() => {
+        const checkCache = () => {
+            const savedOrderStr = localStorage.getItem('@MenuApp:activeOrder');
+            if (savedOrderStr) {
+                try {
+                    const savedOrder: ActiveOrder = JSON.parse(savedOrderStr);
+                    const now = Date.now();
+                    const diffHours = (now - savedOrder.timestamp) / (1000 * 60 * 60);
+                    
+                    if (diffHours < 2) {
+                        setActiveOrder(savedOrder);
+                    } else {
+                        localStorage.removeItem('@MenuApp:activeOrder');
+                    }
+                } catch (e) {
+                    localStorage.removeItem('@MenuApp:activeOrder');
+                }
+            }
+        };
+        checkCache();
+    }, []);
 
     useEffect(() => {
         if (isCartOpen) { setCheckoutStep(1); setStepError(null); }
@@ -254,6 +247,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
         setCheckoutStep(prev => Math.max(prev - 1, 1));
     };
 
+    // FLUXO DE CHECKOUT - MUDANÇA ARQUITETURAL AQUI
     const handleFinalizeOrder = async () => {
         const error = validateStep(4);
         if (error) { setStepError(error); return; }
@@ -274,9 +268,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                 : undefined
         };
 
-        // ARQUITETURA INVERTIDA: o pedido é salvo no backend ANTES de qualquer exibição de Pix.
-        // onPlaceOrder agora retorna o ID do pedido (ou null em caso de falha), nunca um boolean.
-        const orderId = await onPlaceOrder(
+        const generatedOrderId = await onPlaceOrder(
             cart,
             company.id,
             finalTotal,
@@ -293,79 +285,75 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
 
         setIsProcessing(false);
 
-        if (orderId) {
+        if (generatedOrderId) {
+            // Sucesso: Persistindo pedido no LocalStorage e no State
             const newActiveOrder: ActiveOrder = {
-                id: orderId,
+                id: generatedOrderId,
                 total: finalTotal,
                 paymentMethod,
                 customerName: customerName.trim(),
                 status: 'pending_payment',
-                timestamp: Date.now(),
+                timestamp: Date.now()
             };
 
-            try {
-                localStorage.setItem(ACTIVE_ORDER_STORAGE_KEY, JSON.stringify(newActiveOrder));
-            } catch {
-                // localStorage indisponível (modo privado, quota etc.) - segue apenas em memória
-            }
-
             setActiveOrder(newActiveOrder);
+            localStorage.setItem('@MenuApp:activeOrder', JSON.stringify(newActiveOrder));
+            
+            // Limpa Carrinho e vai direto para a Tela de Rastreio (Tracking Hub)
             setCart([]);
             setIsCartOpen(false);
             setIsTrackingViewOpen(true);
         } else {
-            setStepError("Houve um erro ao processar seu pedido. Tente novamente.");
+            setStepError("Houve um erro ao gerar seu pedido. Tente novamente.");
         }
     };
 
-    // --- PLANO B: RASTREIO POR WHATSAPP (fallback quando o cache local não existe/expirou) ---
+    // FALLBACK DE RASTREIO POR WHATSAPP
     const handleTrackByPhone = async () => {
-        if (!trackPhoneInput.trim()) {
-            setTrackLookupError("Informe um número de WhatsApp válido.");
-            return;
-        }
-        if (!onTrackOrderByPhone) {
-            setTrackLookupError("Rastreio por WhatsApp indisponível no momento.");
-            return;
-        }
-
-        setIsTrackingLookupLoading(true);
-        setTrackLookupError(null);
+        if (!trackPhoneInput.trim() || !onTrackOrderByPhone) return;
+        setIsSearchingPhone(true);
+        setTrackModalError('');
 
         try {
-            const found = await onTrackOrderByPhone(trackPhoneInput.trim());
-            if (found) {
-                const refreshedOrder: ActiveOrder = { ...found, timestamp: Date.now() };
-                try {
-                    localStorage.setItem(ACTIVE_ORDER_STORAGE_KEY, JSON.stringify(refreshedOrder));
-                } catch {
-                    // localStorage indisponível - segue apenas em memória
-                }
+            const fetchedOrder = await onTrackOrderByPhone(trackPhoneInput);
+            if (fetchedOrder) {
+                // Injeta novo timestamp para manter o cache vivo
+                const refreshedOrder: ActiveOrder = { ...fetchedOrder, timestamp: Date.now() };
                 setActiveOrder(refreshedOrder);
-                setIsPhoneTrackModalOpen(false);
+                localStorage.setItem('@MenuApp:activeOrder', JSON.stringify(refreshedOrder));
+                setIsTrackModalOpen(false);
                 setIsTrackingViewOpen(true);
             } else {
-                setTrackLookupError("Nenhum pedido ativo encontrado para esse número.");
+                setTrackModalError('Nenhum pedido ativo encontrado para este número.');
             }
-        } catch {
-            setTrackLookupError("Erro ao buscar o pedido. Tente novamente.");
+        } catch (error) {
+            setTrackModalError('Erro ao buscar o pedido. Tente novamente.');
         } finally {
-            setIsTrackingLookupLoading(false);
+            setIsSearchingPhone(false);
         }
     };
 
-    const handleTrackButtonClick = () => {
-        if (activeOrder) {
-            setIsTrackingViewOpen(true);
-        } else {
-            setTrackLookupError(null);
-            setTrackPhoneInput('');
-            setIsPhoneTrackModalOpen(true);
+    const getStatusText = (status: ActiveOrder['status']) => {
+        switch (status) {
+            case 'pending_payment': return 'Aguardando Pagamento/Confirmação';
+            case 'preparing': return 'Sendo Preparado';
+            case 'dispatched': return 'Saiu para Entrega / Disponível para Retirada';
+            default: return 'Processando...';
         }
     };
 
     return (
-        <div className="pb-32 bg-gray-50 min-h-screen font-sans">
+        <div className="pb-32 bg-gray-50 min-h-screen font-sans relative">
+            
+            {/* PLANO B: BOTÃO FLUTUANTE DE ACOMPANHAR PEDIDO */}
+            <button 
+                onClick={() => activeOrder ? setIsTrackingViewOpen(true) : setIsTrackModalOpen(true)} 
+                className="fixed top-4 right-4 z-40 bg-white text-red-600 px-4 py-2 rounded-full shadow-[0_4px_15px_rgba(0,0,0,0.1)] font-bold flex items-center gap-2 text-sm border border-red-100 hover:bg-gray-50 transition-colors"
+            >
+                <Search className="w-4 h-4" /> Acompanhar Pedido
+            </button>
+
+            {/* HEADER DO CARDÁPIO */}
             <div className="relative h-48 md:h-64 bg-gray-900">
                 {company.coverImage ? (
                     <img src={company.coverImage} className="w-full h-full object-cover opacity-80" alt="Capa" />
@@ -431,7 +419,8 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                 </div>
             </div>
 
-            {cart.length > 0 && !isCartOpen && (
+            {/* BARRA FIXA DO CARRINHO */}
+            {cart.length > 0 && !isCartOpen && !isTrackingViewOpen && (
                 <div className="fixed bottom-6 left-0 right-0 px-4 z-20 flex justify-center">
                     <button onClick={() => setIsCartOpen(true)} className="bg-red-600 text-white w-full max-w-md shadow-xl shadow-red-200 rounded-xl p-4 flex justify-between items-center font-bold hover:bg-red-700 transition-all">
                         <div className="flex items-center gap-3">
@@ -446,6 +435,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                 </div>
             )}
 
+            {/* MODAL DE CUSTOMIZAÇÃO DE PRODUTO */}
             {customizingProduct && (
                 <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4 animate-fade-in">
                     <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl relative flex flex-col max-h-[90vh] overflow-hidden">
@@ -477,7 +467,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                                 })}
                                                 className={`p-3 border rounded-xl mt-2 flex justify-between items-center cursor-pointer transition-all ${isSelected ? 'bg-red-50 border-red-500 text-red-700' : 'bg-white border-gray-200 hover:bg-gray-50'}`}
                                             >
-                                                {/* INÍCIO DA ALTERAÇÃO: Hierarquia visual e truncamento de ingredientes */}
                                                 <div className="flex flex-col flex-1 pr-4 overflow-hidden">
                                                     <span className="font-medium text-gray-800">{o.name}</span>
                                                     {(o as any).description && (
@@ -491,7 +480,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                                         </span>
                                                     )}
                                                 </div>
-                                                {/* FIM DA ALTERAÇÃO */}
                                                 <span className="font-bold text-sm shrink-0">
                                                     {isSelected && <CheckCircle className="inline w-4 h-4 mr-1" />}
                                                     {o.price > 0 ? `+ R$ ${o.price.toFixed(2)}` : 'Grátis'}
@@ -614,23 +602,17 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
 
                                         {deliveryMethod === 'delivery' ? (
                                             <div className="space-y-3 animate-fade-in">
-                                                
                                                 <select
                                                     value={neighborhood}
                                                     onChange={e => setNeighborhood(e.target.value)}
                                                     className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-3 text-sm outline-none focus:border-red-400 text-gray-700"
                                                 >
                                                     <option value="">Selecione o Bairro da Entrega...</option>
-                                                    //Corrigido
                                                     {((company as any).neighborhood_fees || (company as any).neighborhoodFees || []).map((n: any) => (
                                                         <option key={n.neighborhood} value={n.neighborhood}>{n.neighborhood} (Taxa: R$ {n.fee.toFixed(2)})</option>
                                                     ))}
                                                 </select>
                                                 
-                                                {((company as any).neighborhoodFees || []).length === 0 && (
-                                                    <p className="text-[10px] text-red-500 text-center font-bold"></p>
-                                                )}
-
                                                 <div className="flex gap-2">
                                                     <input placeholder="Rua" value={street} onChange={e => setStreet(e.target.value)} className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-3 text-sm outline-none focus:border-red-400" />
                                                     <input placeholder="Nº" value={number} onChange={e => setNumber(e.target.value)} className="w-24 bg-gray-50 border border-gray-200 rounded-lg px-3 py-3 text-sm outline-none focus:border-red-400" />
@@ -646,6 +628,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                     </div>
                                 )}
 
+                                {/* ETAPA 4 - APENAS SELEÇÃO, SEM GERAÇÃO DE PIX */}
                                 {checkoutStep === 4 && (
                                     <div className="bg-white p-4 rounded-xl border border-gray-100">
                                         <p className="text-xs text-gray-500 mb-3 font-medium">Como você deseja pagar o pedido?</p>
@@ -659,32 +642,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                             <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 animate-fade-in mt-4">
                                                 <label className="text-sm font-bold text-yellow-900 block mb-2">Precisa de troco para quanto?</label>
                                                 <input type="number" placeholder="Ex: 50.00" value={changeAmount} onChange={e => setChangeAmount(e.target.value)} className="w-full bg-white border border-yellow-300 rounded-lg px-4 py-3 text-sm font-bold text-gray-800 outline-none focus:ring-2 focus:ring-yellow-400" />
-                                            </div>
-                                        )}
-
-                                        {paymentMethod === 'card' && deliveryMethod === 'delivery' && (
-                                            <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 animate-fade-in mt-4 text-center">
-                                                <p className="text-sm font-bold text-blue-900">
-                                                    Não se preocupe, o entregador levará a maquineta de cartão até você!
-                                                </p>
-                                            </div>
-                                        )}
-
-                                        {paymentMethod === 'pix' && pixPayload && (
-                                            <div className="bg-teal-50 p-5 rounded-xl border border-teal-200 animate-fade-in mt-4 flex flex-col items-center">
-                                                <p className="text-sm font-bold text-teal-900 mb-4 text-center">Use o QR Code abaixo para pagar, ou copie o código Pix:</p>
-                                                
-                                                <div className="bg-white p-2 rounded-xl shadow-sm border border-teal-100 mb-4">
-                                                    <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(pixPayload)}`} alt="PIX QR Code" className="w-40 h-40" />
-                                                </div>
-                                                
-                                                <div className="flex w-full gap-2">
-                                                    <input type="text" readOnly value={pixPayload} className="flex-1 text-xs bg-white border border-teal-200 rounded-lg px-3 py-2 outline-none font-mono text-gray-500" />
-                                                    <button onClick={() => { navigator.clipboard.writeText(pixPayload); alert('Código PIX Copiado!'); }} className="bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors shadow-sm">
-                                                        Copiar
-                                                    </button>
-                                                </div>
-                                                <p className="text-[10px] text-teal-700 text-center mt-3 font-medium">Após o pagamento, confirme o pedido abaixo.</p>
                                             </div>
                                         )}
                                     </div>
@@ -722,7 +679,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                 ) : (
                                     <button onClick={handleFinalizeOrder} disabled={isProcessing} className={`flex-1 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all text-lg ${isProcessing ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700 shadow-green-200'}`}>
                                         {isProcessing && <Loader2 className="w-5 h-5 animate-spin" />}
-                                        {isProcessing ? 'Enviando...' : 'Confirmar Pedido'}
+                                        {isProcessing ? 'Processando...' : 'Confirmar Pedido'}
                                     </button>
                                 )}
                             </div>
@@ -730,6 +687,135 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                     </div>
                 </div>
             )}
+
+            {/* TRACKING HUB - VIEW DE ACOMPANHAMENTO (SOBREPOSIÇÃO) */}
+            {isTrackingViewOpen && activeOrder && (
+                <div className="fixed inset-0 z-[60] bg-gray-50 flex flex-col animate-fade-in overflow-y-auto">
+                    <div className="bg-white border-b border-gray-200 p-4 sticky top-0 z-10 flex justify-between items-center shadow-sm">
+                        <div>
+                            <h2 className="font-bold text-gray-900">Acompanhar Pedido</h2>
+                            <p className="text-xs text-gray-500">ID: {activeOrder.id.substring(0, 8).toUpperCase()}</p>
+                        </div>
+                        <button onClick={() => setIsTrackingViewOpen(false)} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full">
+                            <X className="w-5 h-5 text-gray-600" />
+                        </button>
+                    </div>
+
+                    <div className="flex-1 p-6 flex flex-col items-center max-w-md mx-auto w-full">
+                        {/* Status do Pedido */}
+                        <div className={`w-full p-4 rounded-xl border mb-6 text-center ${
+                            activeOrder.status === 'pending_payment' ? 'bg-yellow-50 border-yellow-200' :
+                            activeOrder.status === 'preparing' ? 'bg-blue-50 border-blue-200' : 'bg-green-50 border-green-200'
+                        }`}>
+                            <p className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">Status Atual</p>
+                            <h3 className={`font-bold text-lg ${
+                                activeOrder.status === 'pending_payment' ? 'text-yellow-800' :
+                                activeOrder.status === 'preparing' ? 'text-blue-800' : 'text-green-800'
+                            }`}>
+                                {getStatusText(activeOrder.status)}
+                            </h3>
+                        </div>
+
+                        {/* Área de Pagamento (PIX) */}
+                        {activeOrder.status === 'pending_payment' && activeOrder.paymentMethod === 'pix' && trackingPixPayload && (
+                            <div className="w-full bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center mb-6">
+                                <h3 className="font-bold text-gray-900 mb-2">Pagamento via Pix</h3>
+                                <p className="text-sm text-gray-500 text-center mb-6">O seu pedido já está no nosso sistema! Copie o código abaixo ou escaneie o QR Code no seu banco para aprovar e iniciarmos o preparo.</p>
+                                
+                                <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 mb-6">
+                                    <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(trackingPixPayload)}`} alt="PIX QR Code" className="w-48 h-48" />
+                                </div>
+                                
+                                <div className="w-full">
+                                    <p className="text-xs font-bold text-gray-500 mb-2 uppercase">Pix Copia e Cola</p>
+                                    <div className="flex gap-2">
+                                        <input type="text" readOnly value={trackingPixPayload} className="flex-1 text-xs bg-gray-50 border border-gray-200 rounded-lg px-3 py-3 outline-none font-mono text-gray-600 truncate" />
+                                        <button onClick={() => { navigator.clipboard.writeText(trackingPixPayload); alert('Código PIX Copiado!'); }} className="bg-teal-600 hover:bg-teal-700 text-white flex items-center justify-center px-4 rounded-lg transition-colors shadow-sm">
+                                            <Copy className="w-5 h-5" />
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <p className="font-bold text-lg text-gray-900 mt-6">Total: R$ {activeOrder.total.toFixed(2)}</p>
+                            </div>
+                        )}
+
+                        {/* Mensagens para outros métodos */}
+                        {activeOrder.status === 'pending_payment' && activeOrder.paymentMethod !== 'pix' && (
+                            <div className="w-full bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center mb-6">
+                                <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-4" />
+                                <h3 className="font-bold text-gray-900 text-xl mb-2">Pedido Recebido!</h3>
+                                <p className="text-gray-500 mb-2">O restaurante já recebeu o seu pedido.</p>
+                                <p className="text-sm font-bold text-gray-700 bg-gray-50 py-3 px-4 rounded-lg inline-block border border-gray-200">
+                                    {activeOrder.paymentMethod === 'card' 
+                                        ? "💳 O entregador levará a maquineta de cartão." 
+                                        : "💵 O entregador levará o seu troco."}
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Botões de Ação do Tracking Hub */}
+                        <div className="w-full space-y-3 mt-auto pt-6">
+                            <button 
+                                onClick={() => window.location.reload()} 
+                                className="w-full bg-white border border-gray-300 text-gray-700 font-bold py-3.5 rounded-xl shadow-sm hover:bg-gray-50 flex justify-center items-center gap-2"
+                            >
+                                <RefreshCw className="w-5 h-5" /> Atualizar Status
+                            </button>
+                            <button 
+                                onClick={() => setIsTrackingViewOpen(false)} 
+                                className="w-full bg-gray-100 text-gray-600 font-bold py-3.5 rounded-xl hover:bg-gray-200 transition-colors"
+                            >
+                                Voltar ao Cardápio
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL PLANO B: BUSCA POR WHATSAPP */}
+            {isTrackModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
+                    <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl p-6 relative">
+                        <button onClick={() => setIsTrackModalOpen(false)} className="absolute top-4 right-4 p-2 bg-gray-100 hover:bg-gray-200 rounded-full">
+                            <X className="w-5 h-5 text-gray-600" />
+                        </button>
+                        
+                        <div className="text-center mb-6">
+                            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                                <Search className="w-6 h-6 text-red-600" />
+                            </div>
+                            <h2 className="font-bold text-xl text-gray-900">Buscar Pedido</h2>
+                            <p className="text-sm text-gray-500 mt-1">Informe o seu número de WhatsApp para recuperar o seu pedido ativo.</p>
+                        </div>
+
+                        <div className="space-y-4">
+                            <input 
+                                type="tel" 
+                                placeholder="WhatsApp (DDD + Número)" 
+                                value={trackPhoneInput} 
+                                onChange={e => setTrackPhoneInput(e.target.value)} 
+                                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-red-400" 
+                            />
+                            
+                            {trackModalError && (
+                                <p className="text-xs text-red-600 font-bold text-center">{trackModalError}</p>
+                            )}
+
+                            <button 
+                                onClick={handleTrackByPhone} 
+                                disabled={isSearchingPhone || !trackPhoneInput.trim()} 
+                                className={`w-full text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all ${
+                                    isSearchingPhone || !trackPhoneInput.trim() ? 'bg-gray-400' : 'bg-red-600 hover:bg-red-700 shadow-red-200'
+                                }`}
+                            >
+                                {isSearchingPhone ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Buscar'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
         </div>
     );
 };
