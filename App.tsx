@@ -1192,14 +1192,19 @@ const handlePlaceOrder = async (
           .single();
           
       if (error || !data) return null;
+
+      // Pedidos concluídos ou cancelados não devem aparecer para o cliente
+      if (data.status === 'delivered' || data.status === 'cancelled') return null;
       
       // Adaptando o status do banco para o padrão da nova interface
-      let trackingStatus: 'pending_payment' | 'preparing' | 'dispatched' = 'preparing';
+      let trackingStatus: 'pending_payment' | 'preparing' | 'ready' | 'out_for_delivery' = 'preparing';
       
       if (data.status === 'waiting_payment' || (data.status === 'pending' && data.paymentMethod === 'pix')) {
           trackingStatus = 'pending_payment';
-      } else if (data.status === 'delivering' || data.status === 'ready') {
-          trackingStatus = 'dispatched';
+      } else if (data.status === 'delivering') {
+          trackingStatus = 'out_for_delivery';
+      } else if (data.status === 'ready') {
+          trackingStatus = 'ready';
       }
 
       return {
@@ -1208,7 +1213,12 @@ const handlePlaceOrder = async (
           paymentMethod: data.paymentMethod,
           customerName: data.customerName,
           status: trackingStatus,
-          timestamp: Date.now() // injeta timestamp novo para prolongar cache
+          timestamp: Date.now(), // injeta timestamp novo para prolongar cache
+          items: (data.items || []).map((i: any) => ({
+              name: i.productName,
+              quantity: i.quantity,
+              selectedOptions: i.selectedOptions
+          }))
       };
   };
 
@@ -1223,12 +1233,17 @@ const handlePlaceOrder = async (
           .single();
           
       if (error || !data) return null;
+
+      // Pedido concluído ou cancelado: encerra o acompanhamento do cliente
+      if (data.status === 'delivered' || data.status === 'cancelled') return null;
       
-      let trackingStatus: 'pending_payment' | 'preparing' | 'dispatched' = 'preparing';
+      let trackingStatus: 'pending_payment' | 'preparing' | 'ready' | 'out_for_delivery' = 'preparing';
       if (data.status === 'waiting_payment' || (data.status === 'pending' && data.paymentMethod === 'pix')) {
           trackingStatus = 'pending_payment';
-      } else if (data.status === 'delivering' || data.status === 'ready') {
-          trackingStatus = 'dispatched';
+      } else if (data.status === 'delivering') {
+          trackingStatus = 'out_for_delivery';
+      } else if (data.status === 'ready') {
+          trackingStatus = 'ready';
       }
 
       return {
@@ -1237,7 +1252,12 @@ const handlePlaceOrder = async (
           paymentMethod: data.paymentMethod,
           customerName: data.customerName,
           status: trackingStatus,
-          timestamp: Date.now() // injeta novo timestamp
+          timestamp: Date.now(), // injeta novo timestamp
+          items: (data.items || []).map((i: any) => ({
+              name: i.productName,
+              quantity: i.quantity,
+              selectedOptions: i.selectedOptions
+          }))
       };
   };
 
