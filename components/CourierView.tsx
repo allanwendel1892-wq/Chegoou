@@ -410,7 +410,7 @@ const CourierView: React.FC<CourierViewProps> = ({
             {/* Lista das Últimas Corridas Concluídas */}
             <div className="mt-6">
                 <h3 className="font-bold text-gray-700 mb-3 flex items-center gap-2">
-                    <CheckCircle className="w-4 h-4 text-green-500" /> Últimas corridas entregues (Hoje)
+                    <CheckCircle className="w-4 h-4 text-green-500" /> Últimas corridas entregues
                 </h3>
                 {todaysCompletedOrders.length === 0 ? (
                     <p className="text-sm text-gray-500 text-center py-4">Você ainda não realizou nenhuma entrega hoje.</p>
