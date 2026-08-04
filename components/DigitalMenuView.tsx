@@ -1,3 +1,5 @@
+//Versão Atualizada
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { Company, Product, ProductOption } from '../types';
 import {
