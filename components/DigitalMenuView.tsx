@@ -4,6 +4,7 @@ import {
     ShoppingBag, MapPin, Bike, Clock, ChevronRight, ChevronLeft,
     X, CheckCircle, Store, DollarSign, CreditCard, QrCode, Loader2, User, Truck, AlertTriangle, Search, RefreshCw, Copy
 } from 'lucide-react';
+import { RefreshCw, Utensils } from 'lucide-react';
 
 export interface ActiveOrder {
     id: string;
@@ -797,7 +798,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                 onClick={() => window.location.reload()} 
                                 className="w-full bg-white border border-gray-300 text-gray-700 font-bold py-3.5 rounded-xl shadow-sm hover:bg-gray-50 flex justify-center items-center gap-2"
                             >
-                                <RefreshCw className="w-5 h-5" /> Atualizar Status
+                                <Utensils className="w-5 h-5 text-gray-500" /> Cardápio
                             </button>
                             <button 
     onClick={handleRefreshStatus} 
@@ -805,7 +806,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
     className="w-full bg-white border border-gray-300 text-gray-700 font-bold py-3.5 rounded-xl shadow-sm hover:bg-gray-50 flex justify-center items-center gap-2"
 >
     <RefreshCw className={`w-5 h-5 ${isRefreshingStatus ? 'animate-spin' : ''}`} /> 
-    {isRefreshingStatus ? 'Atualizando...' : 'Voltar ao Menu'}
+    {isRefreshingStatus ? 'Atualizando...' : 'Atualizar Status'}
 </button>
                         </div>
                     </div>
