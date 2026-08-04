@@ -1053,35 +1053,32 @@ const handlePlaceOrder = async (
       changeFor?: number, 
       couponCode?: string, 
       discountAmount?: number,
-      guestData?: { name: string, phone: string, address: any } // NOVO: Suporte para cliente sem login
-  ): Promise<boolean> => {
+      guestData?: { name: string, phone: string, address: any }
+  ): Promise<string | null> => { // 1. ALTERADO O TIPO DE RETORNO
     
-    // 1. Identificação do Cliente (Logado no App ou Visitante no Cardápio Digital)
     const customerId = currentUser ? currentUser.id : undefined;
     const customerName = currentUser ? currentUser.name : guestData?.name || 'Cliente Avulso';
     const customerPhone = currentUser ? currentUser.phone : guestData?.phone || '';
     const deliveryAddress = currentUser ? currentUser.address : guestData?.address;
 
-    // 2. Validação de Endereço (Apenas se for entrega)
     if (deliveryMethod === 'delivery' && !deliveryAddress) {
         alert("Erro: Por favor, informe um endereço de entrega válido.");
-        return false;
+        return null; // 2. SUBSTITUÍDO false POR null
     }
     
     const company = companies.find(c => c.id === companyId);
     if (!company) {
         alert("Erro: Empresa não identificada.");
-        return false;
+        return null; // 2. SUBSTITUÍDO false POR null
     }
 
     const isGuest = !currentUser;
     const isOnlinePayment = paymentMethod !== 'cash';
-    const FIXED_SERVICE_FEE = isGuest ? 0 : 0.49; // Taxa de serviço zerada para o cardápio digital
+    const FIXED_SERVICE_FEE = isGuest ? 0 : 0.49; 
     
     let repasseValue = 0;
     const subtotalAfterDiscount = subtotal - (discountAmount || 0);
 
-    // Lógica de Repasse Financeiro (Apenas para pedidos via App)
     if (!isGuest) {
         if (isOnlinePayment) {
             if (company.deliveryType === 'own') {
@@ -1090,7 +1087,6 @@ const handlePlaceOrder = async (
                 repasseValue = subtotalAfterDiscount;
             }
         } else {
-            // Pedido em dinheiro: Calcula débito das taxas
             if (company.deliveryType === 'chegoou') {
                 repasseValue = -1 * (deliveryFee + FIXED_SERVICE_FEE);
             } else {
@@ -1099,7 +1095,6 @@ const handlePlaceOrder = async (
         }
     }
 
-    // Instancia novo objeto de Pedido
     const newOrder: Order = {
         id: `ord-${Date.now()}`,
         companyId,
@@ -1121,7 +1116,6 @@ const handlePlaceOrder = async (
         deliveryMethod: deliveryMethod,
         paymentMethod: paymentMethod,
         changeFor: changeFor,
-        // Visitantes entram como 'pending' direto para o restaurante aceitar e cobrar no local
         status: isGuest ? 'pending' : (paymentMethod === 'cash' ? 'pending' : 'waiting_payment'),
         timestamp: new Date(),
         deliveryCode: customerPhone.slice(-4) || '0000',
@@ -1130,7 +1124,6 @@ const handlePlaceOrder = async (
         deliveryType: company.deliveryType,
         paymentStatus: 'pending',
         repasseValue: repasseValue,
-        // O app não gerencia o dinheiro do visitante, então o repasse é ignorado
         repasseStatus: isGuest ? 'ignored' : 'pending',
         couponCode: couponCode,
         discountAmount: discountAmount
@@ -1140,28 +1133,24 @@ const handlePlaceOrder = async (
     
     if (error) {
         alert("Erro técnico ao registrar pedido: " + error.message);
-        return false;
+        return null; // 2. SUBSTITUÍDO false POR null
     }
 
-    // Processamento de Pagamento Digital
-    // Somente usuários logados passam pelo gateway. Visitantes pagam presencialmente.
     if (!isGuest && paymentMethod !== 'cash') {
         try {
             const paymentResponse = await PaymentService.processPayment(
                 finalTotal,
                 paymentMethod,
-                currentUser!, // Uso ! pois já validamos que !isGuest
+                currentUser!, 
                 `Pedido #${newOrder.id} - ${company.name}`,
                 newOrder.id
             );
 
-            // Caso de Cartão / Link Externo
             if (paymentResponse.ticketUrl && !paymentResponse.copyPaste && !paymentResponse.qrCodeBase64) {
                 window.location.assign(paymentResponse.ticketUrl);
-                return true; 
+                return newOrder.id; // 3. SUBSTITUÍDO true POR newOrder.id
             }
 
-            // Caso de PIX (QR Code e Copia/Cola)
             if (paymentMethod === 'pix' && (paymentResponse.copyPaste || paymentResponse.qrCodeBase64)) {
                  await supabase.from('orders').update({
                     paymentPixCode: paymentResponse.copyPaste,
@@ -1173,17 +1162,53 @@ const handlePlaceOrder = async (
             if (!paymentResponse.success) {
                 alert("Pagamento negado: " + paymentResponse.message);
                 await supabase.from('orders').update({ status: 'cancelled' }).eq('id', newOrder.id);
-                return false;
+                return null; // 2. SUBSTITUÍDO false POR null
             }
 
         } catch (e: any) {
             alert("Falha crítica no checkout: " + (e.message || "Erro de conexão com o gateway."));
-            return false;
+            return null; // 2. SUBSTITUÍDO false POR null
         }
     }
 
     showInAppNotification("Pedido Criado!", "Seu pedido foi enviado com sucesso!", "🍟");
-    return true;
+    return newOrder.id; // 3. SUBSTITUÍDO true POR newOrder.id
+  };
+
+    /**
+   * Busca pedido ativo pelo número do WhatsApp (Para Cardápio Digital Público)
+   */
+  const handleTrackByPhone = async (phone: string) => {
+      const formattedPhone = normalizeWhatsApp(phone);
+      
+      const { data, error } = await supabase
+          .from('orders')
+          .select('*')
+          .eq('customerPhone', formattedPhone)
+          .in('status', ['waiting_payment', 'pending', 'preparing', 'ready', 'delivering'])
+          .order('timestamp', { ascending: false })
+          .limit(1)
+          .single();
+          
+      if (error || !data) return null;
+      
+      // Adaptando o status do banco para o padrão da nova interface
+      let trackingStatus: 'pending_payment' | 'preparing' | 'dispatched' = 'preparing';
+      
+      if (data.status === 'waiting_payment' || (data.status === 'pending' && data.paymentMethod === 'pix')) {
+          trackingStatus = 'pending_payment';
+      } else if (data.status === 'delivering' || data.status === 'ready') {
+          trackingStatus = 'dispatched';
+      }
+
+      return {
+          id: data.id,
+          total: data.total,
+          paymentMethod: data.paymentMethod,
+          customerName: data.customerName,
+          status: trackingStatus,
+          timestamp: Date.now() // injeta timestamp novo para prolongar cache
+      };
   };
 
   /**
@@ -1466,6 +1491,7 @@ const handlePlaceOrder = async (
                   company={publicMenuCompany}
                   products={products.filter(p => p.companyId === publicMenuCompany.id)}
                   onPlaceOrder={handlePlaceOrder}
+                  onTrackOrderByPhone={handleTrackByPhone} // <-- ESSA É A ÚNICA LINHA NOVA
               />
           </Suspense>
       );
