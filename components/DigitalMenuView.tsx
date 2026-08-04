@@ -32,6 +32,7 @@ interface DigitalMenuViewProps {
         customerData?: { name: string, phone: string, address: any }
     ) => Promise<string | null>; // Alterado para retornar o ID do pedido
     onTrackOrderByPhone?: (phone: string) => Promise<ActiveOrder | null>; // Nova prop adicionada
+    onTrackOrderById?: (orderId: string) => Promise<ActiveOrder | null>;
 }
 
 // --- GERADOR PIX (BR CODE EMV) - VALIDADO BACEN ---
@@ -93,6 +94,28 @@ const CHECKOUT_STEPS = [
 ] as const;
 const TOTAL_STEPS = CHECKOUT_STEPS.length;
 
+const [isRefreshingStatus, setIsRefreshingStatus] = useState(false);
+
+const handleRefreshStatus = async () => {
+    if (!activeOrder || !onTrackOrderById) return;
+    setIsRefreshingStatus(true);
+    try {
+        const freshOrder = await onTrackOrderById(activeOrder.id);
+        if (freshOrder) {
+            setActiveOrder(freshOrder);
+            localStorage.setItem('@MenuApp:activeOrder', JSON.stringify(freshOrder));
+        } else {
+            alert("Este pedido foi concluído, cancelado ou não está mais ativo.");
+            localStorage.removeItem('@MenuApp:activeOrder');
+            setActiveOrder(null);
+            setIsTrackingViewOpen(false);
+        }
+    } catch (error) {
+        console.error("Erro ao atualizar status", error);
+    } finally {
+        setIsRefreshingStatus(false);
+    }
+};
 const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, onPlaceOrder, onTrackOrderByPhone }) => {
     // Estados do Carrinho
     const [cart, setCart] = useState<{ product: Product, quantity: number, selectedOptions?: { groupName: string, optionName: string, price: number }[], finalPrice: number }[]>([]);
@@ -150,28 +173,41 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
         return generatePixPayload(company.pixKey, company.pixKeyType || 'email', company.name, company.address?.city || 'Brasil', activeOrder.total, activeOrder.customerName);
     }, [activeOrder, company]);
 
-    // SISTEMA DE SOBREVIVÊNCIA (Cache de 2h via localStorage)
-    useEffect(() => {
-        const checkCache = () => {
-            const savedOrderStr = localStorage.getItem('@MenuApp:activeOrder');
-            if (savedOrderStr) {
-                try {
-                    const savedOrder: ActiveOrder = JSON.parse(savedOrderStr);
-                    const now = Date.now();
-                    const diffHours = (now - savedOrder.timestamp) / (1000 * 60 * 60);
+    // SISTEMA DE SOBREVIVÊNCIA (Cache de 2h via localStorage + Atualização em background)
+useEffect(() => {
+    const checkCache = async () => {
+        const savedOrderStr = localStorage.getItem('@MenuApp:activeOrder');
+        if (savedOrderStr) {
+            try {
+                const savedOrder: ActiveOrder = JSON.parse(savedOrderStr);
+                const now = Date.now();
+                const diffHours = (now - savedOrder.timestamp) / (1000 * 60 * 60);
+                
+                if (diffHours < 2) {
+                    setActiveOrder(savedOrder); // Exibe o cache imediatamente para não piscar a tela
                     
-                    if (diffHours < 2) {
-                        setActiveOrder(savedOrder);
-                    } else {
-                        localStorage.removeItem('@MenuApp:activeOrder');
+                    // Vai no banco e busca se houve mudança de status silenciosamente
+                    if (onTrackOrderById) {
+                        const freshOrder = await onTrackOrderById(savedOrder.id);
+                        if (freshOrder) {
+                            setActiveOrder(freshOrder);
+                            localStorage.setItem('@MenuApp:activeOrder', JSON.stringify(freshOrder));
+                        } else {
+                            localStorage.removeItem('@MenuApp:activeOrder');
+                            setActiveOrder(null);
+                        }
                     }
-                } catch (e) {
+                } else {
                     localStorage.removeItem('@MenuApp:activeOrder');
                 }
+            } catch (e) {
+                localStorage.removeItem('@MenuApp:activeOrder');
             }
-        };
-        checkCache();
-    }, []);
+        }
+    };
+    checkCache();
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
 
     useEffect(() => {
         if (isCartOpen) { setCheckoutStep(1); setStepError(null); }
@@ -694,7 +730,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                     <div className="bg-white border-b border-gray-200 p-4 sticky top-0 z-10 flex justify-between items-center shadow-sm">
                         <div>
                             <h2 className="font-bold text-gray-900">Acompanhar Pedido</h2>
-                            <p className="text-xs text-gray-500">ID: {activeOrder.id.substring(0, 8).toUpperCase()}</p>
+                            <p className="text-xs text-gray-500">ID: {activeOrder.id.slice(-6).toUpperCase()}</p>
                         </div>
                         <button onClick={() => setIsTrackingViewOpen(false)} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full">
                             <X className="w-5 h-5 text-gray-600" />
@@ -763,11 +799,13 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                 <RefreshCw className="w-5 h-5" /> Atualizar Status
                             </button>
                             <button 
-                                onClick={() => setIsTrackingViewOpen(false)} 
-                                className="w-full bg-gray-100 text-gray-600 font-bold py-3.5 rounded-xl hover:bg-gray-200 transition-colors"
-                            >
-                                Voltar ao Cardápio
-                            </button>
+    onClick={handleRefreshStatus} 
+    disabled={isRefreshingStatus}
+    className="w-full bg-white border border-gray-300 text-gray-700 font-bold py-3.5 rounded-xl shadow-sm hover:bg-gray-50 flex justify-center items-center gap-2"
+>
+    <RefreshCw className={`w-5 h-5 ${isRefreshingStatus ? 'animate-spin' : ''}`} /> 
+    {isRefreshingStatus ? 'Atualizando...' : 'Atualizar Status'}
+</button>
                         </div>
                     </div>
                 </div>
