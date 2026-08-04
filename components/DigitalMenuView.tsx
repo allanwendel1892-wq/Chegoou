@@ -94,29 +94,7 @@ const CHECKOUT_STEPS = [
 ] as const;
 const TOTAL_STEPS = CHECKOUT_STEPS.length;
 
-const [isRefreshingStatus, setIsRefreshingStatus] = useState(false);
-
-const handleRefreshStatus = async () => {
-    if (!activeOrder || !onTrackOrderById) return;
-    setIsRefreshingStatus(true);
-    try {
-        const freshOrder = await onTrackOrderById(activeOrder.id);
-        if (freshOrder) {
-            setActiveOrder(freshOrder);
-            localStorage.setItem('@MenuApp:activeOrder', JSON.stringify(freshOrder));
-        } else {
-            alert("Este pedido foi concluído, cancelado ou não está mais ativo.");
-            localStorage.removeItem('@MenuApp:activeOrder');
-            setActiveOrder(null);
-            setIsTrackingViewOpen(false);
-        }
-    } catch (error) {
-        console.error("Erro ao atualizar status", error);
-    } finally {
-        setIsRefreshingStatus(false);
-    }
-};
-const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, onPlaceOrder, onTrackOrderByPhone }) => {
+const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, onPlaceOrder, onTrackOrderByPhone, onTrackOrderById }) => {
     // Estados do Carrinho
     const [cart, setCart] = useState<{ product: Product, quantity: number, selectedOptions?: { groupName: string, optionName: string, price: number }[], finalPrice: number }[]>([]);
     const [isCartOpen, setIsCartOpen] = useState(false);
@@ -137,13 +115,36 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
     const [changeAmount, setChangeAmount] = useState<string>('');
     const [isProcessing, setIsProcessing] = useState(false);
 
-    // Novos Estados Arquiteturais (Acompanhamento e Cache)
+    // Novos Estados Arquiteturais (Acompanhamento, Cache e Refresh)
     const [activeOrder, setActiveOrder] = useState<ActiveOrder | null>(null);
     const [isTrackingViewOpen, setIsTrackingViewOpen] = useState(false);
     const [isTrackModalOpen, setIsTrackModalOpen] = useState(false);
     const [trackPhoneInput, setTrackPhoneInput] = useState('');
     const [isSearchingPhone, setIsSearchingPhone] = useState(false);
     const [trackModalError, setTrackModalError] = useState('');
+    const [isRefreshingStatus, setIsRefreshingStatus] = useState(false);
+
+    // Função de Refresh de Status agora dentro do escopo correto
+    const handleRefreshStatus = async () => {
+        if (!activeOrder || !onTrackOrderById) return;
+        setIsRefreshingStatus(true);
+        try {
+            const freshOrder = await onTrackOrderById(activeOrder.id);
+            if (freshOrder) {
+                setActiveOrder(freshOrder);
+                localStorage.setItem('@MenuApp:activeOrder', JSON.stringify(freshOrder));
+            } else {
+                alert("Este pedido foi concluído, cancelado ou não está mais ativo.");
+                localStorage.removeItem('@MenuApp:activeOrder');
+                setActiveOrder(null);
+                setIsTrackingViewOpen(false);
+            }
+        } catch (error) {
+            console.error("Erro ao atualizar status", error);
+        } finally {
+            setIsRefreshingStatus(false);
+        }
+    };
 
     // Estados do Menu
     const [selectedCategory, setSelectedCategory] = useState<string>('Tudo');
@@ -174,41 +175,41 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
     }, [activeOrder, company]);
 
     // SISTEMA DE SOBREVIVÊNCIA (Cache de 2h via localStorage + Atualização em background)
-useEffect(() => {
-    const checkCache = async () => {
-        const savedOrderStr = localStorage.getItem('@MenuApp:activeOrder');
-        if (savedOrderStr) {
-            try {
-                const savedOrder: ActiveOrder = JSON.parse(savedOrderStr);
-                const now = Date.now();
-                const diffHours = (now - savedOrder.timestamp) / (1000 * 60 * 60);
-                
-                if (diffHours < 2) {
-                    setActiveOrder(savedOrder); // Exibe o cache imediatamente para não piscar a tela
+    useEffect(() => {
+        const checkCache = async () => {
+            const savedOrderStr = localStorage.getItem('@MenuApp:activeOrder');
+            if (savedOrderStr) {
+                try {
+                    const savedOrder: ActiveOrder = JSON.parse(savedOrderStr);
+                    const now = Date.now();
+                    const diffHours = (now - savedOrder.timestamp) / (1000 * 60 * 60);
                     
-                    // Vai no banco e busca se houve mudança de status silenciosamente
-                    if (onTrackOrderById) {
-                        const freshOrder = await onTrackOrderById(savedOrder.id);
-                        if (freshOrder) {
-                            setActiveOrder(freshOrder);
-                            localStorage.setItem('@MenuApp:activeOrder', JSON.stringify(freshOrder));
-                        } else {
-                            localStorage.removeItem('@MenuApp:activeOrder');
-                            setActiveOrder(null);
+                    if (diffHours < 2) {
+                        setActiveOrder(savedOrder); // Exibe o cache imediatamente para não piscar a tela
+                        
+                        // Vai no banco e busca se houve mudança de status silenciosamente
+                        if (onTrackOrderById) {
+                            const freshOrder = await onTrackOrderById(savedOrder.id);
+                            if (freshOrder) {
+                                setActiveOrder(freshOrder);
+                                localStorage.setItem('@MenuApp:activeOrder', JSON.stringify(freshOrder));
+                            } else {
+                                localStorage.removeItem('@MenuApp:activeOrder');
+                                setActiveOrder(null);
+                            }
                         }
+                    } else {
+                        localStorage.removeItem('@MenuApp:activeOrder');
                     }
-                } else {
+                } catch (e) {
                     localStorage.removeItem('@MenuApp:activeOrder');
                 }
-            } catch (e) {
-                localStorage.removeItem('@MenuApp:activeOrder');
             }
-        }
-    };
-    checkCache();
-// eslint-disable-next-line react-hooks/exhaustive-deps
-}, []);
-
+        };
+        checkCache();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    
     useEffect(() => {
         if (isCartOpen) { setCheckoutStep(1); setStepError(null); }
     }, [isCartOpen]);
