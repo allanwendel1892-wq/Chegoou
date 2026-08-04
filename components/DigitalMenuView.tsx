@@ -13,8 +13,9 @@ export interface ActiveOrder {
     total: number;
     paymentMethod: 'cash' | 'card' | 'pix';
     customerName: string;
-    status: 'pending_payment' | 'preparing' | 'dispatched';
+    status: 'pending_payment' | 'preparing' | 'ready' | 'out_for_delivery';
     timestamp: number;
+    items?: { name: string; quantity: number; selectedOptions?: { groupName?: string; optionName: string; price?: number }[] }[];
 }
 
 interface DigitalMenuViewProps {
@@ -377,7 +378,8 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
         switch (status) {
             case 'pending_payment': return 'Pendente';
             case 'preparing': return 'Preparando';
-            case 'dispatched': return 'Pronto';
+            case 'ready': return 'Pronto';
+            case 'out_for_delivery': return 'Em rota';
             default: return 'Processando...';
         }
     };
@@ -745,16 +747,41 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                         {/* Status do Pedido */}
                         <div className={`w-full p-4 rounded-xl border mb-6 text-center ${
                             activeOrder.status === 'pending_payment' ? 'bg-yellow-50 border-yellow-200' :
-                            activeOrder.status === 'preparing' ? 'bg-blue-50 border-blue-200' : 'bg-green-50 border-green-200'
+                            activeOrder.status === 'preparing' ? 'bg-blue-50 border-blue-200' :
+                            activeOrder.status === 'ready' ? 'bg-teal-50 border-teal-200' :
+                            'bg-green-50 border-green-200'
                         }`}>
                             <p className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">Status Atual</p>
                             <h3 className={`font-bold text-lg ${
                                 activeOrder.status === 'pending_payment' ? 'text-yellow-800' :
-                                activeOrder.status === 'preparing' ? 'text-blue-800' : 'text-green-800'
+                                activeOrder.status === 'preparing' ? 'text-blue-800' :
+                                activeOrder.status === 'ready' ? 'text-teal-800' :
+                                'text-green-800'
                             }`}>
                                 {getStatusText(activeOrder.status)}
                             </h3>
                         </div>
+
+                        {/* Itens do Pedido */}
+                        {activeOrder.items && activeOrder.items.length > 0 && (
+                            <div className="w-full bg-white p-5 rounded-2xl shadow-sm border border-gray-100 mb-6">
+                                <h3 className="font-bold text-gray-900 mb-3 text-sm">Seu Pedido</h3>
+                                <div className="space-y-3">
+                                    {activeOrder.items.map((item, idx) => (
+                                        <div key={idx} className="flex justify-between items-start text-sm border-b border-gray-50 pb-3 last:border-0 last:pb-0">
+                                            <div>
+                                                <p className="font-bold text-gray-800">{item.quantity}x {item.name}</p>
+                                                {item.selectedOptions && item.selectedOptions.length > 0 && (
+                                                    <p className="text-xs text-gray-500 mt-0.5">
+                                                        {item.selectedOptions.map(o => o.optionName).join(', ')}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
                         {/* Área de Pagamento (PIX) */}
                         {activeOrder.status === 'pending_payment' && activeOrder.paymentMethod === 'pix' && trackingPixPayload && (
