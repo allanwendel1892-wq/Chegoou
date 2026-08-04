@@ -372,9 +372,9 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
 
     const getStatusText = (status: ActiveOrder['status']) => {
         switch (status) {
-            case 'pending_payment': return 'Aguardando Pagamento/Confirmação';
+            case 'pending_payment': return 'Pendente';
             case 'preparing': return 'Sendo Preparado';
-            case 'dispatched': return 'Saiu para Entrega / Disponível para Retirada';
+            case 'dispatched': return 'Pronto';
             default: return 'Processando...';
         }
     };
