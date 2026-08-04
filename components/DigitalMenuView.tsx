@@ -805,7 +805,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
     className="w-full bg-white border border-gray-300 text-gray-700 font-bold py-3.5 rounded-xl shadow-sm hover:bg-gray-50 flex justify-center items-center gap-2"
 >
     <RefreshCw className={`w-5 h-5 ${isRefreshingStatus ? 'animate-spin' : ''}`} /> 
-    {isRefreshingStatus ? 'Atualizando...' : 'Atualizar Status'}
+    {isRefreshingStatus ? 'Atualizando...' : 'Voltar ao Menu'}
 </button>
                         </div>
                     </div>
