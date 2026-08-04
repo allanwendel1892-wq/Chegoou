@@ -1058,7 +1058,8 @@ const handlePlaceOrder = async (
     
     const customerId = currentUser ? currentUser.id : undefined;
     const customerName = currentUser ? currentUser.name : guestData?.name || 'Cliente Avulso';
-    const customerPhone = currentUser ? currentUser.phone : guestData?.phone || '';
+    const rawPhone = currentUser ? currentUser.phone : guestData?.phone || '';
+    const customerPhone = normalizeWhatsApp(rawPhone);
     const deliveryAddress = currentUser ? currentUser.address : guestData?.address;
 
     if (deliveryMethod === 'delivery' && !deliveryAddress) {
@@ -1208,6 +1209,35 @@ const handlePlaceOrder = async (
           customerName: data.customerName,
           status: trackingStatus,
           timestamp: Date.now() // injeta timestamp novo para prolongar cache
+      };
+  };
+
+    /**
+   * Busca pedido ativo pelo ID (Para atualizar o status na tela de Rastreio)
+   */
+  const handleTrackOrderById = async (orderId: string) => {
+      const { data, error } = await supabase
+          .from('orders')
+          .select('*')
+          .eq('id', orderId)
+          .single();
+          
+      if (error || !data) return null;
+      
+      let trackingStatus: 'pending_payment' | 'preparing' | 'dispatched' = 'preparing';
+      if (data.status === 'waiting_payment' || (data.status === 'pending' && data.paymentMethod === 'pix')) {
+          trackingStatus = 'pending_payment';
+      } else if (data.status === 'delivering' || data.status === 'ready') {
+          trackingStatus = 'dispatched';
+      }
+
+      return {
+          id: data.id,
+          total: data.total,
+          paymentMethod: data.paymentMethod,
+          customerName: data.customerName,
+          status: trackingStatus,
+          timestamp: Date.now() // injeta novo timestamp
       };
   };
 
@@ -1491,7 +1521,8 @@ const handlePlaceOrder = async (
                   company={publicMenuCompany}
                   products={products.filter(p => p.companyId === publicMenuCompany.id)}
                   onPlaceOrder={handlePlaceOrder}
-                  onTrackOrderByPhone={handleTrackByPhone} // <-- ESSA É A ÚNICA LINHA NOVA
+                  onTrackOrderByPhone={handleTrackByPhone}
+                  onTrackOrderById={handleTrackOrderById}
               />
           </Suspense>
       );
