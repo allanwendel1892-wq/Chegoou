@@ -101,6 +101,80 @@ const prepareProductPayload = (product: Product) => {
 };
 
 /**
+ * Enriquece os produtos buscados com os ingredientes (ficha técnica),
+ * lendo `compositions` + `inventory_items` e injetando o resultado
+ * na propriedade `description` de cada `option` dentro de `groups`.
+ */
+const enrichProductsWithIngredients = async (fetchedProducts: Product[]): Promise<Product[]> => {
+    if (!fetchedProducts || fetchedProducts.length === 0) return fetchedProducts;
+
+    try {
+        const [{ data: compositions, error: compositionsError }, { data: inventoryItems, error: inventoryError }] =
+            await Promise.all([
+                supabase.from('compositions').select('*'),
+                supabase.from('inventory_items').select('id, name')
+            ]);
+
+        if (compositionsError) throw compositionsError;
+        if (inventoryError) throw inventoryError;
+        if (!compositions || !inventoryItems) return fetchedProducts;
+
+        // Mapa id -> name dos insumos
+        const inventoryMap = new Map<string, string>();
+        inventoryItems.forEach((item: any) => {
+            inventoryMap.set(String(item.id), item.name);
+        });
+
+        // Agrupa os nomes de ingredientes por reference_id (sabor/opção)
+        const ingredientsByReference = new Map<string, string[]>();
+        compositions.forEach((comp: any) => {
+            const referenceId = comp.reference_id ?? comp.referenceId;
+            const inventoryItemId = comp.inventory_item_id ?? comp.inventoryItemId;
+            if (!referenceId || !inventoryItemId) return;
+
+            const ingredientName = inventoryMap.get(String(inventoryItemId));
+            if (!ingredientName) return;
+
+            const key = String(referenceId);
+            if (!ingredientsByReference.has(key)) {
+                ingredientsByReference.set(key, []);
+            }
+            ingredientsByReference.get(key)!.push(ingredientName);
+        });
+
+        // Mapeia os produtos, injetando os ingredientes em cada option
+        return fetchedProducts.map((product) => {
+            if (!product.groups || !Array.isArray(product.groups)) return product;
+
+            const updatedGroups = product.groups.map((group: any) => {
+                if (!group.options || !Array.isArray(group.options)) return group;
+
+                const updatedOptions = group.options.map((option: any) => {
+                    const ingredientsByName = option.name ? ingredientsByReference.get(String(option.name)) : undefined;
+                    const ingredientsById = option.id ? ingredientsByReference.get(String(option.id)) : undefined;
+                    const ingredients = ingredientsByName || ingredientsById;
+
+                    if (ingredients && ingredients.length > 0) {
+                        return {
+                            ...option,
+                            description: ingredients.join(', ')
+                        };
+                    }
+                    return option;
+                });
+
+                return { ...group, options: updatedOptions };
+            });
+
+            return { ...product, groups: updatedGroups };
+        });
+    } catch (error) {
+        console.error("Erro ao enriquecer produtos com ingredientes:", error);
+        return fetchedProducts;
+    }
+};
+
+/**
  * Normalização de números de WhatsApp para o formato internacional
  */
 const normalizeWhatsApp = (phone: string) => {
@@ -570,7 +644,10 @@ if (!shouldFetch) return;
           if (productsErr) throw productsErr;
 
           if (singleCompany) setCompanies(singleCompany);
-          if (storeProducts) setProducts(storeProducts);
+          if (storeProducts) {
+              const enrichedProducts = await enrichProductsWithIngredients(storeProducts);
+              setProducts(enrichedProducts);
+          }
       } catch (error: any) {
           console.error("Erro ao carregar cardápio digital:", error);
           setMenuError(error.message || "Não foi possível carregar o cardápio agora.");
@@ -593,7 +670,10 @@ if (!shouldFetch) return;
           // Busca de Produtos
           const { data: productsData, error: productsError } = await supabase.from('products').select('*').limit(5000);
           if (productsError) throw productsError;
-          if (productsData) setProducts(productsData);
+          if (productsData) {
+              const enrichedProducts = await enrichProductsWithIngredients(productsData);
+              setProducts(enrichedProducts);
+          }
 
           // Busca de Pedidos
           const { data: ordersData, error: ordersError } = await supabase.from('orders').select('*').limit(5000);
