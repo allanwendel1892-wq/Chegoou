@@ -62,11 +62,32 @@ const CourierView: React.FC<CourierViewProps> = ({
   // Pedidos concluídos por ESTE motoboy HOJE (Usado apenas para visualização)
   const todaysCompletedOrders = useMemo(() => {
     const today = new Date().toDateString();
+    
     return myCompletedOrders.filter(order => {
-        // Tenta pegar a data de atualização, criação ou data genérica (fazendo cast para evitar erros de tipagem)
-        const dateStr = (order as any).updatedAt || (order as any).createdAt || (order as any).date;
-        if (!dateStr) return true; // Se não encontrar campo de data, mantém na lista por segurança
-        return new Date(dateStr).toDateString() === today;
+        const o = order as any;
+        // Busca os campos de data mais comuns do banco de dados (inclusive Firebase/Firestore)
+        const rawDate = o.deliveredAt || o.updatedAt || o.createdAt || o.timestamp || o.date;
+        
+        // CORREÇÃO: Se não acharmos nenhuma data atrelada, NÃO exibimos na lista de "Hoje" para não vazar históricos antigos
+        if (!rawDate) return false; 
+
+        try {
+            let parsedDate: Date;
+            
+            // Tratamento caso o banco retorne um Timestamp do Firestore (objeto com seconds)
+            if (typeof rawDate === 'object' && rawDate.seconds) {
+                parsedDate = new Date(rawDate.seconds * 1000);
+            } else {
+                parsedDate = new Date(rawDate);
+            }
+
+            // Se a conversão gerar uma data inválida, ignoramos
+            if (isNaN(parsedDate.getTime())) return false;
+
+            return parsedDate.toDateString() === today;
+        } catch (error) {
+            return false;
+        }
     });
   }, [myCompletedOrders]);
 
