@@ -138,7 +138,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                 setActiveOrder(freshOrder);
                 localStorage.setItem('@MenuApp:activeOrder', JSON.stringify(freshOrder));
             } else {
-                alert("Este pedido foi concluído, cancelado ou não está mais ativo.");
+                alert("Nenhum pedido em andamento foi encontrado.");
                 localStorage.removeItem('@MenuApp:activeOrder');
                 setActiveOrder(null);
                 setIsTrackingViewOpen(false);
