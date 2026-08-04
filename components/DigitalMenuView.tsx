@@ -5,6 +5,8 @@ import {
     X, CheckCircle, Store, DollarSign, CreditCard, QrCode, Loader2, User, Truck, AlertTriangle, Search, RefreshCw, Copy
 } from 'lucide-react';
 import { RefreshCw, Utensils } from 'lucide-react';
+import { BookOpen } from 'lucide-react';
+import { Menu } from 'lucide-react';
 
 export interface ActiveOrder {
     id: string;
@@ -798,7 +800,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                 onClick={() => window.location.reload()} 
                                 className="w-full bg-white border border-gray-300 text-gray-700 font-bold py-3.5 rounded-xl shadow-sm hover:bg-gray-50 flex justify-center items-center gap-2"
                             >
-                                <Utensils className="w-5 h-5 text-gray-500" /> Cardápio
+                                <BookOpen className="w-5 h-5 text-gray-500" /> Cardápio
                             </button>
                             <button 
     onClick={handleRefreshStatus} 
