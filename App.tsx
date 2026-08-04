@@ -386,13 +386,15 @@ const App: React.FC = () => {
     const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent);
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
     
-    if (isIos && !isStandalone) {
+    // Adicionamos "!publicMenuCompanyId" para que o alerta NÃO dispare na tela do Cardápio Digital
+    if (isIos && !isStandalone && !publicMenuCompanyId) {
       setTimeout(() => {
         alert("Dica Chegoou: Para instalar o App, clique no ícone de 'Compartilhar' no seu Safari e escolha 'Adicionar à Tela de Início' 📲");
       }, 6000);
     }
-  }, []);
+  }, [publicMenuCompanyId]); // Variável adicionada ao array de dependências
 
+    
   /**
    * Processamento de retorno de pagamento (Mercado Pago / Outros)
    */
