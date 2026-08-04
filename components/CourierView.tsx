@@ -51,13 +51,24 @@ const CourierView: React.FC<CourierViewProps> = ({
     );
   }, [availableOrders, courier.id]);
 
-  // Pedidos concluídos por ESTE motoboy
+  // Pedidos concluídos por ESTE motoboy (Usado para o financeiro)
   const myCompletedOrders = useMemo(() => {
     return (availableOrders || []).filter(o => 
         o.courierId === courier.id && 
         o.status === 'delivered'
     );
   }, [availableOrders, courier.id]);
+
+  // Pedidos concluídos por ESTE motoboy HOJE (Usado apenas para visualização)
+  const todaysCompletedOrders = useMemo(() => {
+    const today = new Date().toDateString();
+    return myCompletedOrders.filter(order => {
+        // Tenta pegar a data de atualização, criação ou data genérica (fazendo cast para evitar erros de tipagem)
+        const dateStr = (order as any).updatedAt || (order as any).createdAt || (order as any).date;
+        if (!dateStr) return true; // Se não encontrar campo de data, mantém na lista por segurança
+        return new Date(dateStr).toDateString() === today;
+    });
+  }, [myCompletedOrders]);
 
   // CORREÇÃO CRÍTICA 1: O banco de dados usa "userId" para registrar o dono do saque. 
   // Se o frontend tentar usar só courierId, ele não acha os saques antigos e o saldo fica infinito.
@@ -310,7 +321,6 @@ const CourierView: React.FC<CourierViewProps> = ({
                 <div className="mt-6 pt-4 border-t border-gray-700 flex justify-between items-center">
                     <div>
                         <p className="text-gray-400 text-xs">Total já recebido</p>
-                        {/* CORREÇÃO CRÍTICA 3: Aqui estava escrito {totalEarned.toFixed(2)}, causando a tela branca porque essa variável não existia. Substituído corretamente por totalRecebido. */}
                         <p className="font-bold">R$ {totalRecebido.toFixed(2)}</p>
                     </div>
                     <div className="text-right">
@@ -379,13 +389,13 @@ const CourierView: React.FC<CourierViewProps> = ({
             {/* Lista das Últimas Corridas Concluídas */}
             <div className="mt-6">
                 <h3 className="font-bold text-gray-700 mb-3 flex items-center gap-2">
-                    <CheckCircle className="w-4 h-4 text-green-500" /> Últimas corridas entregues
+                    <CheckCircle className="w-4 h-4 text-green-500" /> Últimas corridas entregues (Hoje)
                 </h3>
-                {myCompletedOrders.length === 0 ? (
-                    <p className="text-sm text-gray-500 text-center py-4">Você ainda não realizou nenhuma entrega.</p>
+                {todaysCompletedOrders.length === 0 ? (
+                    <p className="text-sm text-gray-500 text-center py-4">Você ainda não realizou nenhuma entrega hoje.</p>
                 ) : (
                     <div className="space-y-2">
-                        {myCompletedOrders.slice(0, 15).map(order => (
+                        {todaysCompletedOrders.slice(0, 15).map(order => (
                             <div key={order.id} className="bg-white p-3 rounded-xl border border-gray-200 flex justify-between items-center">
                                 <div>
                                     <p className="font-bold text-sm text-gray-800">{order.customerName}</p>
