@@ -5,19 +5,18 @@ import {
     X, CheckCircle, Store, DollarSign, CreditCard, QrCode, Loader2, User, Truck, AlertTriangle, Search, Copy
 } from 'lucide-react';
 
-// === NOVAS TIPAGENS PARA O FLUXO DE ACOMPANHAMENTO ===
 interface ActiveOrder {
     id: string;
     total: number;
     paymentMethod: 'cash' | 'card' | 'pix';
     customerName: string;
     status: 'pending_payment' | 'preparing' | 'dispatched';
+    timestamp: number; // Novo: Controle de tempo (2 horas)
 }
 
 interface DigitalMenuViewProps {
     company: Company;
     products: Product[];
-    // Modificado: onPlaceOrder agora deve retornar o ID do pedido gerado no backend (string) ou null em caso de erro.
     onPlaceOrder: (
         items: any[],
         companyId: string,
@@ -32,11 +31,9 @@ interface DigitalMenuViewProps {
         discountAmount?: number,
         customerData?: { name: string, phone: string, address: any } 
     ) => Promise<string | null>; 
-    // Nova função: Bate no backend e traz o pedido ativo do cliente baseado no WhatsApp
     onTrackOrderByPhone?: (phone: string) => Promise<ActiveOrder | null>;
 }
 
-// --- GERADOR PIX (BR CODE EMV) - MANTIDO INTACTO ---
 const generatePixPayload = (pixKey: string, pixKeyType: string, merchantName: string, merchantCity: string, amount: number, customerName: string) => {
     if (!pixKey) return '';
     let formattedKey = pixKey.trim();
@@ -81,13 +78,11 @@ const CHECKOUT_STEPS = [
 const TOTAL_STEPS = CHECKOUT_STEPS.length;
 
 const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, onPlaceOrder, onTrackOrderByPhone }) => {
-    // ESTADOS GERAIS
     const [cart, setCart] = useState<{ product: Product, quantity: number, selectedOptions?: { groupName: string, optionName: string, price: number }[], finalPrice: number }[]>([]);
     const [isCartOpen, setIsCartOpen] = useState(false);
     const [checkoutStep, setCheckoutStep] = useState(1);
     const [stepError, setStepError] = useState<string | null>(null);
 
-    // ESTADOS DO CLIENTE
     const [customerName, setCustomerName] = useState('');
     const [customerPhone, setCustomerPhone] = useState('');
     const [deliveryMethod, setDeliveryMethod] = useState<'delivery' | 'pickup'>('delivery');
@@ -99,32 +94,38 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
     const [changeAmount, setChangeAmount] = useState<string>('');
     const [isProcessing, setIsProcessing] = useState(false);
 
-    // ESTADOS DE ACOMPANHAMENTO E RASTREIO (AS MUDANÇAS ACONTECEM AQUI)
+    // ESTADOS DE ACOMPANHAMENTO
     const [activeOrder, setActiveOrder] = useState<ActiveOrder | null>(null);
-    const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
+    const [isTrackingViewOpen, setIsTrackingViewOpen] = useState(false); // Controla se a tela de rastreio está visível
+    const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false); // Modal do WhatsApp
     const [trackingPhone, setTrackingPhone] = useState('');
     const [isTrackingLoading, setIsTrackingLoading] = useState(false);
     const [trackingError, setTrackingError] = useState<string | null>(null);
 
-    // RECUPERAÇÃO MÁGICA DE ESTADO (LOCALSTORAGE)
+    // RECUPERAÇÃO DO LOCALSTORAGE COM VALIDADE DE 2 HORAS
     useEffect(() => {
         const savedOrder = localStorage.getItem('@MenuApp:activeOrder');
         if (savedOrder) {
             try {
-                setActiveOrder(JSON.parse(savedOrder));
+                const parsedOrder = JSON.parse(savedOrder);
+                const TWO_HOURS_IN_MS = 2 * 60 * 60 * 1000;
+                
+                if (Date.now() - parsedOrder.timestamp < TWO_HOURS_IN_MS) {
+                    setActiveOrder(parsedOrder);
+                } else {
+                    localStorage.removeItem('@MenuApp:activeOrder');
+                }
             } catch (e) {
                 localStorage.removeItem('@MenuApp:activeOrder');
             }
         }
     }, []);
 
-    // PRODUTOS E CATEGORIAS
     const [selectedCategory, setSelectedCategory] = useState<string>('Tudo');
     const [customizingProduct, setCustomizingProduct] = useState<Product | null>(null);
     const [selections, setSelections] = useState<Record<string, ProductOption[]>>({});
     const categories = useMemo(() => ['Tudo', ...Array.from(new Set(products.map(p => p.category)))], [products]);
 
-    // CÁLCULOS FINANCEIROS
     const productTotal = useMemo(() => cart.reduce((acc, item) => acc + (item.finalPrice * item.quantity), 0), [cart]);
     const activeDeliveryFee = useMemo(() => {
         if (deliveryMethod === 'pickup') return 0;
@@ -139,7 +140,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
     const serviceFeeValue = 0.00; 
     const finalTotal = useMemo(() => productTotal + activeDeliveryFee + serviceFeeValue, [productTotal, activeDeliveryFee]);
 
-    // PAYLOAD PIX (Agora atrelado ao pedido ativo, para não perder no refresh)
     const activePixPayload = useMemo(() => {
         if (!activeOrder || activeOrder.paymentMethod !== 'pix' || !company.pixKey) return '';
         return generatePixPayload(company.pixKey, company.pixKeyType || 'email', company.name, company.address?.city || 'Brasil', activeOrder.total, activeOrder.customerName);
@@ -217,7 +217,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
         setCheckoutStep(prev => Math.max(prev - 1, 1));
     };
 
-    // --- NOVA LÓGICA DE CONFIRMAÇÃO ---
     const handleFinalizeOrder = async () => {
         const error = validateStep(4);
         if (error) { setStepError(error); return; }
@@ -238,7 +237,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                 : undefined
         };
 
-        // O backend cria o pedido ANTES do pagamento e devolve o orderId
         const orderId = await onPlaceOrder(
             cart, company.id, finalTotal, deliveryMethod, serviceFeeValue,
             activeDeliveryFee, productTotal, paymentMethod, changeForValue,
@@ -248,23 +246,34 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
         setIsProcessing(false);
 
         if (orderId) {
-            // Salva na memória volátil (React) e na durável (localStorage)
             const newOrder: ActiveOrder = {
                 id: orderId,
                 total: finalTotal,
                 paymentMethod,
                 customerName: customerName,
-                status: 'pending_payment'
+                status: 'pending_payment',
+                timestamp: Date.now() // Carimbo de tempo para travar em 2h
             };
             
             localStorage.setItem('@MenuApp:activeOrder', JSON.stringify(newOrder));
             setActiveOrder(newOrder);
+            setIsTrackingViewOpen(true); // Abre a tela de acompanhamento automaticamente
             
-            // Limpa o carrinho
             setCart([]);
             setIsCartOpen(false);
         } else {
             setStepError("Houve um erro ao gerar seu pedido. Tente novamente.");
+        }
+    };
+
+    // LÓGICA DO BOTÃO "ACOMPANHAR PEDIDO" DO TOPO
+    const handleOpenTracking = () => {
+        if (activeOrder) {
+            // Se já tem na memória (mesmo navegador), vai direto! Sem pedir WhatsApp.
+            setIsTrackingViewOpen(true);
+        } else {
+            // Se limpou o cache ou trocou de navegador, pede o WhatsApp (Plano B)
+            setIsTrackingModalOpen(true);
         }
     };
 
@@ -284,11 +293,13 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
         try {
             const foundOrder = await onTrackOrderByPhone(trackingPhone);
             if (foundOrder) {
-                localStorage.setItem('@MenuApp:activeOrder', JSON.stringify(foundOrder));
-                setActiveOrder(foundOrder);
+                const orderWithTime = { ...foundOrder, timestamp: Date.now() };
+                localStorage.setItem('@MenuApp:activeOrder', JSON.stringify(orderWithTime));
+                setActiveOrder(orderWithTime);
                 setIsTrackingModalOpen(false);
+                setIsTrackingViewOpen(true); // Abre a tela de rastreio
             } else {
-                setTrackingError("Nenhum pedido ativo encontrado para este número.");
+                setTrackingError("Nenhum pedido recente encontrado para este número.");
             }
         } catch (e) {
             setTrackingError("Erro ao buscar pedido. Tente novamente.");
@@ -298,14 +309,13 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
     };
 
     // =========================================================================
-    // O NOVO HUB DE ACOMPANHAMENTO (Renderiza no lugar do cardápio se houver pedido)
+    // O HUB DE ACOMPANHAMENTO (Agora é uma view que pode ser fechada)
     // =========================================================================
-    if (activeOrder) {
+    if (isTrackingViewOpen && activeOrder) {
         return (
-            <div className="min-h-screen bg-gray-50 flex flex-col items-center pt-12 pb-6 px-4">
+            <div className="min-h-screen bg-gray-50 flex flex-col items-center pt-12 pb-6 px-4 animate-fade-in">
                 <div className="w-full max-w-md bg-white rounded-2xl shadow-sm border border-gray-100 p-6 flex flex-col items-center">
                     
-                    {/* Header do Status */}
                     <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4">
                         {activeOrder.status === 'pending_payment' ? (
                             <Clock className="w-8 h-8 text-red-600" />
@@ -322,7 +332,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                         {activeOrder.status === 'pending_payment' && activeOrder.paymentMethod === 'pix' ? 'Aguardando Pagamento' : 'Em Preparo'}
                     </p>
 
-                    {/* QR Code Mapeado Diretamente no Hub */}
                     {activeOrder.paymentMethod === 'pix' && activeOrder.status === 'pending_payment' && activePixPayload && (
                         <div className="w-full bg-teal-50 p-5 rounded-xl border border-teal-200 flex flex-col items-center mb-6">
                             <p className="text-sm font-bold text-teal-900 mb-4 text-center">
@@ -342,7 +351,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                         </div>
                     )}
 
-                    {/* Mensagem para outros métodos */}
                     {activeOrder.paymentMethod !== 'pix' && (
                         <div className="w-full bg-blue-50 p-4 rounded-xl border border-blue-100 text-center mb-6">
                             <p className="text-sm text-blue-800">
@@ -361,15 +369,12 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                             Atualizar Status
                         </button>
                         
-                        {/* Apenas para fim de demo/desenvolvimento: Limpar pedido */}
+                        {/* NOVO: Apenas esconde a tela de rastreio, MAS MANTÉM o pedido no localStorage */}
                         <button 
-                            onClick={() => {
-                                localStorage.removeItem('@MenuApp:activeOrder');
-                                setActiveOrder(null);
-                            }} 
-                            className="w-full text-gray-500 font-medium py-3 rounded-xl hover:bg-gray-50 border border-transparent hover:border-gray-200 transition-all text-sm"
+                            onClick={() => setIsTrackingViewOpen(false)} 
+                            className="w-full text-gray-600 font-bold py-3.5 rounded-xl bg-gray-100 hover:bg-gray-200 transition-all text-sm"
                         >
-                            Fazer um novo pedido (Sair)
+                            Voltar ao Cardápio
                         </button>
                     </div>
                 </div>
@@ -383,14 +388,23 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
     return (
         <div className="pb-32 bg-gray-50 min-h-screen font-sans">
             
-            {/* Header com botão de rastreio (O Plano B) */}
+            {/* BOTÃO DE ACOMPANHAMENTO MELHORADO */}
             <div className="fixed top-4 right-4 z-40">
                 <button 
-                    onClick={() => setIsTrackingModalOpen(true)}
-                    className="bg-white/90 backdrop-blur-sm border border-gray-200 shadow-sm text-gray-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 hover:bg-white"
+                    onClick={handleOpenTracking}
+                    className="bg-white/90 backdrop-blur-sm border border-gray-200 shadow-sm text-gray-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 hover:bg-white transition-all"
                 >
-                    <Search className="w-4 h-4 text-red-600" />
-                    Acompanhar Pedido
+                    {activeOrder ? (
+                        <>
+                            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                            Pedido em Andamento
+                        </>
+                    ) : (
+                        <>
+                            <Search className="w-4 h-4 text-red-600" />
+                            Acompanhar Pedido
+                        </>
+                    )}
                 </button>
             </div>
 
@@ -459,7 +473,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                 </div>
             </div>
 
-            {/* BOTÃO FLUTUANTE DA SACOLA */}
             {cart.length > 0 && !isCartOpen && (
                 <div className="fixed bottom-6 left-0 right-0 px-4 z-20 flex justify-center">
                     <button onClick={() => setIsCartOpen(true)} className="bg-red-600 text-white w-full max-w-md shadow-xl shadow-red-200 rounded-xl p-4 flex justify-between items-center font-bold hover:bg-red-700 transition-all">
@@ -475,7 +488,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                 </div>
             )}
 
-            {/* MODAL DE PRODUTO */}
             {customizingProduct && (
                 <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4 animate-fade-in">
                     <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl relative flex flex-col max-h-[90vh] overflow-hidden">
@@ -510,12 +522,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                                 <div className="flex flex-col flex-1 pr-4 overflow-hidden">
                                                     <span className="font-medium text-gray-800">{o.name}</span>
                                                     {(o as any).description && (
-                                                        <span 
-                                                            className={`text-[11px] mt-0.5 leading-tight line-clamp-2 transition-colors ${
-                                                                isSelected ? 'text-red-600/90 font-medium' : 'text-gray-400'
-                                                            }`}
-                                                            title={(o as any).description}
-                                                        >
+                                                        <span className={`text-[11px] mt-0.5 leading-tight line-clamp-2 transition-colors ${isSelected ? 'text-red-600/90 font-medium' : 'text-gray-400'}`}>
                                                             {(o as any).description}
                                                         </span>
                                                     )}
@@ -540,26 +547,21 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                             return;
                                         }
                                     }
-
                                     const isPizzaMode = customizingProduct.isPizza || customizingProduct.name.toLowerCase().includes('pizza');
                                     const flatOptions: any[] = [];
-
                                     customizingProduct.groups.forEach(g => {
                                         const selectedInGroup = selections[g.id] || [];
                                         selectedInGroup.forEach(o => {
                                             let finalOptionName = o.name;
                                             let finalOptionPrice = o.price || 0;
-
                                             if (isPizzaMode && selectedInGroup.length > 0) {
                                                 const fraction = selectedInGroup.length > 1 ? `1/${selectedInGroup.length}` : '';
                                                 finalOptionName = `${fraction} ${o.name}`.trim();
                                                 finalOptionPrice = finalOptionPrice / selectedInGroup.length;
                                             }
-
                                             flatOptions.push({ groupName: g.name, optionName: finalOptionName, price: finalOptionPrice });
                                         });
                                     });
-
                                     addToCart(customizingProduct, currentPrice, flatOptions);
                                     setCustomizingProduct(null);
                                 }}
@@ -573,7 +575,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                 </div>
             )}
 
-            {/* MODAL DE RASTREIO (PLANO B) */}
             {isTrackingModalOpen && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl relative">
@@ -610,7 +611,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                 </div>
             )}
 
-            {/* MODAL DO CARRINHO E CHECKOUT */}
             {isCartOpen && (
                 <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4 animate-fade-in">
                     
@@ -705,7 +705,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                     </div>
                                 )}
 
-                                {/* PASSO 4 MODIFICADO: Apenas Seleção. O Pix gera na próxima tela. */}
                                 {checkoutStep === 4 && (
                                     <div className="bg-white p-4 rounded-xl border border-gray-100">
                                         <p className="text-xs text-gray-500 mb-3 font-medium">Como você deseja pagar o pedido?</p>
@@ -722,7 +721,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                             </div>
                                         )}
                                         
-                                        {/* Aviso explicativo para o Pix */}
                                         {paymentMethod === 'pix' && (
                                             <div className="bg-teal-50 p-4 rounded-xl border border-teal-200 animate-fade-in mt-4 text-center">
                                                 <p className="text-sm font-bold text-teal-900">
