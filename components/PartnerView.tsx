@@ -371,6 +371,7 @@ const OrderCard = React.memo(function OrderCard({ order, status, orderChats, pro
                   </div>
               </div>
           </div>
+      </div>
   );
 }, areOrderCardPropsEqual);
 
