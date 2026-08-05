@@ -497,7 +497,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                                 </div>
                                                 <span className="font-bold text-sm shrink-0">
                                                     {isSelected && <CheckCircle className="inline w-4 h-4 mr-1" />}
-                                                    {o.price > 0 ? `+ R$ ${o.price.toFixed(2)}` : '+0,00'}
+                                                    {o.price > 0 ? `+ R$ ${o.price.toFixed(2)}` : '+ R$ 0,00'}
                                                 </span>
                                             </div>
                                         );
