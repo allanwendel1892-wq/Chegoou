@@ -297,10 +297,11 @@ const OrderCard = React.memo(function OrderCard({ order, status, orderChats, pro
                </div>
           )}
 
-          <div className="flex justify-between items-center pt-2 border-t border-gray-50 mt-2">
-              <span className="font-bold text-sm shrink-0">R$ {order.total.toFixed(2)}</span>
+          <div className="pt-3 border-t border-gray-100 mt-2 space-y-2">
+              {/* Linha 1: Preço e Botão Principal de Avançar */}
+              <div className="flex justify-between items-center">
+                  <span className="font-bold text-base text-gray-900">R$ {order.total.toFixed(2)}</span>
 
-              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
                   {status !== 'delivered' && status !== 'cancelled' && (
                       <button
                           onClick={(e) => {
@@ -316,54 +317,60 @@ const OrderCard = React.memo(function OrderCard({ order, status, orderChats, pro
                               const nextStatus = nextStatusMap[status];
                               if (nextStatus) onDrop(order.id, nextStatus);
                           }}
-                          className="bg-red-100 text-red-700 hover:bg-red-200 px-2 py-1 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shrink-0"
+                          className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 shrink-0"
                           title="Avançar Pedido"
                      >
-                          Avançar <ArrowRight className="w-3 h-3" />
-                      </button>
-                  )}
-
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onPrintOrder(order); }}
-                    className="p-2 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-800 transition-colors shrink-0"
-                    title="Imprimir Pedido"
-                  >
-                      <Printer className="w-4 h-4" />
-                  </button>
-
-                  {onToggleDeliveryMethod && (
-                      <button
-                          onClick={(e) => { e.stopPropagation(); onToggleDeliveryMethod(order); }}
-                          className="p-2 rounded-full bg-purple-50 text-purple-600 hover:bg-purple-200 transition-colors shrink-0"
-                          title="Alternar Entrega / Retirada"
-                      >
-                          {dMethod.includes('pickup') || dMethod.includes('retirada') ? <Bike className="w-4 h-4" /> : <Store className="w-4 h-4" />}
-                      </button>
-                  )}
-
-                  {!isWhatsapp && (
-                    <button
-                        onClick={(e) => { e.stopPropagation(); onOpenChat(order.id); }}
-                        className={`p-2 rounded-full transition-all flex items-center gap-1 shrink-0
-                            ${hasUnread
-                                ? 'bg-red-600 text-white animate-pulse shadow-md shadow-red-200'
-                                : hasMessages ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
-                          }
-                        `}
-                        title="Chat com Cliente"
-                   >
-                        <MessageCircle className="w-4 h-4" />
-                        {hasUnread && <span className="text-[10px] font-bold">Novo</span>}
-                   </button>
-                  )}
-                  {isWhatsapp && (
-                      <button onClick={() => window.open(`https://wa.me/${order.customerPhone}`, '_blank')} className="p-2 rounded-full bg-green-100 text-green-600 hover:bg-green-200 shrink-0">
-                          <MessageSquare className="w-4 h-4"/>
+                          Avançar <ArrowRight className="w-3.5 h-3.5" />
                       </button>
                   )}
               </div>
+
+              {/* Linha 2: Ícones Utilitários e Chat */}
+              <div className="flex items-center justify-between pt-1">
+                  <div className="flex items-center gap-1">
+                      <button
+                          onClick={(e) => { e.stopPropagation(); onPrintOrder(order); }}
+                          className="p-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                          title="Imprimir Pedido"
+                      >
+                          <Printer className="w-4 h-4" />
+                      </button>
+
+                      {onToggleDeliveryMethod && (
+                          <button
+                              onClick={(e) => { e.stopPropagation(); onToggleDeliveryMethod(order); }}
+                              className="p-1.5 rounded-lg bg-purple-50 text-purple-600 hover:bg-purple-100 transition-colors"
+                              title="Alternar Entrega / Retirada"
+                          >
+                              {dMethod.includes('pickup') || dMethod.includes('retirada') ? <Bike className="w-4 h-4" /> : <Store className="w-4 h-4" />}
+                          </button>
+                      )}
+                  </div>
+
+                  <div>
+                      {!isWhatsapp && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onOpenChat(order.id); }}
+                            className={`px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 text-xs font-bold
+                                ${hasUnread
+                                    ? 'bg-red-600 text-white animate-pulse shadow-md shadow-red-200'
+                                    : hasMessages ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                              }
+                            `}
+                            title="Chat com Cliente"
+                       >
+                            <MessageCircle className="w-4 h-4" />
+                            {hasUnread && <span>Novo</span>}
+                       </button>
+                      )}
+                      {isWhatsapp && (
+                          <button onClick={() => window.open(`https://wa.me/${order.customerPhone}`, '_blank')} className="p-1.5 rounded-lg bg-green-100 text-green-700 hover:bg-green-200 flex items-center gap-1 text-xs font-bold px-2">
+                              <MessageSquare className="w-4 h-4"/> WhatsApp
+                          </button>
+                      )}
+                  </div>
+              </div>
           </div>
-      </div>
   );
 }, areOrderCardPropsEqual);
 
