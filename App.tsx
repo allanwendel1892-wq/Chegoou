@@ -11,7 +11,8 @@ import React, {
     lazy,
     Suspense,
     useEffect, 
-    useRef 
+    useRef,
+    useMemo
 } from 'react';
 
 // --- DEFINIÇÕES DE TIPOS E INTERFACES ---
