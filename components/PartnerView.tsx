@@ -316,7 +316,7 @@ const OrderCard = React.memo(function OrderCard({ order, status, orderChats, pro
                               const nextStatus = nextStatusMap[status];
                               if (nextStatus) onDrop(order.id, nextStatus);
                           }}
-                          className="md:hidden bg-red-100 text-red-700 hover:bg-red-200 px-2 py-1 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shrink-0"
+                          className="bg-red-100 text-red-700 hover:bg-red-200 px-2 py-1 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shrink-0"
                           title="Avançar Pedido"
                      >
                           Avançar <ArrowRight className="w-3 h-3" />
