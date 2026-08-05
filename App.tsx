@@ -1667,17 +1667,7 @@ const handlePlaceOrder = async (
         break;
     
     case 'partner':
-        const myCompany = companies.find(c => c.id === currentUser.id);
-        
-        // --- BLINDAGEM DE MEMÓRIA PARA O PARCEIRO ---
-        const partnerOrders = useMemo(() => {
-            return orders.filter(o => o.companyId === myCompany?.id);
-        }, [orders, myCompany?.id]);
-
-        const partnerProducts = useMemo(() => {
-            return products.filter(p => p.companyId === myCompany?.id);
-        }, [products, myCompany?.id]);
-        // -------------------------------------------
+        const myCompany = myPartnerCompany; // reaproveita a constante do topo
 
         if (!myCompany) {
             ViewToRender = (
@@ -1691,8 +1681,8 @@ const handlePlaceOrder = async (
         } else {
             ViewToRender = <PartnerView 
                 company={myCompany} 
-                orders={partnerOrders} // <-- Usando o array blindado
-                products={partnerProducts} // <-- Usando o array blindado
+                orders={partnerOrders} // <-- Usa o array blindado do topo
+                products={partnerProducts} // <-- Usa o array blindado do topo
                 updateOrderStatus={updateOrderStatus}
                 updateCompany={(data) => handleUpdateCompany(myCompany.id, data)}
                 onAddProduct={handleAddProduct}
