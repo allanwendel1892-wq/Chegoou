@@ -786,6 +786,24 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const [deliveryFee, setDeliveryFee] = useState<number>(0);
 
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(false);
+  // Agrupa os pedidos por status UMA ÚNICA VEZ por render de `orders`, em vez de rodar
+  // `orders.filter(...)` inline em cada KanbanColumn (o que gerava uma nova referência de
+  // array a cada render do PartnerView e quebrava a memoização das colunas).
+  const groupedOrders = useMemo(() => {
+      return {
+          waiting_payment: orders.filter(o => o.status === 'waiting_payment'),
+          pending: orders.filter(o => o.status === 'pending'),
+          preparing: orders.filter(o => o.status === 'preparing'),
+          ready: orders.filter(o => o.status === 'ready' || o.status === 'waiting_courier'),
+          delivering: orders.filter(o => o.status === 'delivering'),
+          delivered: orders.filter(o => o.status === 'delivered'),
+          cancelled: orders.filter(o => o.status === 'cancelled')
+      };
+  }, [orders]);
+  // Handlers estáveis (useCallback com deps vazias, pois usam apenas setters de estado)
+  // para que as props do KanbanColumn não mudem de referência a cada render.
+  const handleOpenChat = useCallback((orderId: string) => setActiveChatOrder(orderId), []);
+  const handleSetEditingOrder = useCallback((order: Order) => setEditingOrder(order), []);
   const prevOrdersCount = useRef(orders.length);
   // Ref sincronizado com `orders`: permite que handleDragDropOrder acesse a lista mais
   // recente sem precisar de `orders` no array de dependências do useCallback, evitando
@@ -2309,12 +2327,12 @@ delete updated.mapLink;
                             <KanbanColumn 
                                  title="Aguardando Pagamento" 
                                 status="waiting_payment" 
-                                items={orders.filter(o => o.status === 'waiting_payment')} 
+                                items={groupedOrders.waiting_payment} 
                                 color="border-yellow-200"
-                                onClickOrder={setEditingOrder}
+                                onClickOrder={handleSetEditingOrder}
                                 onDrop={handleDragDropOrder}
                                 chats={chats}
-                                onOpenChat={setActiveChatOrder}
+                                onOpenChat={handleOpenChat}
                                 onPrintOrder={handlePrintOrder}
                                 products={products}
                                 onToggleDeliveryMethod={handleToggleDeliveryMethod}
@@ -2322,12 +2340,12 @@ delete updated.mapLink;
                             <KanbanColumn 
                                  title="Pendentes" 
                                 status="pending" 
-                                items={orders.filter(o => o.status === 'pending')} 
+                                items={groupedOrders.pending} 
                                 color="border-orange-200"
-                                onClickOrder={setEditingOrder}
+                                onClickOrder={handleSetEditingOrder}
                                 onDrop={handleDragDropOrder}
                                 chats={chats}
-                                onOpenChat={setActiveChatOrder}
+                                onOpenChat={handleOpenChat}
                                 onPrintOrder={handlePrintOrder}
                                 products={products}
                                 onToggleDeliveryMethod={handleToggleDeliveryMethod}
@@ -2335,12 +2353,12 @@ delete updated.mapLink;
                             <KanbanColumn 
                                 title="Em Preparo" 
                                  status="preparing" 
-                                items={orders.filter(o => o.status === 'preparing')} 
+                                items={groupedOrders.preparing} 
                                 color="border-blue-200"
-                                 onClickOrder={setEditingOrder}
+                                 onClickOrder={handleSetEditingOrder}
                                 onDrop={handleDragDropOrder}
                                 chats={chats}
-                                 onOpenChat={setActiveChatOrder}
+                                 onOpenChat={handleOpenChat}
                                 onPrintOrder={handlePrintOrder}
                                 products={products}
                                 onToggleDeliveryMethod={handleToggleDeliveryMethod}
@@ -2348,12 +2366,12 @@ delete updated.mapLink;
                             <KanbanColumn 
                                 title="Pronto" 
                                  status="ready" 
-                                items={orders.filter(o => o.status === 'ready' || o.status === 'waiting_courier')} 
+                                items={groupedOrders.ready} 
                                 color="border-green-200"
-                                onClickOrder={setEditingOrder}
+                                onClickOrder={handleSetEditingOrder}
                                 onDrop={handleDragDropOrder}
                                  chats={chats}
-                                onOpenChat={setActiveChatOrder}
+                                onOpenChat={handleOpenChat}
                                 onPrintOrder={handlePrintOrder}
                                  products={products}
                                 onToggleDeliveryMethod={handleToggleDeliveryMethod}
@@ -2361,12 +2379,12 @@ delete updated.mapLink;
                             <KanbanColumn 
                                  title="Em Entrega" 
                                 status="delivering" 
-                                items={orders.filter(o => o.status === 'delivering')} 
+                                items={groupedOrders.delivering} 
                                  color="border-purple-200"
-                                onClickOrder={setEditingOrder}
+                                onClickOrder={handleSetEditingOrder}
                                 onDrop={handleDragDropOrder}
                                  chats={chats}
-                                onOpenChat={setActiveChatOrder}
+                                onOpenChat={handleOpenChat}
                                 onPrintOrder={handlePrintOrder}
                                  products={products}
                                 onToggleDeliveryMethod={handleToggleDeliveryMethod}
@@ -2374,12 +2392,12 @@ delete updated.mapLink;
                             <KanbanColumn 
                                  title="Concluídos" 
                                 status="delivered" 
-                                items={orders.filter(o => o.status === 'delivered')} 
+                                items={groupedOrders.delivered} 
                                  color="border-gray-200"
-                                onClickOrder={setEditingOrder}
+                                onClickOrder={handleSetEditingOrder}
                                 onDrop={handleDragDropOrder}
                                  chats={chats}
-                                onOpenChat={setActiveChatOrder}
+                                onOpenChat={handleOpenChat}
                                 onPrintOrder={handlePrintOrder}
                                 products={products}
                                 onToggleDeliveryMethod={handleToggleDeliveryMethod}
@@ -2387,13 +2405,13 @@ delete updated.mapLink;
                             <KanbanColumn 
                                 title="Cancelados" 
                                  status="cancelled" 
-                                items={orders.filter(o => o.status === 'cancelled')} 
+                                items={groupedOrders.cancelled} 
                                 color="border-red-200"
                                  isLast
-                                onClickOrder={setEditingOrder}
+                                onClickOrder={handleSetEditingOrder}
                                 onDrop={handleDragDropOrder}
                                  chats={chats}
-                                onOpenChat={setActiveChatOrder}
+                                onOpenChat={handleOpenChat}
                                 onPrintOrder={handlePrintOrder}
                                  products={products}
                                 onToggleDeliveryMethod={handleToggleDeliveryMethod}
