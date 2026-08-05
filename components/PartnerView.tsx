@@ -142,6 +142,23 @@ const areOrderCardPropsEqual = (prev: OrderCardProps, next: OrderCardProps) => {
   return prev.status === next.status && prev.products === next.products;
 };
 
+// Formato já processado que o JSX consome diretamente, sem recalcular
+// products.find/groups/frações a cada render.
+interface FormattedOptionGroup {
+  key: string;
+  groupName: string;
+  divide: boolean;
+  fraction: string;
+  options: string[];
+}
+
+interface FormattedOrderItem {
+  key: string;
+  quantity: number;
+  productName: string;
+  groups: FormattedOptionGroup[];
+}
+
 const OrderCard = React.memo(function OrderCard({ order, status, orderChats, products, onClickOrder, onDrop, onOpenChat, onPrintOrder, onToggleDeliveryMethod }: OrderCardProps) {
   const hasMessages = orderChats.length > 0;
   const lastMsg = hasMessages ? orderChats[orderChats.length - 1] : null;
@@ -149,6 +166,54 @@ const OrderCard = React.memo(function OrderCard({ order, status, orderChats, pro
   const isWhatsapp = order.origin?.toLowerCase() === 'whatsapp';
   const pMethod = order.paymentMethod?.toLowerCase() || '';
   const dMethod = order.deliveryMethod?.toLowerCase() || '';
+
+  // Motor de cálculo (produto correspondente, agrupamento de opções, regra de
+  // divisão de fração de pizza) movido para fora do JSX. Só recalcula quando
+  // os itens do pedido ou o catálogo de produtos mudam — não a cada render.
+  const formattedItems: FormattedOrderItem[] = useMemo(() => {
+    if (!Array.isArray(order.items) || order.items.length === 0) return [];
+
+    return order.items.slice(0, 3).map((item, idx) => {
+        const originalProduct = products.find(p => p.name === item.productName);
+        const isPizza = (item as any).pricingMode === 'pizza' || originalProduct?.pricingMode === 'pizza';
+
+        let groups: FormattedOptionGroup[] = [];
+
+        if (item.selectedOptions && item.selectedOptions.length > 0) {
+            const rawGroups: Record<string, string[]> = {};
+
+            item.selectedOptions.forEach(opt => {
+                const g = (opt as any).groupName || '';
+                if (!rawGroups[g]) rawGroups[g] = [];
+                rawGroups[g].push(opt.optionName || opt.name);
+            });
+
+            groups = Object.entries(rawGroups).map(([gName, opts], groupIdx) => {
+                // 1. Lê a flag dividePrice direto do JSON salvo no banco
+                const snapshotDivide = item.selectedOptions.some(opt => (opt as any).groupName === gName && (opt as any).dividePrice === true);
+                // 2. Fallback caso seja um pedido muito antigo e não tenha a flag no JSON
+                const originalGroup = originalProduct?.groups?.find(g => g.name === gName || g.name.toUpperCase() === gName);
+                // 3. Define a regra final (priorizando o JSON do pedido)
+                const divideThisGroup = !!(snapshotDivide || originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor')));
+
+                return {
+                    key: `${idx}-${groupIdx}`,
+                    groupName: gName,
+                    divide: divideThisGroup,
+                    fraction: divideThisGroup && opts.length > 1 ? `1/${opts.length} ` : '',
+                    options: opts,
+                };
+            });
+        }
+
+        return {
+            key: String(idx),
+            quantity: item.quantity,
+            productName: item.productName,
+            groups,
+        };
+    });
+  }, [order.items, products]);
 
   return (
       <div
@@ -205,54 +270,29 @@ const OrderCard = React.memo(function OrderCard({ order, status, orderChats, pro
           </div>
 
           <div className="space-y-2 bg-gray-50 p-2.5 rounded-lg mb-3 border border-gray-100">
-              {Array.isArray(order.items) && order.items.length > 0 ? (
+              {formattedItems.length > 0 ? (
                   <>
-                      {order.items.slice(0, 3).map((item, idx) => (
-                          <div key={idx} className="flex flex-col border-b border-gray-100 last:border-0 pb-1 last:pb-0">
+                      {formattedItems.map((item) => (
+                          <div key={item.key} className="flex flex-col border-b border-gray-100 last:border-0 pb-1 last:pb-0">
                               <div className="text-xs text-gray-800 font-medium flex justify-between gap-2">
                                   <span className="truncate">{item.quantity}x {item.productName}</span>
                               </div>
-                              {item.selectedOptions && item.selectedOptions.length > 0 && (
+                              {item.groups.length > 0 && (
                                   <div className="pl-3 mt-1 space-y-1">
-                                      {(() => {
-                                          const originalProduct = products.find(p => p.name === item.productName);
-                                          const isPizza = (item as any).pricingMode === 'pizza' || originalProduct?.pricingMode === 'pizza';
-                                          const groups: Record<string, string[]> = {};
-
-                                          item.selectedOptions.forEach(opt => {
-                                              const g = (opt as any).groupName || '';
-                                              if (!groups[g]) groups[g] = [];
-                                              groups[g].push(opt.optionName || opt.name);
-                                          });
-                                          return Object.entries(groups).map(([gName, opts], groupIdx) => {
-                                              // 1. Lê a flag dividePrice direto do JSON salvo no banco
-                                              const snapshotDivide = item.selectedOptions.some(opt => (opt as any).groupName === gName && (opt as any).dividePrice === true);
-                                              // 2. Fallback caso seja um pedido muito antigo e não tenha a flag no JSON
-                                              const originalGroup = originalProduct?.groups?.find(g => g.name === gName || g.name.toUpperCase() === gName);
-                                              // 3. Define a regra final (priorizando o JSON do pedido)
-                                              const divideThisGroup = snapshotDivide || originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
-
-                                              if (divideThisGroup) {
-                                                  const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
-                                                  return (
-                                                      <React.Fragment key={groupIdx}>
-                                                          {opts.map((o, i) => (
-                                                              <div key={i} className="text-[10px] text-gray-600 leading-tight mt-0.5">
-                                                                  <span className="font-bold text-gray-800">+ {fraction}{o}</span>
-                                                              </div>
-                                                          ))}
-                                                      </React.Fragment>
-                                                  );
-                                              } else {
-                                                  return (
-                                                      <div key={groupIdx} className="text-[10px] text-gray-600 leading-tight mt-0.5">
-                                                          {gName ? <span className="font-bold text-gray-800 uppercase">{gName}: </span> : <span className="font-bold text-gray-800">+ </span>}
-                                                          <span className="font-bold text-gray-800">{opts.join(', ')}</span>
-                                                      </div>
-                                                  );
-                                              }
-                                          });
-                                      })()}
+                                      {item.groups.map(group => group.divide ? (
+                                          <React.Fragment key={group.key}>
+                                              {group.options.map((o, i) => (
+                                                  <div key={i} className="text-[10px] text-gray-600 leading-tight mt-0.5">
+                                                      <span className="font-bold text-gray-800">+ {group.fraction}{o}</span>
+                                                  </div>
+                                              ))}
+                                          </React.Fragment>
+                                      ) : (
+                                          <div key={group.key} className="text-[10px] text-gray-600 leading-tight mt-0.5">
+                                              {group.groupName ? <span className="font-bold text-gray-800 uppercase">{group.groupName}: </span> : <span className="font-bold text-gray-800">+ </span>}
+                                              <span className="font-bold text-gray-800">{group.options.join(', ')}</span>
+                                          </div>
+                                      ))}
                                   </div>
                               )}
                           </div>
@@ -397,7 +437,11 @@ const KanbanColumn: React.FC<KanbanColumnProps> = React.memo(({ title, status, i
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
       e.preventDefault();
-      setIsOver(true);
+      // Functional update: evita disparar re-render a cada pixel do mouse
+      // enquanto o item é arrastado sobre a coluna (onDragOver dispara
+      // dezenas de vezes por segundo). Só atualiza o estado quando ele
+      // realmente muda de false -> true.
+      setIsOver(prev => prev ? prev : true);
   }, []);
 
   const handleDragLeave = useCallback(() => {
