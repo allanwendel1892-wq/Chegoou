@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem, WithdrawalRequest, Coupon, User } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
 import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle, ArrowRight, Lock, Unlock, Banknote, AlertCircle, Info, MessageSquare, CreditCard, Printer, TrendingUp, Copy, Link2 } from 'lucide-react';
@@ -101,6 +101,280 @@ const PROTECTED_VIEWS = [
     ViewState.WHATSAPP,
     ViewState.HISTORY
 ];
+interface OrderCardProps {
+  order: Order;
+  status: Order['status'];
+  orderChats: ChatMessage[];
+  products: Product[];
+  onClickOrder: (order: Order) => void;
+  onDrop: (orderId: string, status: Order['status']) => void;
+  onOpenChat: (orderId: string) => void;
+  onPrintOrder: (order: Order) => void;
+  onToggleDeliveryMethod?: (order: Order) => void;
+}
+
+// Compara apenas o que realmente importa para este cartão específico, evitando
+// que o Kanban inteiro re-renderize quando o estado do componente pai muda
+// (ex: digitação no chat ou no modal de edição de outro pedido).
+const areOrderCardPropsEqual = (prev: OrderCardProps, next: OrderCardProps) => {
+  if (prev.order !== next.order) {
+      if (
+          prev.order.id !== next.order.id ||
+          prev.order.status !== next.order.status ||
+          prev.order.total !== next.order.total ||
+          prev.order.deliveryMethod !== next.order.deliveryMethod ||
+          prev.order.customerName !== next.order.customerName ||
+          prev.order.customerPhone !== next.order.customerPhone ||
+          prev.order.changeFor !== next.order.changeFor ||
+          prev.order.timestamp !== next.order.timestamp ||
+          prev.order.items !== next.order.items
+      ) {
+          return false;
+      }
+  }
+  if (prev.orderChats !== next.orderChats) {
+      const prevLast = prev.orderChats[prev.orderChats.length - 1];
+      const nextLast = next.orderChats[next.orderChats.length - 1];
+      if (prev.orderChats.length !== next.orderChats.length || prevLast?.id !== nextLast?.id) {
+          return false;
+      }
+  }
+  return (
+      prev.status === next.status &&
+      prev.products === next.products &&
+      prev.onClickOrder === next.onClickOrder &&
+      prev.onDrop === next.onDrop &&
+      prev.onOpenChat === next.onOpenChat &&
+      prev.onPrintOrder === next.onPrintOrder &&
+      prev.onToggleDeliveryMethod === next.onToggleDeliveryMethod
+  );
+};
+
+const OrderCard = React.memo(function OrderCard({ order, status, orderChats, products, onClickOrder, onDrop, onOpenChat, onPrintOrder, onToggleDeliveryMethod }: OrderCardProps) {
+  const hasMessages = orderChats.length > 0;
+  const lastMsg = hasMessages ? orderChats[orderChats.length - 1] : null;
+  const hasUnread = lastMsg?.senderRole === 'client';
+  const isWhatsapp = order.origin?.toLowerCase() === 'whatsapp';
+  const pMethod = order.paymentMethod?.toLowerCase() || '';
+  const dMethod = order.deliveryMethod?.toLowerCase() || '';
+
+  return (
+      <div
+          draggable
+          onDragStart={(e) => {
+              e.dataTransfer.setData("orderId", order.id);
+              e.dataTransfer.effectAllowed = "move";
+              e.currentTarget.style.opacity = "0.5";
+          }}
+          onDragEnd={(e) => {
+              e.currentTarget.style.opacity = "1";
+          }}
+          onClick={() => onClickOrder(order)}
+          className={`bg-white p-4 rounded-xl shadow-sm border ${isWhatsapp ? 'border-green-200 bg-green-50/30' : 'border-gray-100'} hover:shadow-md transition-all cursor-grab active:cursor-grabbing group select-none relative overflow-hidden`}
+      >
+          {isWhatsapp && (
+              <div className="absolute -top-2 -right-2 bg-green-500 text-white rounded-full p-1 shadow-sm z-10" title="Pedido via WhatsApp (IA)">
+                  <MessageSquare className="w-3 h-3" fill="white" />
+              </div>
+          )}
+
+          <div className="flex justify-between items-start mb-2">
+              <span className="font-bold text-gray-900 group-hover:text-red-600 transition-colors">#{order.id.slice(-4)}</span>
+              <span className="text-xs text-gray-400 flex items-center gap-1 shrink-0">
+                  <Clock className="w-3 h-3" />
+                  {new Date(order.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+              </span>
+          </div>
+
+          <div className="mb-3">
+              {dMethod.includes('pickup') || dMethod.includes('retirada') ? (
+                  <span className="inline-flex items-center gap-1.5 bg-purple-50 text-purple-700 border border-purple-100 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide">
+                      <Store className="w-3 h-3" /> Retirada
+                  </span>
+              ) : (
+                  <span className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 border border-blue-100 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide">
+                      <Bike className="w-3 h-3" /> Entrega
+                  </span>
+              )}
+          </div>
+
+          <div className="mb-3">
+              <div className="flex items-center gap-2 mb-1">
+                  <div className="w-6 h-6 bg-gray-100 rounded-full flex items-center justify-center font-bold text-gray-600 text-[10px] shrink-0">
+                      {order.customerName.charAt(0)}
+                  </div>
+                  <span className="text-sm font-medium text-gray-800 truncate">{order.customerName}</span>
+              </div>
+              {order.deliveryAddress && (
+                  <p className="text-[10px] text-gray-500 flex items-start gap-1 pl-1 line-clamp-2">
+                      <MapPin className="w-3 h-3 shrink-0 mt-0.5"/> {order.deliveryAddress.street}, {order.deliveryAddress.number} - {order.deliveryAddress.neighborhood}
+                  </p>
+              )}
+          </div>
+
+          <div className="space-y-2 bg-gray-50 p-2.5 rounded-lg mb-3 border border-gray-100">
+              {Array.isArray(order.items) && order.items.length > 0 ? (
+                  <>
+                      {order.items.slice(0, 3).map((item, idx) => (
+                          <div key={idx} className="flex flex-col border-b border-gray-100 last:border-0 pb-1 last:pb-0">
+                              <div className="text-xs text-gray-800 font-medium flex justify-between gap-2">
+                                  <span className="truncate">{item.quantity}x {item.productName}</span>
+                              </div>
+                              {item.selectedOptions && item.selectedOptions.length > 0 && (
+                                  <div className="pl-3 mt-1 space-y-1">
+                                      {(() => {
+                                          const originalProduct = products.find(p => p.name === item.productName);
+                                          const isPizza = (item as any).pricingMode === 'pizza' || originalProduct?.pricingMode === 'pizza';
+                                          const groups: Record<string, string[]> = {};
+
+                                          item.selectedOptions.forEach(opt => {
+                                              const g = (opt as any).groupName || '';
+                                              if (!groups[g]) groups[g] = [];
+                                              groups[g].push(opt.optionName || opt.name);
+                                          });
+                                          return Object.entries(groups).map(([gName, opts], groupIdx) => {
+                                              // 1. Lê a flag dividePrice direto do JSON salvo no banco
+                                              const snapshotDivide = item.selectedOptions.some(opt => (opt as any).groupName === gName && (opt as any).dividePrice === true);
+                                              // 2. Fallback caso seja um pedido muito antigo e não tenha a flag no JSON
+                                              const originalGroup = originalProduct?.groups?.find(g => g.name === gName || g.name.toUpperCase() === gName);
+                                              // 3. Define a regra final (priorizando o JSON do pedido)
+                                              const divideThisGroup = snapshotDivide || originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
+
+                                              if (divideThisGroup) {
+                                                  const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
+                                                  return (
+                                                      <React.Fragment key={groupIdx}>
+                                                          {opts.map((o, i) => (
+                                                              <div key={i} className="text-[10px] text-gray-600 leading-tight mt-0.5">
+                                                                  <span className="font-bold text-gray-800">+ {fraction}{o}</span>
+                                                              </div>
+                                                          ))}
+                                                      </React.Fragment>
+                                                  );
+                                              } else {
+                                                  return (
+                                                      <div key={groupIdx} className="text-[10px] text-gray-600 leading-tight mt-0.5">
+                                                          {gName ? <span className="font-bold text-gray-800 uppercase">{gName}: </span> : <span className="font-bold text-gray-800">+ </span>}
+                                                          <span className="font-bold text-gray-800">{opts.join(', ')}</span>
+                                                      </div>
+                                                  );
+                                              }
+                                          });
+                                      })()}
+                                  </div>
+                              )}
+                          </div>
+                      ))}
+                      {order.items.length > 3 && <div className="text-[10px] text-center text-gray-400 font-medium pt-1">Ver mais {order.items.length - 3} itens...</div>}
+                  </>
+              ) : (
+                  <p className="text-xs text-gray-600 italic whitespace-pre-wrap leading-relaxed break-words">
+                      {order.raw_description || "Sem descrição"}
+                  </p>
+              )}
+          </div>
+
+          <div className="mb-2">
+              {pMethod.includes('cash') || pMethod.includes('dinheiro') ? (
+                  <div className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-green-200 w-fit">
+                      <DollarSign className="w-3 h-3 shrink-0"/>
+                      <span className="truncate">Dinheiro {order.changeFor ? `(Troco p/ R$ ${order.changeFor.toFixed(2)})` : ''}</span>
+                  </div>
+              ) : pMethod.includes('pix') ? (
+                  <div className="bg-teal-100 text-teal-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-teal-200 w-fit">
+                      <svg className="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-4.33-6.027l2.997 2.998 2.062-2.064-2.997-2.997 2.997-2.998-2.063-2.063-2.996 2.997-2.998-2.997-2.063 2.063 2.997 2.998-2.997 2.063 2.064 2.998-2.998z"/></svg>
+                      Pix
+                  </div>
+              ) : pMethod.includes('card') || pMethod.includes('cartao') || pMethod.includes('cartão') ? (
+                  <div className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-blue-200 w-fit">
+                      <CreditCard className="w-3 h-3 shrink-0"/>
+                      Cartão
+                  </div>
+              ) : (
+                  <div className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-green-200 w-fit">
+                      <MessageSquare className="w-3 h-3 shrink-0"/>
+                      Combinado no Chat
+                  </div>
+              )}
+          </div>
+
+          {order.status === 'waiting_payment' && !isWhatsapp && (
+               <div className="bg-yellow-100 text-yellow-800 text-[10px] font-bold px-2 py-1 rounded mb-2 flex items-center gap-1 border border-yellow-200 w-fit">
+                   <Clock className="w-3 h-3 shrink-0"/>
+                   Aguardando Pagamento
+               </div>
+          )}
+
+          <div className="flex justify-between items-center pt-2 border-t border-gray-50 mt-2">
+              <span className="font-bold text-sm shrink-0">R$ {order.total.toFixed(2)}</span>
+
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                  {status !== 'delivered' && status !== 'cancelled' && (
+                      <button
+                          onClick={(e) => {
+                              e.stopPropagation();
+                              const nextStatusMap: Record<string, Order['status']> = {
+                                  'waiting_payment': 'pending',
+                                  'pending': 'preparing',
+                                  'preparing': 'ready',
+                                  'ready': 'delivering',
+                                  'waiting_courier': 'delivering',
+                                  'delivering': 'delivered'
+                              };
+                              const nextStatus = nextStatusMap[status];
+                              if (nextStatus) onDrop(order.id, nextStatus);
+                          }}
+                          className="md:hidden bg-red-100 text-red-700 hover:bg-red-200 px-2 py-1 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shrink-0"
+                          title="Avançar Pedido"
+                     >
+                          Avançar <ArrowRight className="w-3 h-3" />
+                      </button>
+                  )}
+
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onPrintOrder(order); }}
+                    className="p-2 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-800 transition-colors shrink-0"
+                    title="Imprimir Pedido"
+                  >
+                      <Printer className="w-4 h-4" />
+                  </button>
+
+                  {onToggleDeliveryMethod && (
+                      <button
+                          onClick={(e) => { e.stopPropagation(); onToggleDeliveryMethod(order); }}
+                          className="p-2 rounded-full bg-purple-50 text-purple-600 hover:bg-purple-200 transition-colors shrink-0"
+                          title="Alternar Entrega / Retirada"
+                      >
+                          {dMethod.includes('pickup') || dMethod.includes('retirada') ? <Bike className="w-4 h-4" /> : <Store className="w-4 h-4" />}
+                      </button>
+                  )}
+
+                  {!isWhatsapp && (
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onOpenChat(order.id); }}
+                        className={`p-2 rounded-full transition-all flex items-center gap-1 shrink-0
+                            ${hasUnread
+                                ? 'bg-red-600 text-white animate-pulse shadow-md shadow-red-200'
+                                : hasMessages ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+                          }
+                        `}
+                        title="Chat com Cliente"
+                   >
+                        <MessageCircle className="w-4 h-4" />
+                        {hasUnread && <span className="text-[10px] font-bold">Novo</span>}
+                   </button>
+                  )}
+                  {isWhatsapp && (
+                      <button onClick={() => window.open(`https://wa.me/${order.customerPhone}`, '_blank')} className="p-2 rounded-full bg-green-100 text-green-600 hover:bg-green-200 shrink-0">
+                          <MessageSquare className="w-4 h-4"/>
+                      </button>
+                  )}
+              </div>
+          </div>
+      </div>
+  );
+}, areOrderCardPropsEqual);
+
 interface KanbanColumnProps {
   title: string;
   status: Order['status'];
@@ -116,23 +390,29 @@ interface KanbanColumnProps {
   onToggleDeliveryMethod?: (order: Order) => void;
 }
 
-const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color, isLast, onClickOrder, onDrop, chats, onOpenChat, onPrintOrder, products, onToggleDeliveryMethod }) => {
+const EMPTY_CHATS: ChatMessage[] = [];
+
+const KanbanColumn: React.FC<KanbanColumnProps> = React.memo(({ title, status, items, color, isLast, onClickOrder, onDrop, chats, onOpenChat, onPrintOrder, products, onToggleDeliveryMethod }) => {
   const [isOver, setIsOver] = useState(false);
-  const handleDragOver = (e: React.DragEvent) => {
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
       e.preventDefault();
       setIsOver(true);
-  };
-  const handleDragLeave = () => {
+  }, []);
+
+  const handleDragLeave = useCallback(() => {
       setIsOver(false);
-  };
-  const handleDrop = (e: React.DragEvent) => {
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
       e.preventDefault();
       setIsOver(false);
       const orderId = e.dataTransfer.getData("orderId");
       if (orderId) {
           onDrop(orderId, status);
       }
-  };
+  }, [onDrop, status]);
+
   return (
     <div 
         className={`flex flex-col h-full w-[300px] min-w-[300px] max-w-[300px] shrink-0 bg-gray-50 rounded-2xl border-t-4 ${color} ${!isLast ? 'mr-4' : ''} transition-colors ${isOver ? 'bg-gray-100 ring-2 ring-gray-300' : ''}`}
@@ -145,231 +425,20 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
         <span className="bg-white px-2 py-1 rounded-lg text-xs font-bold text-gray-500 shadow-sm shrink-0">{items.length}</span>
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
-          {items.map(order => {
-              const orderChats = chats[order.id] || [];
-              const hasMessages = orderChats.length > 0;
-              const lastMsg = hasMessages ? orderChats[orderChats.length - 1] : null;
-              const hasUnread = lastMsg?.senderRole === 'client';
-              const isWhatsapp = order.origin?.toLowerCase() === 'whatsapp';
-              const pMethod = order.paymentMethod?.toLowerCase() || '';
-              const dMethod = order.deliveryMethod?.toLowerCase() || '';
-              return (
-                  <div 
-                      key={order.id} 
-                      draggable
-                      onDragStart={(e) => {
-                          e.dataTransfer.setData("orderId", order.id);
-                          e.dataTransfer.effectAllowed = "move";
-                          e.currentTarget.style.opacity = "0.5";
-                      }}
-                      onDragEnd={(e) => {
-                          e.currentTarget.style.opacity = "1";
-                      }}
-                      onClick={() => onClickOrder(order)}
-                      className={`bg-white p-4 rounded-xl shadow-sm border ${isWhatsapp ? 'border-green-200 bg-green-50/30' : 'border-gray-100'} hover:shadow-md transition-all cursor-grab active:cursor-grabbing group select-none relative overflow-hidden`}
-                  >
-                      {isWhatsapp && (
-                          <div className="absolute -top-2 -right-2 bg-green-500 text-white rounded-full p-1 shadow-sm z-10" title="Pedido via WhatsApp (IA)">
-                              <MessageSquare className="w-3 h-3" fill="white" />
-                          </div>
-                      )}
-
-                      <div className="flex justify-between items-start mb-2">
-                          <span className="font-bold text-gray-900 group-hover:text-red-600 transition-colors">#{order.id.slice(-4)}</span>
-                          <span className="text-xs text-gray-400 flex items-center gap-1 shrink-0">
-                              <Clock className="w-3 h-3" />
-                              {new Date(order.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                          </span>
-                      </div>
-  
-                      <div className="mb-3">
-                          {dMethod.includes('pickup') || dMethod.includes('retirada') ? (
-                              <span className="inline-flex items-center gap-1.5 bg-purple-50 text-purple-700 border border-purple-100 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide">
-                                  <Store className="w-3 h-3" /> Retirada
-                              </span>
-                          ) : (
-                              <span className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 border border-blue-100 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide">
-                                  <Bike className="w-3 h-3" /> Entrega
-                              </span>
-                          )}
-                      </div>
-                      
-                      <div className="mb-3">
-                          <div className="flex items-center gap-2 mb-1">
-                              <div className="w-6 h-6 bg-gray-100 rounded-full flex items-center justify-center font-bold text-gray-600 text-[10px] shrink-0">
-                                  {order.customerName.charAt(0)}
-                              </div>
-                              <span className="text-sm font-medium text-gray-800 truncate">{order.customerName}</span>
-                          </div>
-                          {order.deliveryAddress && (
-                              <p className="text-[10px] text-gray-500 flex items-start gap-1 pl-1 line-clamp-2">
-                                  <MapPin className="w-3 h-3 shrink-0 mt-0.5"/> {order.deliveryAddress.street}, {order.deliveryAddress.number} - {order.deliveryAddress.neighborhood}
-                              </p>
-                          )}
-                      </div>
-
-                      <div className="space-y-2 bg-gray-50 p-2.5 rounded-lg mb-3 border border-gray-100">
-                          {Array.isArray(order.items) && order.items.length > 0 ? (
-                              <>
-                                  {order.items.slice(0, 3).map((item, idx) => (
-                                      <div key={idx} className="flex flex-col border-b border-gray-100 last:border-0 pb-1 last:pb-0">
-                                          <div className="text-xs text-gray-800 font-medium flex justify-between gap-2">
-                                              <span className="truncate">{item.quantity}x {item.productName}</span>
-                                          </div>
-                                          {item.selectedOptions && item.selectedOptions.length > 0 && (
-                                              <div className="pl-3 mt-1 space-y-1">
-                                                  {(() => {
-                                                      const originalProduct = products.find(p => p.name === item.productName);
-                                                      const isPizza = (item as any).pricingMode === 'pizza' || originalProduct?.pricingMode === 'pizza';
-                                                      const groups: Record<string, string[]> = {};
-                                                      
-                                                      item.selectedOptions.forEach(opt => {
-                                                          const g = (opt as any).groupName || '';
-                                                          if (!groups[g]) groups[g] = [];
-                                                          groups[g].push(opt.optionName || opt.name);
-                                                      });
-                                                      return Object.entries(groups).map(([gName, opts], groupIdx) => {
-                                                          // 1. Lê a flag dividePrice direto do JSON salvo no banco
-                                                          const snapshotDivide = item.selectedOptions.some(opt => (opt as any).groupName === gName && (opt as any).dividePrice === true);
-                                                          // 2. Fallback caso seja um pedido muito antigo e não tenha a flag no JSON
-                                                          const originalGroup = originalProduct?.groups?.find(g => g.name === gName || g.name.toUpperCase() === gName);
-                                                          // 3. Define a regra final (priorizando o JSON do pedido)
-                                                          const divideThisGroup = snapshotDivide || originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
-
-                                                          if (divideThisGroup) {
-                                                              const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
-                                                              return (
-                                                                  <React.Fragment key={groupIdx}>
-                                                                      {opts.map((o, i) => (
-                                                                          <div key={i} className="text-[10px] text-gray-600 leading-tight mt-0.5">
-                                                                              <span className="font-bold text-gray-800">+ {fraction}{o}</span>
-                                                                          </div>
-                                                                      ))}
-                                                                  </React.Fragment>
-                                                              );
-                                                          } else {
-                                                              return (
-                                                                  <div key={groupIdx} className="text-[10px] text-gray-600 leading-tight mt-0.5">
-                                                                      {gName ? <span className="font-bold text-gray-800 uppercase">{gName}: </span> : <span className="font-bold text-gray-800">+ </span>}
-                                                                      <span className="font-bold text-gray-800">{opts.join(', ')}</span>
-                                                                  </div>
-                                                              );
-                                                          }
-                                                      });
-                                                  })()}
-                                              </div>
-                                          )}
-                                      </div>
-                                  ))}
-                                  {order.items.length > 3 && <div className="text-[10px] text-center text-gray-400 font-medium pt-1">Ver mais {order.items.length - 3} itens...</div>}
-                              </>
-                          ) : (
-                              <p className="text-xs text-gray-600 italic whitespace-pre-wrap leading-relaxed break-words">
-                                  {order.raw_description || "Sem descrição"}
-                              </p>
-                          )}
-                      </div>
-
-                      <div className="mb-2">
-                          {pMethod.includes('cash') || pMethod.includes('dinheiro') ? (
-                              <div className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-green-200 w-fit">
-                                  <DollarSign className="w-3 h-3 shrink-0"/>
-                                  <span className="truncate">Dinheiro {order.changeFor ? `(Troco p/ R$ ${order.changeFor.toFixed(2)})` : ''}</span>
-                              </div>
-                          ) : pMethod.includes('pix') ? (
-                              <div className="bg-teal-100 text-teal-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-teal-200 w-fit">
-                                  <svg className="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-4.33-6.027l2.997 2.998 2.062-2.064-2.997-2.997 2.997-2.998-2.063-2.063-2.996 2.997-2.998-2.997-2.063 2.063 2.997 2.998-2.997 2.063 2.064 2.998-2.998z"/></svg>
-                                  Pix
-                              </div>
-                          ) : pMethod.includes('card') || pMethod.includes('cartao') || pMethod.includes('cartão') ? (
-                              <div className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-blue-200 w-fit">
-                                  <CreditCard className="w-3 h-3 shrink-0"/>
-                                  Cartão
-                              </div>
-                          ) : (
-                              <div className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-green-200 w-fit">
-                                  <MessageSquare className="w-3 h-3 shrink-0"/>
-                                  Combinado no Chat
-                              </div>
-                          )}
-                      </div>
-
-                      {order.status === 'waiting_payment' && !isWhatsapp && (
-                           <div className="bg-yellow-100 text-yellow-800 text-[10px] font-bold px-2 py-1 rounded mb-2 flex items-center gap-1 border border-yellow-200 w-fit">
-                               <Clock className="w-3 h-3 shrink-0"/>
-                               Aguardando Pagamento
-                           </div>
-                      )}
-
-                      <div className="flex justify-between items-center pt-2 border-t border-gray-50 mt-2">
-                          <span className="font-bold text-sm shrink-0">R$ {order.total.toFixed(2)}</span>
-                          
-                          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-                              {status !== 'delivered' && status !== 'cancelled' && (
-                                  <button 
-                                      onClick={(e) => {
-                                          e.stopPropagation();
-                                          const nextStatusMap: Record<string, Order['status']> = {
-                                              'waiting_payment': 'pending',
-                                              'pending': 'preparing',
-                                              'preparing': 'ready',
-                                              'ready': 'delivering',
-                                              'waiting_courier': 'delivering',
-                                              'delivering': 'delivered'
-                                          };
-                                          const nextStatus = nextStatusMap[status];
-                                          if (nextStatus) onDrop(order.id, nextStatus);
-                                      }}
-                                      className="md:hidden bg-red-100 text-red-700 hover:bg-red-200 px-2 py-1 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shrink-0"
-                                      title="Avançar Pedido"
-                                 >
-                                      Avançar <ArrowRight className="w-3 h-3" />
-                                  </button>
-                              )}
-
-                              <button
-                                onClick={(e) => { e.stopPropagation(); onPrintOrder(order); }}
-                                className="p-2 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-800 transition-colors shrink-0"
-                                title="Imprimir Pedido"
-                              >
-                                  <Printer className="w-4 h-4" />
-                              </button>
-
-                              {onToggleDeliveryMethod && (
-                                  <button
-                                      onClick={(e) => { e.stopPropagation(); onToggleDeliveryMethod(order); }}
-                                      className="p-2 rounded-full bg-purple-50 text-purple-600 hover:bg-purple-200 transition-colors shrink-0"
-                                      title="Alternar Entrega / Retirada"
-                                  >
-                                      {dMethod.includes('pickup') || dMethod.includes('retirada') ? <Bike className="w-4 h-4" /> : <Store className="w-4 h-4" />}
-                                  </button>
-                              )}
-
-                              {!isWhatsapp && (
-                                <button 
-                                    onClick={(e) => { e.stopPropagation(); onOpenChat(order.id); }}
-                                    className={`p-2 rounded-full transition-all flex items-center gap-1 shrink-0
-                                        ${hasUnread 
-                                            ? 'bg-red-600 text-white animate-pulse shadow-md shadow-red-200' 
-                                            : hasMessages ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
-                                      }
-                                    `}
-                                    title="Chat com Cliente"
-                               >
-                                    <MessageCircle className="w-4 h-4" />
-                                    {hasUnread && <span className="text-[10px] font-bold">Novo</span>}
-                               </button>
-                              )}
-                              {isWhatsapp && (
-                                  <button onClick={() => window.open(`https://wa.me/${order.customerPhone}`, '_blank')} className="p-2 rounded-full bg-green-100 text-green-600 hover:bg-green-200 shrink-0">
-                                      <MessageSquare className="w-4 h-4"/>
-                                  </button>
-                              )}
-                          </div>
-                      </div>
-                  </div>
-              );
-          })}
+          {items.map(order => (
+              <OrderCard
+                  key={order.id}
+                  order={order}
+                  status={status}
+                  orderChats={chats[order.id] || EMPTY_CHATS}
+                  products={products}
+                  onClickOrder={onClickOrder}
+                  onDrop={onDrop}
+                  onOpenChat={onOpenChat}
+                  onPrintOrder={onPrintOrder}
+                  onToggleDeliveryMethod={onToggleDeliveryMethod}
+              />
+          ))}
           {items.length === 0 && (
               <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-50 pointer-events-none">
                   <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center mb-2 shrink-0">
@@ -381,11 +450,328 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({ title, status, items, color
       </div>
     </div>
   );
-};
+});
 
 const calculateBankFee = (amount: number, percentage: number) => {
     const rawFee = amount * (percentage / 100);
     return Math.ceil(rawFee * 100) / 100;
+};
+
+interface EditOrderModalProps {
+  order: Order;
+  products: Product[];
+  onClose: () => void;
+  onSave: (order: Order) => void;
+  onCancelOrder: (orderId: string) => void;
+}
+
+// Modal com estado 100% local: digitar aqui não re-renderiza o PartnerView nem o Kanban.
+const EditOrderModal: React.FC<EditOrderModalProps> = ({ order, products, onClose, onSave, onCancelOrder }) => {
+  const [localOrder, setLocalOrder] = useState<Order>(order);
+
+  const paymentMethod = localOrder.paymentMethod?.toLowerCase() || '';
+  const origin = localOrder.origin?.toLowerCase() || '';
+
+  const handleDeleteItem = (index: number) => {
+      const newItems = [...localOrder.items];
+      newItems.splice(index, 1);
+      setLocalOrder({ ...localOrder, items: newItems });
+  };
+
+  const handleUpdateItemQuantity = (index: number, delta: number) => {
+      const newItems = [...localOrder.items];
+      const newQty = Math.max(1, newItems[index].quantity + delta);
+      newItems[index] = { ...newItems[index], quantity: newQty };
+      setLocalOrder({ ...localOrder, items: newItems });
+  };
+
+  const handleSave = () => {
+      const itemsTotal = localOrder.items.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+      const newTotal = itemsTotal + localOrder.deliveryFee + localOrder.serviceFee;
+      const finalOrder = { ...localOrder, total: newTotal, subtotal: itemsTotal };
+      onSave(finalOrder);
+      alert("Pedido atualizado com sucesso!");
+  };
+
+  const handleCancelOrder = () => {
+      if (window.confirm("ATENÇÃO: Deseja realmente CANCELAR este pedido? Se houve pagamento online, o estorno será iniciado automaticamente.")) {
+          onCancelOrder(localOrder.id);
+      }
+  };
+
+  return (
+       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+           <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl animate-scale-in overflow-hidden max-h-[90vh] flex flex-col">
+               <div className="bg-white border-b border-gray-100 p-6 flex justify-between items-center">
+                   <h3 className="text-xl font-bold text-gray-900">
+                       {origin === 'whatsapp' ? (
+                           <span className="flex items-center gap-2">
+                               <MessageSquare className="w-5 h-5 text-green-600" /> Pedido IA #{localOrder.id.slice(-4)}
+                           </span>
+                       ) : (
+                           `Editar Pedido #${localOrder.id.slice(-4)}`
+                       )}
+                   </h3>
+                   <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full"><X className="w-5 h-5"/></button>
+               </div>
+       
+               <div className="p-6 overflow-y-auto space-y-6 flex-1">
+                   
+                   {origin === 'whatsapp' && (
+                       <div className="bg-green-50 p-4 rounded-xl border border-green-200 mb-4">
+                           <p className="text-sm text-green-800 font-bold flex items-center gap-2">
+                               <Info className="w-4 h-4"/> Pedido Externo (WhatsApp)
+                           </p>
+                           <p className="text-xs text-green-700 mt-1">
+                               Este pedido foi gerado pela IA. O pagamento é tratado diretamente com o cliente. Não contabiliza no saldo da plataforma.
+                           </p>
+                       </div>
+                   )}
+
+                   <div className="bg-yellow-50 border border-yellow-100 p-4 rounded-xl">
+                        <div className="flex justify-between items-center mb-2">
+                           <h4 className="font-bold text-sm text-yellow-800 uppercase">Pagamento</h4>
+                           <span className="bg-white px-2 py-1 rounded text-xs font-bold shadow-sm">
+                              {paymentMethod.includes('cash') ? 'DINHEIRO' : 
+                                (paymentMethod.includes('pix') ? 'PIX' : 
+                                (paymentMethod.includes('whatsapp') ? 'WHATSAPP' : 'ONLINE'))}
+                           </span>
+                       </div>
+                       {paymentMethod.includes('cash') ? (
+                           <p className="text-sm text-yellow-900 font-bold">
+                               Levar troco para: <span className="text-lg">R$ {localOrder.changeFor ? localOrder.changeFor.toFixed(2) : localOrder.total.toFixed(2)}</span>
+                           </p>
+                       ) : (
+                           <p className="text-sm text-green-700 font-medium">
+                              {paymentMethod.includes('whatsapp') ? 'Combinado via Chat' : (origin === 'whatsapp' ? 'Combinado via WhatsApp' : 'Pago via App/Pix/Cartão')}
+                           </p>
+                       )}
+                  </div>
+
+                   <div className="space-y-4">
+                       <h4 className="font-bold text-sm text-gray-500 uppercase tracking-wide">Dados do Cliente</h4>
+      
+                       <div className="grid grid-cols-2 gap-4">
+                           <div>
+                               <label className="text-xs font-bold text-gray-400">Nome</label>
+                               <input 
+                                  value={localOrder.customerName}
+                                  onChange={e => setLocalOrder({...localOrder, customerName: e.target.value})}
+                                  className="w-full border rounded-lg px-3 py-2 mt-1 font-medium"
+                               />
+                          </div>
+                           <div>
+                               <label className="text-xs font-bold text-gray-400">Telefone</label>
+                               <input 
+                                  value={localOrder.customerPhone}
+                                  onChange={e => setLocalOrder({...localOrder, customerPhone: e.target.value})}
+                                  className="w-full border rounded-lg px-3 py-2 mt-1 font-medium"
+                               />
+                           </div>
+                       </div>
+
+                       {/* Alteração para Alternar Tipo de Entrega no próprio Modal */}
+                       <div>
+                           <label className="text-xs font-bold text-gray-400 uppercase">Tipo de Entrega</label>
+                           <select 
+                              value={localOrder.deliveryMethod}
+                              onChange={e => {
+                                  const method = e.target.value;
+                                  setLocalOrder({
+                                      ...localOrder,
+                                      deliveryMethod: method,
+                                      deliveryFee: method === 'pickup' ? 0 : localOrder.deliveryFee
+                                  });
+                              }}
+                              className="w-full border rounded-lg px-3 py-2 mt-1 bg-white font-medium"
+                           >
+                               <option value="delivery">Entrega</option>
+                               <option value="pickup">Retirada</option>
+                           </select>
+                       </div>
+
+                       {localOrder.deliveryAddress && (
+                          <div>
+                               <label className="text-xs font-bold text-gray-400">Endereço</label>
+                               <p className="text-sm font-medium bg-gray-50 p-2 rounded border border-gray-200">
+                                   {localOrder.deliveryAddress.street}, {localOrder.deliveryAddress.number} <br/>
+                                   {localOrder.deliveryAddress.neighborhood} - {localOrder.deliveryAddress.city}
+                               </p>
+                           </div>
+                       )}
+                   </div>
+
+                   <div className="space-y-4">
+                       <h4 className="font-bold text-sm text-gray-500 uppercase tracking-wide">Itens do Pedido</h4>
+                       <div className="bg-gray-50 rounded-xl p-4 space-y-4">
+                           {Array.isArray(localOrder.items) && localOrder.items.length > 0 ?
+                           localOrder.items.map((item, idx) => (
+                               <div key={idx} className="flex flex-col bg-white p-3 rounded-lg shadow-sm border border-gray-100">
+                                   <div className="flex justify-between items-center mb-1">
+                                       <div className="flex items-center gap-3">
+                                           <div className="flex items-center border rounded-lg">
+                                               <button onClick={() => handleUpdateItemQuantity(idx, -1)} className="px-2 py-1 hover:bg-gray-100">-</button>
+                                               <span className="px-2 font-bold text-sm">{item.quantity}</span>
+                                               <button onClick={() => handleUpdateItemQuantity(idx, 1)} className="px-2 py-1 hover:bg-gray-100">+</button>
+                                           </div>
+                                           <span className="text-sm font-medium">{item.productName}</span>
+                                       </div>
+                                       <div className="flex items-center gap-4">
+                                           <span className="font-bold text-sm">R$ {item.price.toFixed(2)}</span>
+                                           <button onClick={() => handleDeleteItem(idx)} className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg">
+                                                <Trash2 className="w-4 h-4"/>
+                                           </button>
+                                       </div>
+                                   </div>
+                                
+                                  {item.selectedOptions && item.selectedOptions.length > 0 && (
+                                        <div className="pl-24 space-y-1 border-t border-gray-50 pt-1 mt-1">
+                                             {(() => {
+                                                const originalProduct = products.find(p => p.name === item.productName);
+                                                const isPizza = (item as any).pricingMode === 'pizza' || originalProduct?.pricingMode === 'pizza';
+                                                const groups: Record<string, string[]> = {};
+                                                item.selectedOptions.forEach(opt => {
+                                                    const g = (opt as any).groupName || '';
+                                                    if (!groups[g]) groups[g] = [];
+                                                    groups[g].push(opt.optionName || opt.name);
+                                                });
+                                                return Object.entries(groups).map(([gName, opts], groupIdx) => {
+                                                    const snapshotDivide = item.selectedOptions.some(opt => (opt as any).groupName === gName && (opt as any).dividePrice === true);
+                                                    const originalGroup = originalProduct?.groups?.find(g => g.name === gName || g.name.toUpperCase() === gName);
+                                                    const divideThisGroup = snapshotDivide || originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
+                                                    
+                                                    if (divideThisGroup) {
+                                                        const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
+                                                        return (
+                                                            <React.Fragment key={groupIdx}>
+                                                                {opts.map((o, i) => (
+                                                                    <div key={i} className="text-[10px] text-gray-600 mt-0.5">
+                                                                        <span className="font-bold text-gray-800">+ {fraction}{o}</span>
+                                                                    </div>
+                                                                ))}
+                                                            </React.Fragment>
+                                                        );
+                                                    } else {
+                                                        return (
+                                                            <div key={groupIdx} className="text-[10px] text-gray-600 mt-0.5">
+                                                                {gName ? <span className="font-bold text-gray-800 uppercase">{gName}: </span> : <span className="font-bold text-gray-800">+ </span>}
+                                                                <span className="font-bold text-gray-800">{opts.join(', ')}</span>
+                                                            </div>
+                                                        );
+                                                    }
+                                                });
+                                            })()}
+                                        </div>
+                                   )}
+                               </div>
+                           )) : (
+                               <div className="bg-white p-4 rounded-lg border border-gray-200">
+                                   <p className="text-sm font-mono whitespace-pre-wrap">{localOrder.raw_description || "Sem descrição disponível."}</p>
+                               </div>
+                          )}
+                       </div>
+                   </div>
+
+                   <div className="space-y-2">
+                       <label className="text-xs font-bold text-gray-400 uppercase">Status do Pedido</label>
+                       <select 
+                          value={localOrder.status}
+                          onChange={e => setLocalOrder({...localOrder, status: e.target.value as any})}
+                          className="w-full border rounded-lg px-3 py-2 bg-white"
+                       >
+                           <option value="waiting_payment">Aguardando Pagamento</option>
+                           <option value="pending">Pendente</option>
+                           <option value="preparing">Preparando</option>
+                           <option value="ready">Pronto</option>
+                           <option value="waiting_courier">Aguardando Entregador</option>
+                           <option value="delivering">Em Rota</option>
+                           <option value="delivered">Entregue</option>
+                           <option value="cancelled">Cancelado</option>
+                       </select>
+                   </div>
+               </div>
+               <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-between items-center gap-2">
+                   <div className="flex-1">
+                       <p className="text-xs text-gray-500 font-bold uppercase">Total Atualizado</p>
+                       <p className="text-xl font-bold text-gray-900">
+                           R$ {localOrder.total.toFixed(2)}
+                       </p>
+                   </div>
+                   
+                   <button 
+                      onClick={handleCancelOrder}
+                      className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-4 py-3 rounded-xl font-bold flex items-center gap-2 transition-colors text-sm"
+                      title="Cancela o pedido e estorna pagamento (se houver)"
+                   >
+                       <XCircle className="w-5 h-5" /> Cancelar
+                   </button>
+                   <button onClick={handleSave} className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-green-200 transition-colors">
+                       <Check className="w-5 h-5" /> Salvar
+                   </button>
+               </div>
+           </div>
+       </div>
+  );
+};
+
+interface ChatPanelProps {
+  orderId: string;
+  messages: ChatMessage[];
+  onSend: (text: string) => void;
+  onClose: () => void;
+}
+
+// Painel de chat com estado local do input: digitar não re-renderiza o resto da tela.
+const ChatPanel: React.FC<ChatPanelProps> = ({ orderId, messages, onSend, onClose }) => {
+  const [chatInput, setChatInput] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const handleSend = () => {
+      if (!chatInput.trim()) return;
+      onSend(chatInput);
+      setChatInput('');
+  };
+
+  return (
+       <div className="fixed bottom-0 right-0 w-full sm:w-96 h-[500px] bg-white shadow-2xl z-40 rounded-t-3xl sm:rounded-tl-3xl border border-gray-200 flex flex-col animate-slide-up">
+            <div className="bg-red-600 text-white p-4 rounded-t-3xl flex justify-between items-center">
+               <div className="flex items-center gap-2">
+                   <div className="bg-white/20 p-2 rounded-full"><MessageCircle className="w-5 h-5"/></div>
+                   <div>
+                       <h4 className="font-bold">Chat com Cliente</h4>
+                       <p className="text-xs opacity-80">Pedido #{orderId.slice(-4)}</p>
+                   </div>
+               </div>
+               <button onClick={onClose} className="hover:bg-white/20 p-2 rounded-full"><X className="w-5 h-5"/></button>
+           </div>
+           <div className="flex-1 bg-gray-50 overflow-y-auto p-4 space-y-3">
+               {messages.map(msg => (
+                   <div key={msg.id} className={`flex ${msg.senderRole === 'partner' ? 'justify-end' : 'justify-start'}`}>
+                       <div className={`max-w-[80%] p-3 rounded-xl text-sm ${msg.senderRole === 'partner' ? 'bg-red-100 text-red-900 rounded-tr-none' : 'bg-white border border-gray-200 rounded-tl-none'}`}>
+                           {msg.text}
+                           <span className="block text-[10px] text-gray-400 text-right mt-1">
+                               {new Date(msg.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                            </span>
+                       </div>
+                   </div>
+               ))}
+               <div ref={messagesEndRef} />
+           </div>
+           <div className="p-3 bg-white border-t border-gray-100 flex gap-2">
+               <input 
+                  value={chatInput} onChange={e => setChatInput(e.target.value)}
+                  placeholder="Digite sua mensagem..."
+                  className="flex-1 bg-gray-100 rounded-full px-4 py-2 outline-none focus:ring-2 focus:ring-red-500"
+                  onKeyDown={e => e.key === 'Enter' && handleSend()}
+               />
+               <button onClick={handleSend} className="bg-red-600 text-white p-2 rounded-full hover:bg-red-700"><Send className="w-5 h-5"/></button>
+           </div>
+       </div>
+  );
 };
 
 const PartnerView: React.FC<PartnerViewProps> = ({ 
@@ -424,8 +810,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const [generatingAi, setGeneratingAi] = useState(false);
   const [productImagePreview, setProductImagePreview] = useState<string>('');
   const [activeChatOrder, setActiveChatOrder] = useState<string | null>(null);
-  const [chatInput, setChatInput] = useState('');
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [localCompany, setLocalCompany] = useState<Company>(company);
   const [showMapModal, setShowMapModal] = useState(false);
@@ -551,7 +935,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
     setIsConfirmingStatus(false);
   };
 
-  const handlePrintOrder = (order: Order) => {
+  const handlePrintOrder = useCallback((order: Order) => {
       const itemsHtml = Array.isArray(order.items) ?
       order.items.map(item => {
           let optionsHtml = '';
@@ -689,7 +1073,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
               }, 2000);
           }, 500);
       }
-  };
+  }, [products, company.name]);
 
   useEffect(() => {
     const healFinancials = async () => {
@@ -1119,10 +1503,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       }
   };
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chats, activeChatOrder]);
-
   const [savingProduct, setSavingProduct] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -1157,48 +1537,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
     setGeneratingAi(false);
   };
 
-  const handlePartnerSendMessage = () => {
-      if (!activeChatOrder || !chatInput.trim()) return;
-      onSendMessage(activeChatOrder, chatInput, company.id, 'partner');
-      setChatInput('');
-  };
-
-  const handleSaveEditingOrder = () => {
-      if (editingOrder) {
-          const itemsTotal = editingOrder.items.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-          const newTotal = itemsTotal + editingOrder.deliveryFee + editingOrder.serviceFee; 
-          const finalOrder = { ...editingOrder, total: newTotal, subtotal: itemsTotal };
-          onUpdateFullOrder(finalOrder);
-          setEditingOrder(null);
-          alert("Pedido atualizado com sucesso!");
-      }
-  };
-
-  const handleDeleteItem = (index: number) => {
-      if (!editingOrder) return;
-      const newItems = [...editingOrder.items];
-      newItems.splice(index, 1);
-      setEditingOrder({ ...editingOrder, items: newItems });
-  };
-
-  const handleUpdateItemQuantity = (index: number, delta: number) => {
-      if (!editingOrder) return;
-      const newItems = [...editingOrder.items];
-      const newQty = Math.max(1, newItems[index].quantity + delta);
-      newItems[index] = { ...newItems[index], quantity: newQty };
-      setEditingOrder({ ...editingOrder, items: newItems });
-  };
-
-  const handlePartnerCancelOrder = () => {
-      if (!editingOrder) return;
-      if (window.confirm("ATENÇÃO: Deseja realmente CANCELAR este pedido? Se houve pagamento online, o estorno será iniciado automaticamente.")) {
-          updateOrderStatus(editingOrder.id, 'cancelled');
-          setEditingOrder(null); 
-      }
-  };
-
   // Lógica Modificada de Drag & Drop para Interceptação de Entregadores
-  const handleDragDropOrder = async (orderId: string, status: Order['status']) => {
+  const handleDragDropOrder = useCallback((orderId: string, status: Order['status']) => {
       const order = orders.find(o => o.id === orderId);
       const isDelivery = order && !(order.deliveryMethod?.toLowerCase().includes('pickup') || order.deliveryMethod?.toLowerCase().includes('retirada'));
       
@@ -1215,7 +1555,18 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       if (status === 'preparing' && order) {
           notifyCustomerWhatsApp(order, 'preparing', company.name);
       }
-  };
+  }, [orders, updateOrderStatus, company.name]);
+
+  // Handler estável (useCallback) para alternar entre entrega/retirada direto no card do Kanban,
+  // evitando recriar uma função inline por coluna a cada render do PartnerView.
+  const handleToggleDeliveryMethod = useCallback((order: Order) => {
+      const isPickup = order.deliveryMethod?.toLowerCase().includes('pickup') || order.deliveryMethod?.toLowerCase().includes('retirada');
+      onUpdateFullOrder({
+          ...order,
+          deliveryMethod: isPickup ? 'delivery' : 'pickup',
+          deliveryFee: isPickup ? order.deliveryFee : 0
+      });
+  }, [onUpdateFullOrder]);
 
   const addGroup = () => {
       const newGroup: ProductGroup = {
@@ -1372,9 +1723,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2500);
   };
-
-  const editingOrderPaymentMethod = editingOrder?.paymentMethod?.toLowerCase() || '';
-  const editingOrderOrigin = editingOrder?.origin?.toLowerCase() || '';
 
   const currentBankFee = calculateBankFee(financialSummary.available, localCompany.serviceFeePercentage || 0);
   const currentNet = Math.max(0, financialSummary.available - currentBankFee);
@@ -1601,255 +1949,25 @@ delete updated.mapLink;
         )}
 
         {editingOrder && (
-             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-                 <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl animate-scale-in overflow-hidden max-h-[90vh] flex flex-col">
-                     <div className="bg-white border-b border-gray-100 p-6 flex justify-between items-center">
-                         <h3 className="text-xl font-bold text-gray-900">
-                             {editingOrderOrigin === 'whatsapp' ? (
-                                 <span className="flex items-center gap-2">
-                                     <MessageSquare className="w-5 h-5 text-green-600" /> Pedido IA #{editingOrder.id.slice(-4)}
-                                 </span>
-                             ) : (
-                                 `Editar Pedido #${editingOrder.id.slice(-4)}`
-                             )}
-                         </h3>
-                         <button onClick={() => setEditingOrder(null)} className="p-2 hover:bg-gray-100 rounded-full"><X className="w-5 h-5"/></button>
-                     </div>
-             
-                     <div className="p-6 overflow-y-auto space-y-6 flex-1">
-                         
-                         {editingOrderOrigin === 'whatsapp' && (
-                             <div className="bg-green-50 p-4 rounded-xl border border-green-200 mb-4">
-                                 <p className="text-sm text-green-800 font-bold flex items-center gap-2">
-                                     <Info className="w-4 h-4"/> Pedido Externo (WhatsApp)
-                                 </p>
-                                 <p className="text-xs text-green-700 mt-1">
-                                     Este pedido foi gerado pela IA. O pagamento é tratado diretamente com o cliente. Não contabiliza no saldo da plataforma.
-                                 </p>
-                             </div>
-                         )}
-
-                         <div className="bg-yellow-50 border border-yellow-100 p-4 rounded-xl">
-                              <div className="flex justify-between items-center mb-2">
-                                 <h4 className="font-bold text-sm text-yellow-800 uppercase">Pagamento</h4>
-                                 <span className="bg-white px-2 py-1 rounded text-xs font-bold shadow-sm">
-                                    {editingOrderPaymentMethod.includes('cash') ? 'DINHEIRO' : 
-                                      (editingOrderPaymentMethod.includes('pix') ? 'PIX' : 
-                                      (editingOrderPaymentMethod.includes('whatsapp') ? 'WHATSAPP' : 'ONLINE'))}
-                                 </span>
-                             </div>
-                             {editingOrderPaymentMethod.includes('cash') ? (
-                                 <p className="text-sm text-yellow-900 font-bold">
-                                     Levar troco para: <span className="text-lg">R$ {editingOrder.changeFor ? editingOrder.changeFor.toFixed(2) : editingOrder.total.toFixed(2)}</span>
-                                 </p>
-                             ) : (
-                                 <p className="text-sm text-green-700 font-medium">
-                                    {editingOrderPaymentMethod.includes('whatsapp') ? 'Combinado via Chat' : (editingOrderOrigin === 'whatsapp' ? 'Combinado via WhatsApp' : 'Pago via App/Pix/Cartão')}
-                                 </p>
-                             )}
-                        </div>
-
-                         <div className="space-y-4">
-                             <h4 className="font-bold text-sm text-gray-500 uppercase tracking-wide">Dados do Cliente</h4>
-                
-                             <div className="grid grid-cols-2 gap-4">
-                                 <div>
-                                     <label className="text-xs font-bold text-gray-400">Nome</label>
-                                     <input 
-                                        value={editingOrder.customerName}
-                                        onChange={e => setEditingOrder({...editingOrder, customerName: e.target.value})}
-                                        className="w-full border rounded-lg px-3 py-2 mt-1 font-medium"
-                                     />
-                                </div>
-                                 <div>
-                                     <label className="text-xs font-bold text-gray-400">Telefone</label>
-                                     <input 
-                                        value={editingOrder.customerPhone}
-                                        onChange={e => setEditingOrder({...editingOrder, customerPhone: e.target.value})}
-                                        className="w-full border rounded-lg px-3 py-2 mt-1 font-medium"
-                                     />
-                                 </div>
-                             </div>
-
-                             {/* Alteração para Alternar Tipo de Entrega no próprio Modal */}
-                             <div>
-                                 <label className="text-xs font-bold text-gray-400 uppercase">Tipo de Entrega</label>
-                                 <select 
-                                    value={editingOrder.deliveryMethod}
-                                    onChange={e => {
-                                        const method = e.target.value;
-                                        setEditingOrder({
-                                            ...editingOrder,
-                                            deliveryMethod: method,
-                                            deliveryFee: method === 'pickup' ? 0 : editingOrder.deliveryFee
-                                        });
-                                    }}
-                                    className="w-full border rounded-lg px-3 py-2 mt-1 bg-white font-medium"
-                                 >
-                                     <option value="delivery">Entrega</option>
-                                     <option value="pickup">Retirada</option>
-                                 </select>
-                             </div>
-
-                             {editingOrder.deliveryAddress && (
-                                <div>
-                                     <label className="text-xs font-bold text-gray-400">Endereço</label>
-                                     <p className="text-sm font-medium bg-gray-50 p-2 rounded border border-gray-200">
-                                         {editingOrder.deliveryAddress.street}, {editingOrder.deliveryAddress.number} <br/>
-                                         {editingOrder.deliveryAddress.neighborhood} - {editingOrder.deliveryAddress.city}
-                                     </p>
-                                 </div>
-                             )}
-                         </div>
-
-                         <div className="space-y-4">
-                             <h4 className="font-bold text-sm text-gray-500 uppercase tracking-wide">Itens do Pedido</h4>
-                             <div className="bg-gray-50 rounded-xl p-4 space-y-4">
-                                 {Array.isArray(editingOrder.items) && editingOrder.items.length > 0 ?
-                                 editingOrder.items.map((item, idx) => (
-                                     <div key={idx} className="flex flex-col bg-white p-3 rounded-lg shadow-sm border border-gray-100">
-                                         <div className="flex justify-between items-center mb-1">
-                                             <div className="flex items-center gap-3">
-                                                 <div className="flex items-center border rounded-lg">
-                                                     <button onClick={() => handleUpdateItemQuantity(idx, -1)} className="px-2 py-1 hover:bg-gray-100">-</button>
-                                                     <span className="px-2 font-bold text-sm">{item.quantity}</span>
-                                                     <button onClick={() => handleUpdateItemQuantity(idx, 1)} className="px-2 py-1 hover:bg-gray-100">+</button>
-                                                 </div>
-                                                 <span className="text-sm font-medium">{item.productName}</span>
-                                             </div>
-                                             <div className="flex items-center gap-4">
-                                                 <span className="font-bold text-sm">R$ {item.price.toFixed(2)}</span>
-                                                 <button onClick={() => handleDeleteItem(idx)} className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg">
-                                                      <Trash2 className="w-4 h-4"/>
-                                                 </button>
-                                             </div>
-                                         </div>
-                                      
-                                        {item.selectedOptions && item.selectedOptions.length > 0 && (
-                                              <div className="pl-24 space-y-1 border-t border-gray-50 pt-1 mt-1">
-                                                   {(() => {
-                                                      const originalProduct = products.find(p => p.name === item.productName);
-                                                      const isPizza = (item as any).pricingMode === 'pizza' || originalProduct?.pricingMode === 'pizza';
-                                                      const groups: Record<string, string[]> = {};
-                                                      item.selectedOptions.forEach(opt => {
-                                                          const g = (opt as any).groupName || '';
-                                                          if (!groups[g]) groups[g] = [];
-                                                          groups[g].push(opt.optionName || opt.name);
-                                                      });
-                                                      return Object.entries(groups).map(([gName, opts], groupIdx) => {
-                                                          const snapshotDivide = item.selectedOptions.some(opt => (opt as any).groupName === gName && (opt as any).dividePrice === true);
-                                                          const originalGroup = originalProduct?.groups?.find(g => g.name === gName || g.name.toUpperCase() === gName);
-                                                          const divideThisGroup = snapshotDivide || originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
-                                                          
-                                                          if (divideThisGroup) {
-                                                              const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
-                                                              return (
-                                                                  <React.Fragment key={groupIdx}>
-                                                                      {opts.map((o, i) => (
-                                                                          <div key={i} className="text-[10px] text-gray-600 mt-0.5">
-                                                                              <span className="font-bold text-gray-800">+ {fraction}{o}</span>
-                                                                          </div>
-                                                                      ))}
-                                                                  </React.Fragment>
-                                                              );
-                                                          } else {
-                                                              return (
-                                                                  <div key={groupIdx} className="text-[10px] text-gray-600 mt-0.5">
-                                                                      {gName ? <span className="font-bold text-gray-800 uppercase">{gName}: </span> : <span className="font-bold text-gray-800">+ </span>}
-                                                                      <span className="font-bold text-gray-800">{opts.join(', ')}</span>
-                                                                  </div>
-                                                              );
-                                                          }
-                                                      });
-                                                  })()}
-                                              </div>
-                                         )}
-                                     </div>
-                                 )) : (
-                                     <div className="bg-white p-4 rounded-lg border border-gray-200">
-                                         <p className="text-sm font-mono whitespace-pre-wrap">{editingOrder.raw_description || "Sem descrição disponível."}</p>
-                                     </div>
-                                )}
-                             </div>
-                         </div>
-
-                         <div className="space-y-2">
-                             <label className="text-xs font-bold text-gray-400 uppercase">Status do Pedido</label>
-                             <select 
-                                value={editingOrder.status}
-                                onChange={e => setEditingOrder({...editingOrder, status: e.target.value as any})}
-                                className="w-full border rounded-lg px-3 py-2 bg-white"
-                             >
-                                 <option value="waiting_payment">Aguardando Pagamento</option>
-                                 <option value="pending">Pendente</option>
-                                 <option value="preparing">Preparando</option>
-                                 <option value="ready">Pronto</option>
-                                 <option value="waiting_courier">Aguardando Entregador</option>
-                                 <option value="delivering">Em Rota</option>
-                                 <option value="delivered">Entregue</option>
-                                 <option value="cancelled">Cancelado</option>
-                             </select>
-                         </div>
-                     </div>
-                     <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-between items-center gap-2">
-                         <div className="flex-1">
-                             <p className="text-xs text-gray-500 font-bold uppercase">Total Atualizado</p>
-                             <p className="text-xl font-bold text-gray-900">
-                                 R$ {editingOrder.total.toFixed(2)}
-                             </p>
-                         </div>
-                         
-                         <button 
-                            onClick={handlePartnerCancelOrder}
-                            className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-4 py-3 rounded-xl font-bold flex items-center gap-2 transition-colors text-sm"
-                            title="Cancela o pedido e estorna pagamento (se houver)"
-                         >
-                             <XCircle className="w-5 h-5" /> Cancelar
-                         </button>
-                         <button onClick={handleSaveEditingOrder} className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-green-200 transition-colors">
-                             <Check className="w-5 h-5" /> Salvar
-                         </button>
-                     </div>
-                 </div>
-             </div>
+            <EditOrderModal
+                key={editingOrder.id}
+                order={editingOrder}
+                products={products}
+                onClose={() => setEditingOrder(null)}
+                onSave={(updatedOrder) => { onUpdateFullOrder(updatedOrder); setEditingOrder(null); }}
+                onCancelOrder={(orderId) => { updateOrderStatus(orderId, 'cancelled'); setEditingOrder(null); }}
+            />
         )}
 
         {activeChatOrder && (
-             <div className="fixed bottom-0 right-0 w-full sm:w-96 h-[500px] bg-white shadow-2xl z-40 rounded-t-3xl sm:rounded-tl-3xl border border-gray-200 flex flex-col animate-slide-up">
-                  <div className="bg-red-600 text-white p-4 rounded-t-3xl flex justify-between items-center">
-                     <div className="flex items-center gap-2">
-                         <div className="bg-white/20 p-2 rounded-full"><MessageCircle className="w-5 h-5"/></div>
-                         <div>
-                             <h4 className="font-bold">Chat com Cliente</h4>
-                             <p className="text-xs opacity-80">Pedido #{activeChatOrder.slice(-4)}</p>
-                         </div>
-                     </div>
-                     <button onClick={() => setActiveChatOrder(null)} className="hover:bg-white/20 p-2 rounded-full"><X className="w-5 h-5"/></button>
-                 </div>
-                 <div className="flex-1 bg-gray-50 overflow-y-auto p-4 space-y-3">
-                     {(chats[activeChatOrder] || []).map(msg => (
-                         <div key={msg.id} className={`flex ${msg.senderRole === 'partner' ? 'justify-end' : 'justify-start'}`}>
-                             <div className={`max-w-[80%] p-3 rounded-xl text-sm ${msg.senderRole === 'partner' ? 'bg-red-100 text-red-900 rounded-tr-none' : 'bg-white border border-gray-200 rounded-tl-none'}`}>
-                                 {msg.text}
-                                 <span className="block text-[10px] text-gray-400 text-right mt-1">
-                                     {new Date(msg.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
-                                  </span>
-                             </div>
-                         </div>
-                     ))}
-                     <div ref={messagesEndRef} />
-                 </div>
-                 <div className="p-3 bg-white border-t border-gray-100 flex gap-2">
-                     <input 
-                        value={chatInput} onChange={e => setChatInput(e.target.value)}
-                        placeholder="Digite sua mensagem..."
-                        className="flex-1 bg-gray-100 rounded-full px-4 py-2 outline-none focus:ring-2 focus:ring-red-500"
-                        onKeyDown={e => e.key === 'Enter' && handlePartnerSendMessage()}
-                     />
-                     <button onClick={handlePartnerSendMessage} className="bg-red-600 text-white p-2 rounded-full hover:bg-red-700"><Send className="w-5 h-5"/></button>
-                 </div>
-             </div>
+            <ChatPanel
+                orderId={activeChatOrder}
+                messages={chats[activeChatOrder] || []}
+                onSend={(text) => onSendMessage(activeChatOrder, text, company.id, 'partner')}
+                onClose={() => setActiveChatOrder(null)}
+            />
         )}
+
 
       <Sidebar 
         currentView={view} 
@@ -2202,14 +2320,7 @@ delete updated.mapLink;
                                 onOpenChat={setActiveChatOrder}
                                 onPrintOrder={handlePrintOrder}
                                 products={products}
-                                onToggleDeliveryMethod={(order) => {
-                                    const isPickup = order.deliveryMethod?.toLowerCase().includes('pickup') || order.deliveryMethod?.toLowerCase().includes('retirada');
-                                    onUpdateFullOrder({
-                                        ...order,
-                                        deliveryMethod: isPickup ? 'delivery' : 'pickup',
-                                        deliveryFee: isPickup ? order.deliveryFee : 0
-                                    });
-                                }}
+                                onToggleDeliveryMethod={handleToggleDeliveryMethod}
                             />
                             <KanbanColumn 
                                  title="Pendentes" 
@@ -2222,14 +2333,7 @@ delete updated.mapLink;
                                 onOpenChat={setActiveChatOrder}
                                 onPrintOrder={handlePrintOrder}
                                 products={products}
-                                onToggleDeliveryMethod={(order) => {
-                                    const isPickup = order.deliveryMethod?.toLowerCase().includes('pickup') || order.deliveryMethod?.toLowerCase().includes('retirada');
-                                    onUpdateFullOrder({
-                                        ...order,
-                                        deliveryMethod: isPickup ? 'delivery' : 'pickup',
-                                        deliveryFee: isPickup ? order.deliveryFee : 0
-                                    });
-                                }}
+                                onToggleDeliveryMethod={handleToggleDeliveryMethod}
                              />
                             <KanbanColumn 
                                 title="Em Preparo" 
@@ -2242,14 +2346,7 @@ delete updated.mapLink;
                                  onOpenChat={setActiveChatOrder}
                                 onPrintOrder={handlePrintOrder}
                                 products={products}
-                                onToggleDeliveryMethod={(order) => {
-                                    const isPickup = order.deliveryMethod?.toLowerCase().includes('pickup') || order.deliveryMethod?.toLowerCase().includes('retirada');
-                                    onUpdateFullOrder({
-                                        ...order,
-                                        deliveryMethod: isPickup ? 'delivery' : 'pickup',
-                                        deliveryFee: isPickup ? order.deliveryFee : 0
-                                    });
-                                }}
+                                onToggleDeliveryMethod={handleToggleDeliveryMethod}
                              />
                             <KanbanColumn 
                                 title="Pronto" 
@@ -2262,14 +2359,7 @@ delete updated.mapLink;
                                 onOpenChat={setActiveChatOrder}
                                 onPrintOrder={handlePrintOrder}
                                  products={products}
-                                onToggleDeliveryMethod={(order) => {
-                                    const isPickup = order.deliveryMethod?.toLowerCase().includes('pickup') || order.deliveryMethod?.toLowerCase().includes('retirada');
-                                    onUpdateFullOrder({
-                                        ...order,
-                                        deliveryMethod: isPickup ? 'delivery' : 'pickup',
-                                        deliveryFee: isPickup ? order.deliveryFee : 0
-                                    });
-                                }}
+                                onToggleDeliveryMethod={handleToggleDeliveryMethod}
                             />
                             <KanbanColumn 
                                  title="Em Entrega" 
@@ -2282,14 +2372,7 @@ delete updated.mapLink;
                                 onOpenChat={setActiveChatOrder}
                                 onPrintOrder={handlePrintOrder}
                                  products={products}
-                                onToggleDeliveryMethod={(order) => {
-                                    const isPickup = order.deliveryMethod?.toLowerCase().includes('pickup') || order.deliveryMethod?.toLowerCase().includes('retirada');
-                                    onUpdateFullOrder({
-                                        ...order,
-                                        deliveryMethod: isPickup ? 'delivery' : 'pickup',
-                                        deliveryFee: isPickup ? order.deliveryFee : 0
-                                    });
-                                }}
+                                onToggleDeliveryMethod={handleToggleDeliveryMethod}
                             />
                             <KanbanColumn 
                                  title="Concluídos" 
@@ -2302,14 +2385,7 @@ delete updated.mapLink;
                                 onOpenChat={setActiveChatOrder}
                                 onPrintOrder={handlePrintOrder}
                                 products={products}
-                                onToggleDeliveryMethod={(order) => {
-                                    const isPickup = order.deliveryMethod?.toLowerCase().includes('pickup') || order.deliveryMethod?.toLowerCase().includes('retirada');
-                                    onUpdateFullOrder({
-                                        ...order,
-                                        deliveryMethod: isPickup ? 'delivery' : 'pickup',
-                                        deliveryFee: isPickup ? order.deliveryFee : 0
-                                    });
-                                }}
+                                onToggleDeliveryMethod={handleToggleDeliveryMethod}
                               />
                             <KanbanColumn 
                                 title="Cancelados" 
@@ -2323,14 +2399,7 @@ delete updated.mapLink;
                                 onOpenChat={setActiveChatOrder}
                                 onPrintOrder={handlePrintOrder}
                                  products={products}
-                                onToggleDeliveryMethod={(order) => {
-                                    const isPickup = order.deliveryMethod?.toLowerCase().includes('pickup') || order.deliveryMethod?.toLowerCase().includes('retirada');
-                                    onUpdateFullOrder({
-                                        ...order,
-                                        deliveryMethod: isPickup ? 'delivery' : 'pickup',
-                                        deliveryFee: isPickup ? order.deliveryFee : 0
-                                    });
-                                }}
+                                onToggleDeliveryMethod={handleToggleDeliveryMethod}
                             />
                         </div>
                     </div>
