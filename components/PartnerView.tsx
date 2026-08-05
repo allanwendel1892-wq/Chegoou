@@ -139,15 +139,7 @@ const areOrderCardPropsEqual = (prev: OrderCardProps, next: OrderCardProps) => {
           return false;
       }
   }
-  return (
-      prev.status === next.status &&
-      prev.products === next.products &&
-      prev.onClickOrder === next.onClickOrder &&
-      prev.onDrop === next.onDrop &&
-      prev.onOpenChat === next.onOpenChat &&
-      prev.onPrintOrder === next.onPrintOrder &&
-      prev.onToggleDeliveryMethod === next.onToggleDeliveryMethod
-  );
+  return prev.status === next.status && prev.products === next.products;
 };
 
 const OrderCard = React.memo(function OrderCard({ order, status, orderChats, products, onClickOrder, onDrop, onOpenChat, onPrintOrder, onToggleDeliveryMethod }: OrderCardProps) {
@@ -795,6 +787,11 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(false);
   const prevOrdersCount = useRef(orders.length);
+  // Ref sincronizado com `orders`: permite que handleDragDropOrder acesse a lista mais
+  // recente sem precisar de `orders` no array de dependências do useCallback, evitando
+  // que a função seja recriada a cada atualização de pedidos (o que quebrava o memo dos cards).
+  const ordersRef = useRef(orders);
+  useEffect(() => { ordersRef.current = orders; }, [orders]);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [editingProductId, setEditingProductId] = useState<string | null>(null); 
   const [productToDelete, setProductToDelete] = useState<string | null>(null);
@@ -1539,7 +1536,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
   // Lógica Modificada de Drag & Drop para Interceptação de Entregadores
   const handleDragDropOrder = useCallback((orderId: string, status: Order['status']) => {
-      const order = orders.find(o => o.id === orderId);
+      const order = ordersRef.current.find(o => o.id === orderId);
       const isDelivery = order && !(order.deliveryMethod?.toLowerCase().includes('pickup') || order.deliveryMethod?.toLowerCase().includes('retirada'));
       
       if (status === 'delivering' && isDelivery) {
@@ -1555,7 +1552,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       if (status === 'preparing' && order) {
           notifyCustomerWhatsApp(order, 'preparing', company.name);
       }
-  }, [orders, updateOrderStatus, company.name]);
+  }, [updateOrderStatus, company.name]);
 
   // Handler estável (useCallback) para alternar entre entrega/retirada direto no card do Kanban,
   // evitando recriar uma função inline por coluna a cada render do PartnerView.
