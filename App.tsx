@@ -291,6 +291,10 @@ const App: React.FC = () => {
     currentUserRef.current = currentUser; 
   }, [currentUser]);
 
+  // MUTEX/LOCK: Evita que o polling sobrescreva atualizações otimistas de pedidos
+  // que ainda estão sendo persistidas no banco (efeito "bate e volta").
+  const lockedOrders = useRef(new Set<string>());
+
   // --- LÓGICA DE INSTALAÇÃO PWA ---
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
@@ -516,6 +520,11 @@ if (!shouldFetch) return;
               let hasChanges = false;
 
               (data as any[]).forEach((freshOrder: any) => {
+                  // MUTEX/LOCK: Ignora pedidos que estão com uma atualização otimista
+                  // em andamento (ainda sendo persistida no Supabase), para não
+                  // sobrescrever a UI com o dado antigo vindo do polling.
+                  if (lockedOrders.current.has(freshOrder.id)) return;
+
                   const existing = newOrdersMap.get(freshOrder.id);
                   const formattedFreshOrder: Order = {
                       ...freshOrder,
@@ -1280,68 +1289,77 @@ const handlePlaceOrder = async (
    * Atualiza status do pedido e processa estornos
    */
   const updateOrderStatus = async (orderId: string, status: Order['status']) => {
-    if (status === 'cancelled') {
-        const orderToCancel = orders.find(o => o.id === orderId);
-        
-        // Estorno Automático para pagamentos digitais
-        if (orderToCancel && orderToCancel.paymentId && orderToCancel.paymentMethod !== 'cash') {
-            console.log("Iniciando processo de estorno para transação:", orderToCancel.paymentId);
-            try {
-                const refundResult = await PaymentService.refundPayment(orderToCancel.paymentId);
-                if (refundResult.success) {
-                    alert("Pedido cancelado e valor estornado com sucesso!");
-                    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status, paymentStatus: 'refunded' } : o));
-                    await supabase.from('orders').update({ status, paymentStatus: 'refunded' }).eq('id', orderId);
-                    return;
-                } else {
-                    alert("Pedido cancelado. Nota: O estorno automático falhou e deve ser verificado: " + refundResult.message);
-                }
-            } catch (e) {
-                console.error("Falha no serviço de estorno:", e);
-            }
-        }
+    // MUTEX/LOCK: Trava o pedido durante toda a operação de atualização
+    // (otimista + persistência), impedindo que o polling sobrescreva a UI
+    // com dados desatualizados antes do Supabase confirmar a mudança.
+    lockedOrders.current.add(orderId);
+    try {
+      if (status === 'cancelled') {
+          const orderToCancel = orders.find(o => o.id === orderId);
+          
+          // Estorno Automático para pagamentos digitais
+          if (orderToCancel && orderToCancel.paymentId && orderToCancel.paymentMethod !== 'cash') {
+              console.log("Iniciando processo de estorno para transação:", orderToCancel.paymentId);
+              try {
+                  const refundResult = await PaymentService.refundPayment(orderToCancel.paymentId);
+                  if (refundResult.success) {
+                      alert("Pedido cancelado e valor estornado com sucesso!");
+                      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status, paymentStatus: 'refunded' } : o));
+                      await supabase.from('orders').update({ status, paymentStatus: 'refunded' }).eq('id', orderId);
+                      return;
+                  } else {
+                      alert("Pedido cancelado. Nota: O estorno automático falhou e deve ser verificado: " + refundResult.message);
+                  }
+              } catch (e) {
+                  console.error("Falha no serviço de estorno:", e);
+              }
+          }
+      }
+
+      let updateData: Partial<Order> = { status };
+      
+      // Libera saldo para empresa se entregue e GATILHO DE ESTOQUE
+      if (status === 'delivered') {
+          updateData.repasseStatus = 'blocked'; // Fica em carência
+          updateData.repasseDate = new Date().toISOString();
+
+          // >>> INÍCIO DA BAIXA DE ESTOQUE AUTOMÁTICA <<<
+          try {
+              const orderToDeduct = orders.find(o => o.id === orderId);
+              if (orderToDeduct && orderToDeduct.items) {
+                  // Puxa as fichas técnicas do banco de dados
+                  const { data: compositions } = await supabase.from('compositions').select('*');
+                  
+                  if (compositions) {
+                      // Roda a calculadora de estoque
+                      const deductions = await processInventoryDeduction(orderToDeduct.items, compositions);
+                      
+                      // Vai no banco e desconta o que foi usado
+                      for (const [inventoryId, amountToDeduct] of Object.entries(deductions)) {
+                          const { data: itemData } = await supabase.from('inventory_items')
+                              .select('current_stock').eq('id', inventoryId).single();
+                              
+                          if (itemData) {
+                              const newStock = Math.max(0, Number(itemData.current_stock) - Number(amountToDeduct));
+                              await supabase.from('inventory_items')
+                                  .update({ current_stock: newStock }).eq('id', inventoryId);
+                          }
+                      }
+                      console.log("Chegoou: Estoque atualizado com sucesso para o pedido", orderId);
+                  }
+              }
+          } catch (e) {
+              console.error("Chegoou: Erro ao abater estoque:", e);
+          }
+          // >>> FIM DA BAIXA DE ESTOQUE AUTOMÁTICA <<<
+      }
+
+      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updateData } : o));
+      await supabase.from('orders').update(updateData).eq('id', orderId);
+    } finally {
+      // Libera o lock assim que a persistência (bem ou mal sucedida) terminar.
+      lockedOrders.current.delete(orderId);
     }
-
-    let updateData: Partial<Order> = { status };
-    
-    // Libera saldo para empresa se entregue e GATILHO DE ESTOQUE
-    if (status === 'delivered') {
-        updateData.repasseStatus = 'blocked'; // Fica em carência
-        updateData.repasseDate = new Date().toISOString();
-
-        // >>> INÍCIO DA BAIXA DE ESTOQUE AUTOMÁTICA <<<
-        try {
-            const orderToDeduct = orders.find(o => o.id === orderId);
-            if (orderToDeduct && orderToDeduct.items) {
-                // Puxa as fichas técnicas do banco de dados
-                const { data: compositions } = await supabase.from('compositions').select('*');
-                
-                if (compositions) {
-                    // Roda a calculadora de estoque
-                    const deductions = await processInventoryDeduction(orderToDeduct.items, compositions);
-                    
-                    // Vai no banco e desconta o que foi usado
-                    for (const [inventoryId, amountToDeduct] of Object.entries(deductions)) {
-                        const { data: itemData } = await supabase.from('inventory_items')
-                            .select('current_stock').eq('id', inventoryId).single();
-                            
-                        if (itemData) {
-                            const newStock = Math.max(0, Number(itemData.current_stock) - Number(amountToDeduct));
-                            await supabase.from('inventory_items')
-                                .update({ current_stock: newStock }).eq('id', inventoryId);
-                        }
-                    }
-                    console.log("Chegoou: Estoque atualizado com sucesso para o pedido", orderId);
-                }
-            }
-        } catch (e) {
-            console.error("Chegoou: Erro ao abater estoque:", e);
-        }
-        // >>> FIM DA BAIXA DE ESTOQUE AUTOMÁTICA <<<
-    }
-
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updateData } : o));
-    await supabase.from('orders').update(updateData).eq('id', orderId);
   };
 
   /**
