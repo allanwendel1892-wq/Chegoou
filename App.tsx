@@ -376,6 +376,18 @@ const App: React.FC = () => {
     ordersRef.current = orders; 
   }, [orders]);
 
+    const myPartnerCompany = currentUser?.role === 'partner' 
+      ? companies.find(c => c.id === currentUser.id) 
+      : null;
+
+  const partnerOrders = useMemo(() => {
+      return orders.filter(o => o.companyId === myPartnerCompany?.id);
+  }, [orders, myPartnerCompany?.id]);
+
+  const partnerProducts = useMemo(() => {
+      return products.filter(p => p.companyId === myPartnerCompany?.id);
+  }, [products, myPartnerCompany?.id]);
+
   // ---------------------------------------------------------------------------
   // EFEITOS DE SISTEMA
   // ---------------------------------------------------------------------------
@@ -1667,7 +1679,7 @@ const handlePlaceOrder = async (
         break;
     
     case 'partner':
-        const myCompany = myPartnerCompany; // reaproveita a constante do topo
+        const myCompany = myPartnerCompany;
 
         if (!myCompany) {
             ViewToRender = (
@@ -1681,8 +1693,8 @@ const handlePlaceOrder = async (
         } else {
             ViewToRender = <PartnerView 
                 company={myCompany} 
-                orders={partnerOrders} // <-- Usa o array blindado do topo
-                products={partnerProducts} // <-- Usa o array blindado do topo
+                orders={partnerOrders} 
+                products={partnerProducts} 
                 updateOrderStatus={updateOrderStatus}
                 updateCompany={(data) => handleUpdateCompany(myCompany.id, data)}
                 onAddProduct={handleAddProduct}
@@ -1696,7 +1708,6 @@ const handlePlaceOrder = async (
             />;
         }
         break;
-
     case 'courier':
         ViewToRender = <CourierView 
             courier={currentUser} 
