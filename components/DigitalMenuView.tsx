@@ -493,8 +493,14 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                                 className={`p-3 border rounded-xl mt-2 flex justify-between items-center cursor-pointer transition-all ${isSelected ? 'bg-red-50 border-red-500 text-red-700' : 'bg-white border-gray-200 hover:bg-gray-50'}`}
                                             >
                                                 <div className="flex flex-col flex-1 pr-4 overflow-hidden">
-                                                    <span className="font-medium text-gray-800">{o.name}</span>
-                                                </div>
+    <span className="font-medium text-gray-800">{o.name}</span>
+    {/* Adicionando a renderização dos ingredientes que vêm no o.description */}
+    {o.description && (
+        <span className="text-xs text-gray-500 mt-0.5 line-clamp-2 leading-tight">
+            {o.description}
+        </span>
+    )}
+</div>
                                                 <span className="font-bold text-sm shrink-0">
                                                     {isSelected && <CheckCircle className="inline w-4 h-4 mr-1" />}
                                                     {o.price > 0 ? `+ R$ ${o.price.toFixed(2)}` : '+ R$ 0.00'}
