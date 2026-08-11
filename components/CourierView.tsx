@@ -280,16 +280,21 @@ const CourierView: React.FC<CourierViewProps> = ({
                     const pMethod = (order.paymentMethod || '').toLowerCase();
                     const isCash = pMethod.includes('cash') || pMethod.includes('dinheiro');
                     const isSettled = !!order.pay;
-                    // TRAVA: pedido em dinheiro cujo caixa ainda não confirmou o acerto
-                    // não pode ser concluído pelo entregador (evita "sumiço" de troco/valor).
                     const blockedByCashSettlement = isCash && !isSettled;
 
                     const rawPhone = order.customerPhone ? String(order.customerPhone).replace(/\D/g, '') : '';
                     const whatsappLink = rawPhone ? `https://wa.me/${rawPhone}` : null;
 
-                    const lat = order.deliveryAddress?.lat;
-                    const lng = order.deliveryAddress?.lng;
+                    // --- NOVA LÓGICA DE LOCALIZAÇÃO VIA TABELA USERS ---
+                    // Encontra o cliente na lista de usuários pelo ID (que na sua imagem é o telefone) ou pelo customerId
+                    const customer = users?.find(u => u.id === order.customerId || String(u.id) === String(order.customerPhone)) as any;
+
+                    // Puxa as coordenadas diretamente do cliente na tabela users
+                    const lat = customer?.latitude || order.deliveryAddress?.lat;
+                    const lng = customer?.longitude || order.deliveryAddress?.lng;
                     const hasExactCoords = !!lat && !!lng;
+                    // ----------------------------------------------------
+
                     const addressSearchLink = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${order.deliveryAddress?.street || ''}, ${order.deliveryAddress?.number || ''}, ${order.deliveryAddress?.neighborhood || ''}, ${order.deliveryAddress?.city || ''}`)}`;
 
                     return (
@@ -362,7 +367,7 @@ const CourierView: React.FC<CourierViewProps> = ({
                                         rel="noopener noreferrer"
                                         className="flex items-center justify-center gap-2 w-full bg-green-50 text-green-700 font-bold py-2.5 rounded-xl border border-green-200 hover:bg-green-100"
                                     >
-                                        <Crosshair className="w-5 h-5" /> GPS Exato (Coordenadas)
+                                        <Crosshair className="w-5 h-5" /> GPS Coordenadas
                                     </a>
                                 )}
                                 {order.deliveryAddress && (
@@ -372,7 +377,7 @@ const CourierView: React.FC<CourierViewProps> = ({
                                         rel="noopener noreferrer"
                                         className="flex items-center justify-center gap-2 w-full bg-blue-50 text-blue-700 font-bold py-2.5 rounded-xl border border-blue-200 hover:bg-blue-100"
                                     >
-                                        <MapPin className="w-5 h-5" /> GPS por Endereço (Texto)
+                                        <MapPin className="w-5 h-5" /> GPS
                                     </a>
                                 )}
                             </div>
