@@ -110,13 +110,47 @@ const enrichProductsWithIngredients = async (fetchedProducts: Product[]): Promis
     if (!fetchedProducts || fetchedProducts.length === 0) return fetchedProducts;
 
     try {
-        const [{ data: compositions, error: compositionsError }, { data: inventoryItems, error: inventoryError }] =
-            await Promise.all([
-                supabase.from('compositions').select('*'),
-                supabase.from('inventory_items').select('id, name')
-            ]);
+        // Monta a lista de "reference_id" possíveis (id do produto base + id/nome
+        // de cada opção/sabor dentro dos grupos), apenas para os produtos que
+        // realmente estão em tela — evita baixar a ficha técnica inteira do banco.
+        const referenceIds = new Set<string>();
+        fetchedProducts.forEach((product) => {
+            referenceIds.add(String(product.id));
+            if (product.groups && Array.isArray(product.groups)) {
+                (product.groups as any[]).forEach((group) => {
+                    if (group.options && Array.isArray(group.options)) {
+                        group.options.forEach((option: any) => {
+                            if (option.id) referenceIds.add(String(option.id));
+                            if (option.name) referenceIds.add(String(option.name));
+                        });
+                    }
+                });
+            }
+        });
+        const referenceIdsArray = Array.from(referenceIds);
+
+        if (referenceIdsArray.length === 0) return fetchedProducts;
+
+        // 1ª consulta: só as composições cujo reference_id pertence aos produtos em tela.
+        const { data: compositions, error: compositionsError } = await supabase
+            .from('compositions')
+            .select('*')
+            .in('referenceId', referenceIdsArray);
 
         if (compositionsError) throw compositionsError;
+        if (!compositions || compositions.length === 0) return fetchedProducts;
+
+        // 2ª consulta: só os insumos de estoque realmente usados nessas composições.
+        const inventoryIds = Array.from(new Set(
+            compositions
+                .map((comp: any) => String(comp.inventory_item_id ?? comp.inventoryItemId ?? ''))
+                .filter(Boolean)
+        ));
+
+        const { data: inventoryItems, error: inventoryError } = inventoryIds.length > 0
+            ? await supabase.from('inventory_items').select('id, name').in('id', inventoryIds)
+            : { data: [] as any[], error: null };
+
         if (inventoryError) throw inventoryError;
         if (!compositions || !inventoryItems) return fetchedProducts;
 
@@ -712,65 +746,116 @@ if (!shouldFetch) return;
       setIsLoading(true);
       setConnectionError(null);
       console.log("Iniciando carregamento de dados globais...");
-      
-      try {
-          // Busca de Empresas
-          const { data: companiesData, error: companiesError } = await supabase.from('companies').select('*');
-          if (companiesError) throw companiesError;
-          if (companiesData) setCompanies(companiesData);
 
-          // Busca de Produtos
-          const { data: productsData, error: productsError } = await supabase.from('products').select('*').limit(5000);
-          if (productsError) throw productsError;
-          if (productsData) {
-              const enrichedProducts = await enrichProductsWithIngredients(productsData);
+      // Usa o usuário logado (via ref, que já reflete o localStorage restaurado)
+      // para decidir quais filtros aplicar nas queries ANTES de disparar tudo.
+      const role = currentUserRef.current?.role;
+      const userId = currentUserRef.current?.id;
+
+      const ACTIVE_STATUSES = ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering', 'waiting_payment'];
+      const INACTIVE_STATUSES = ['delivered', 'cancelled'];
+      const HISTORY_PAGE_SIZE = 50;
+
+      try {
+          // --- Monta as queries dinamicamente conforme o perfil de quem logou ---
+          let productsQuery = supabase.from('products').select('*').limit(5000);
+          let ordersQuery = supabase.from('orders').select('*').limit(5000);
+          // Só existe busca de "histórico separado" quando é parceiro (painel Kanban).
+          let ordersHistoryQuery: PromiseLike<{ data: any[] | null; error: any }> = Promise.resolve({ data: [], error: null });
+
+          if (role === 'partner' && userId) {
+              // Parceiro só precisa dos produtos/pedidos da própria loja.
+              productsQuery = productsQuery.eq('companyId', userId) as typeof productsQuery;
+              // Pedidos ativos da loja (sem limite de histórico).
+              ordersQuery = supabase.from('orders').select('*')
+                  .eq('companyId', userId)
+                  .in('status', ACTIVE_STATUSES) as typeof ordersQuery;
+              // Últimos 50 pedidos inativos (concluídos/cancelados) da loja.
+              ordersHistoryQuery = supabase.from('orders').select('*')
+                  .eq('companyId', userId)
+                  .in('status', INACTIVE_STATUSES)
+                  .order('timestamp', { ascending: false })
+                  .limit(HISTORY_PAGE_SIZE);
+          } else if (role === 'client' && userId) {
+              // Cliente só precisa dos próprios pedidos.
+              ordersQuery = supabase.from('orders').select('*')
+                  .eq('customerId', userId)
+                  .limit(5000) as typeof ordersQuery;
+          }
+          // admin / courier / não logado: mantém as queries completas (comportamento anterior).
+
+          // --- Dispara TODAS as requisições principais em paralelo (elimina o waterfall) ---
+          const [
+              companiesRes,
+              productsRes,
+              ordersRes,
+              ordersHistoryRes,
+              usersRes,
+              couponsRes,
+              withdrawalsRes,
+              messagesRes
+          ] = await Promise.all([
+              supabase.from('companies').select('*'),
+              productsQuery,
+              ordersQuery,
+              ordersHistoryQuery,
+              supabase.from('users').select('*').limit(5000),
+              supabase.from('coupons').select('*'),
+              supabase.from('withdrawal_requests').select('*'),
+              supabase.from('messages').select('*').order('timestamp', { ascending: true })
+          ]);
+
+          // Erros críticos: qualquer um desses impede o app de funcionar corretamente.
+          if (companiesRes.error) throw companiesRes.error;
+          if (productsRes.error) throw productsRes.error;
+          if (ordersRes.error) throw ordersRes.error;
+          if (ordersHistoryRes.error) throw ordersHistoryRes.error;
+          if (usersRes.error) throw usersRes.error;
+
+          if (companiesRes.data) setCompanies(companiesRes.data);
+
+          if (productsRes.data) {
+              const enrichedProducts = await enrichProductsWithIngredients(productsRes.data);
               setProducts(enrichedProducts);
           }
 
-          // Busca de Pedidos
-          const { data: ordersData, error: ordersError } = await supabase.from('orders').select('*').limit(5000);
-          if (ordersError) throw ordersError;
-          if (ordersData) {
-              const formattedOrders = ordersData.map(o => ({
-                  ...o,
-                  timestamp: new Date(o.timestamp)
-              }));
-              formattedOrders.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-              setOrders(formattedOrders);
+          // Une pedidos ativos + últimos 50 históricos (quando parceiro) em um único estado.
+          const combinedOrders = [...(ordersRes.data || []), ...(ordersHistoryRes.data || [])];
+          const formattedOrders = combinedOrders.map((o: any) => ({
+              ...o,
+              timestamp: new Date(o.timestamp)
+          }));
+          formattedOrders.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+          setOrders(formattedOrders);
+
+          if (usersRes.data) setUsers(usersRes.data);
+
+          // Erros não-críticos: não travam o app, só ficam de fora do estado.
+          if (!couponsRes.error && couponsRes.data) {
+              setCoupons(couponsRes.data);
+          } else if (couponsRes.error) {
+              console.warn("Tabela de cupons não acessível ou vazia.");
           }
 
-          // Busca de Usuários (Apenas se Admin no futuro, ou limitado)
-          const { data: usersData, error: usersError } = await supabase.from('users').select('*').limit(5000);
-          if (usersError) throw usersError;
-          if (usersData) setUsers(usersData);
+          if (!withdrawalsRes.error && withdrawalsRes.data) {
+              setWithdrawals(withdrawalsRes.data);
+          } else if (withdrawalsRes.error) {
+              console.warn("Tabela de saques não acessível.");
+          }
 
-          // Busca de Cupons
-          try {
-            const { data: couponsData, error: couponsError } = await supabase.from('coupons').select('*');
-            if (!couponsError && couponsData) setCoupons(couponsData);
-          } catch(e) { console.warn("Tabela de cupons não acessível ou vazia."); }
-
-          // Busca de Saques
-          try {
-            const { data: withdrawalData, error: wdError } = await supabase.from('withdrawal_requests').select('*');
-            if (!wdError && withdrawalData) setWithdrawals(withdrawalData);
-          } catch (e) { console.warn("Tabela de saques não acessível."); }
-
-          // Busca de Histórico de Mensagens
-          try {
-            const { data: messagesData, error: msgError } = await supabase.from('messages').select('*').order('timestamp', { ascending: true });
-            if (!msgError && messagesData) {
-                const groupedChats: Record<string, ChatMessage[]> = {};
-                messagesData.forEach((msg: ChatMessage) => {
-                    if (!groupedChats[msg.orderId]) groupedChats[msg.orderId] = [];
-                    groupedChats[msg.orderId].push({
-                        ...msg,
-                        timestamp: new Date(msg.timestamp)
-                    });
-                });
-                setChats(groupedChats);
-            }
-          } catch (e) { console.error("Erro ao carregar histórico de mensagens."); }
+          if (!messagesRes.error && messagesRes.data) {
+              const groupedChats: Record<string, ChatMessage[]> = {};
+              (messagesRes.data as ChatMessage[]).forEach((msg) => {
+                  if (!groupedChats[msg.orderId]) groupedChats[msg.orderId] = [];
+                  groupedChats[msg.orderId].push({
+                      ...msg,
+                      timestamp: new Date(msg.timestamp)
+                  });
+              });
+              setChats(groupedChats);
+          } else if (messagesRes.error) {
+              console.error("Erro ao carregar histórico de mensagens.");
+          }
 
       } catch (error: any) {
           console.error("Erro fatal ao carregar dados iniciais:", error);
@@ -790,6 +875,44 @@ if (!shouldFetch) return;
           setConnectionError({ title, message, type: errorType });
       } finally {
           setIsLoading(false);
+      }
+  };
+
+  /**
+   * LAZY LOADING DE HISTÓRICO (PARCEIRO)
+   * Busca um bloco mais antigo de pedidos inativos (entregues/cancelados) e
+   * concatena ao estado `orders` existente, sem duplicar itens já carregados.
+   * Preparada para ser passada como prop ao `PartnerView` futuramente, para
+   * paginação sob demanda no Kanban (ex: botão "Carregar mais antigos").
+   */
+  const loadMoreHistoricalOrders = async (offset: number, limit: number = 50) => {
+      if (!currentUserRef.current || currentUserRef.current.role !== 'partner') return;
+
+      try {
+          const { data, error } = await supabase
+              .from('orders')
+              .select('*')
+              .eq('companyId', currentUserRef.current.id)
+              .in('status', ['delivered', 'cancelled'])
+              .order('timestamp', { ascending: false })
+              .range(offset, offset + limit - 1);
+
+          if (error) throw error;
+          if (!data || data.length === 0) return;
+
+          const formattedBatch = data.map((o: any) => ({
+              ...o,
+              timestamp: new Date(o.timestamp)
+          }));
+
+          setOrders(prev => {
+              const existingIds = new Set(prev.map(o => o.id));
+              const newOnes = formattedBatch.filter(o => !existingIds.has(o.id));
+              if (newOnes.length === 0) return prev;
+              return [...prev, ...newOnes].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+          });
+      } catch (error) {
+          console.error("Erro ao carregar histórico de pedidos mais antigos:", error);
       }
   };
 
