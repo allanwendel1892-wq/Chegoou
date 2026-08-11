@@ -671,7 +671,16 @@ if (!shouldFetch) return;
       };
 
       const fetchWithdrawalsUpdate = async () => {
-          const { data, error } = await supabase.from('withdrawal_requests').select('*');
+          let query = supabase.from('withdrawal_requests').select('*');
+          
+          // Otimiza o Polling igual otimizamos o initial fetch
+          if (currentUser.role === 'partner') {
+              query = query.or(`userId.eq.${currentUser.id},companyId.eq.${currentUser.id}`);
+          } else if (currentUser.role === 'courier') {
+              query = query.eq('userId', currentUser.id);
+          }
+
+          const { data, error } = await query;
           if (error || !data) return;
 
           setWithdrawals(prev => {
@@ -745,12 +754,13 @@ if (!shouldFetch) return;
   const fetchInitialData = async () => {
       setIsLoading(true);
       setConnectionError(null);
-      console.log("Iniciando carregamento de dados globais...");
+      console.log("Iniciando carregamento de dados globais otimizado...");
 
       // Usa o usuário logado (via ref, que já reflete o localStorage restaurado)
       // para decidir quais filtros aplicar nas queries ANTES de disparar tudo.
       const role = currentUserRef.current?.role;
       const userId = currentUserRef.current?.id;
+      const courierCompanyId = (currentUserRef.current as any)?.companyId; // Necessário para motoboys
 
       const ACTIVE_STATUSES = ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering', 'waiting_payment'];
       const INACTIVE_STATUSES = ['delivered', 'cancelled'];
@@ -758,31 +768,63 @@ if (!shouldFetch) return;
 
       try {
           // --- Monta as queries dinamicamente conforme o perfil de quem logou ---
-          let productsQuery = supabase.from('products').select('*').limit(5000);
-          let ordersQuery = supabase.from('orders').select('*').limit(5000);
-          // Só existe busca de "histórico separado" quando é parceiro (painel Kanban).
+          let productsQuery: any = supabase.from('products').select('*').limit(5000);
+          let ordersQuery: any = supabase.from('orders').select('*').limit(5000);
           let ordersHistoryQuery: PromiseLike<{ data: any[] | null; error: any }> = Promise.resolve({ data: [], error: null });
+          
+          // QUERIES GLOBAIS QUE AGORA SÃO DINÂMICAS PARA NÃO TRAVAR O SISTEMA
+          let usersQuery: any = supabase.from('users').select('*').limit(5000);
+          let couponsQuery: any = supabase.from('coupons').select('*');
+          let withdrawalsQuery: any = supabase.from('withdrawal_requests').select('*');
+          let messagesQuery: any = supabase.from('messages').select('*').order('timestamp', { ascending: true });
 
           if (role === 'partner' && userId) {
               // Parceiro só precisa dos produtos/pedidos da própria loja.
-              productsQuery = productsQuery.eq('companyId', userId) as typeof productsQuery;
+              productsQuery = supabase.from('products').select('*').eq('companyId', userId);
+              
               // Pedidos ativos da loja (sem limite de histórico).
               ordersQuery = supabase.from('orders').select('*')
                   .eq('companyId', userId)
-                  .in('status', ACTIVE_STATUSES) as typeof ordersQuery;
+                  .in('status', ACTIVE_STATUSES);
+                  
               // Últimos 50 pedidos inativos (concluídos/cancelados) da loja.
               ordersHistoryQuery = supabase.from('orders').select('*')
                   .eq('companyId', userId)
                   .in('status', INACTIVE_STATUSES)
                   .order('timestamp', { ascending: false })
                   .limit(HISTORY_PAGE_SIZE);
+
+              // Baixar apenas os usuários que são o próprio parceiro OU entregadores vinculados a ele
+              usersQuery = supabase.from('users').select('*').or(`id.eq.${userId},companyId.eq.${userId}`);
+              
+              // Baixar apenas cupons deste restaurante
+              couponsQuery = supabase.from('coupons').select('*').eq('companyId', userId);
+              
+              // Baixar saques apenas deste restaurante (seja do parceiro ou repasses dos motoboys)
+              withdrawalsQuery = supabase.from('withdrawal_requests').select('*').or(`userId.eq.${userId},companyId.eq.${userId}`);
+
           } else if (role === 'client' && userId) {
               // Cliente só precisa dos próprios pedidos.
               ordersQuery = supabase.from('orders').select('*')
                   .eq('customerId', userId)
-                  .limit(5000) as typeof ordersQuery;
+                  .limit(5000);
+
+          } else if (role === 'courier' && userId) {
+              // Entregador não precisa baixar o cardápio
+              productsQuery = Promise.resolve({ data: [], error: null }) as any;
+              
+              if (courierCompanyId) {
+                  // Entregador só baixa pedidos do restaurante que ele está vinculado
+                  ordersQuery = supabase.from('orders').select('*').eq('companyId', courierCompanyId).limit(5000);
+              } else {
+                  // Sem vínculo, não baixa pedidos
+                  ordersQuery = Promise.resolve({ data: [], error: null }) as any;
+              }
+              
+              // Entregador só baixa seus próprios saques
+              withdrawalsQuery = supabase.from('withdrawal_requests').select('*').eq('userId', userId);
           }
-          // admin / courier / não logado: mantém as queries completas (comportamento anterior).
+          // admin / não logado: mantém as queries completas (comportamento anterior).
 
           // --- Dispara TODAS as requisições principais em paralelo (elimina o waterfall) ---
           const [
@@ -799,10 +841,10 @@ if (!shouldFetch) return;
               productsQuery,
               ordersQuery,
               ordersHistoryQuery,
-              supabase.from('users').select('*').limit(5000),
-              supabase.from('coupons').select('*'),
-              supabase.from('withdrawal_requests').select('*'),
-              supabase.from('messages').select('*').order('timestamp', { ascending: true })
+              usersQuery,       // <-- Agora usa a query otimizada
+              couponsQuery,     // <-- Agora usa a query otimizada
+              withdrawalsQuery, // <-- Agora usa a query otimizada
+              messagesQuery
           ]);
 
           // Erros críticos: qualquer um desses impede o app de funcionar corretamente.
