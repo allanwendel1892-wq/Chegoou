@@ -288,7 +288,13 @@ const CourierView: React.FC<CourierViewProps> = ({
             <h2 className="font-bold text-gray-700 text-lg flex items-center gap-2">
               <Clock className="w-5 h-5 text-blue-500" /> Pedidos Liberados
             </h2>
-            {openPoolOrders.length === 0 ? (
+            {!(courier as any).companyId ? (
+                <div className="text-center py-10 bg-amber-50 rounded-2xl border border-dashed border-amber-300">
+                    <p className="text-amber-700 font-medium px-4">
+                        Sua conta ainda não está vinculada a nenhum restaurante. Fale com o restaurante para que ele vincule o seu cadastro antes de aceitar corridas.
+                    </p>
+                </div>
+            ) : openPoolOrders.length === 0 ? (
                 <div className="text-center py-10 bg-white rounded-2xl border border-dashed border-gray-300">
                     <p className="text-gray-500 font-medium">Nenhum pedido livre no momento.</p>
                 </div>
