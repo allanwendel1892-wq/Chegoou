@@ -12,7 +12,11 @@ import {
     Check,
     Send,
     XCircle,
-    Loader2
+    Loader2,
+    MessageCircle,
+    Crosshair,
+    CreditCard,
+    AlertTriangle
 } from 'lucide-react';
 
 interface CourierViewProps {
@@ -270,12 +274,42 @@ const CourierView: React.FC<CourierViewProps> = ({
                     <p className="text-gray-500 font-medium">Sua rota está vazia.</p>
                 </div>
             ) : (
-                myActiveOrders.map(order => (
+                myActiveOrders.map(order => {
+                    const pMethod = (order.paymentMethod || '').toLowerCase();
+                    const isCash = pMethod.includes('cash') || pMethod.includes('dinheiro');
+                    const isSettled = !!order.pay;
+                    // TRAVA: pedido em dinheiro cujo caixa ainda não confirmou o acerto
+                    // não pode ser concluído pelo entregador (evita "sumiço" de troco/valor).
+                    const blockedByCashSettlement = isCash && !isSettled;
+
+                    const rawPhone = order.customerPhone ? String(order.customerPhone).replace(/\D/g, '') : '';
+                    const whatsappLink = rawPhone ? `https://wa.me/${rawPhone}` : null;
+
+                    const lat = order.deliveryAddress?.lat;
+                    const lng = order.deliveryAddress?.lng;
+                    const hasExactCoords = !!lat && !!lng;
+                    const addressSearchLink = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${order.deliveryAddress?.street || ''}, ${order.deliveryAddress?.number || ''}, ${order.deliveryAddress?.neighborhood || ''}, ${order.deliveryAddress?.city || ''}`)}`;
+
+                    return (
                     <div key={order.id} className="bg-white rounded-2xl shadow-md border-l-4 border-green-500 overflow-hidden">
                         <div className="p-5 flex flex-col gap-4">
                             <div className="flex justify-between items-start">
                                 <div>
-                                    <h3 className="font-bold text-lg text-gray-900">{order.customerName}</h3>
+                                    <div className="flex items-center gap-2">
+                                        <h3 className="font-bold text-lg text-gray-900">{order.customerName}</h3>
+                                        {whatsappLink && (
+                                            <a
+                                                href={whatsappLink}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                onClick={(e) => e.stopPropagation()}
+                                                className="p-1.5 bg-green-100 text-green-700 rounded-full hover:bg-green-200 transition-colors"
+                                                title="Chamar cliente no WhatsApp"
+                                            >
+                                                <MessageCircle className="w-4 h-4" />
+                                            </a>
+                                        )}
+                                    </div>
                                     <p className="text-gray-600 text-sm mt-1 flex items-start gap-1">
                                         <MapPin className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
                                         <span>
@@ -290,17 +324,56 @@ const CourierView: React.FC<CourierViewProps> = ({
                                 </div>
                             </div>
 
-                            {/* DYNAMIC GPS ACTION BUTTON */}
-                            {order.deliveryAddress && (
-                                <a 
-                                    href={order.deliveryAddress.mapLink || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${order.deliveryAddress.street || ''}, ${order.deliveryAddress.number || ''}, ${order.deliveryAddress.neighborhood || ''}, ${order.deliveryAddress.city || ''}`)}`}
-                                    target="_blank" 
-                                    rel="noopener noreferrer"
-                                    className="flex items-center justify-center gap-2 w-full bg-blue-50 text-blue-700 font-bold py-2.5 rounded-xl border border-blue-200 hover:bg-blue-100"
-                                >
-                                    <MapPin className="w-5 h-5" /> Abrir no GPS
-                                </a>
-                            )}
+                            {/* DETALHES DO PEDIDO: pagamento, valor total e troco */}
+                            <div className="grid grid-cols-2 gap-2 bg-gray-50 rounded-xl p-3 border border-gray-100 text-sm">
+                                <div>
+                                    <p className="text-[10px] text-gray-400 font-bold uppercase">Forma de Pagamento</p>
+                                    <p className="font-bold text-gray-800 flex items-center gap-1">
+                                        {isCash ? <DollarSign className="w-3.5 h-3.5 text-green-600" /> : <CreditCard className="w-3.5 h-3.5 text-blue-600" />}
+                                        {order.paymentMethod || '—'}
+                                    </p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] text-gray-400 font-bold uppercase">Status Pagamento</p>
+                                    <p className={`font-bold ${isSettled ? 'text-green-600' : 'text-yellow-600'}`}>
+                                        {isSettled ? 'Acertado' : 'Pendente'}
+                                    </p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] text-gray-400 font-bold uppercase">Valor Total</p>
+                                    <p className="font-bold text-gray-800">R$ {(Number(order.total) || 0).toFixed(2)}</p>
+                                </div>
+                                {isCash && !!order.changeFor && (
+                                    <div>
+                                        <p className="text-[10px] text-gray-400 font-bold uppercase">Troco Para</p>
+                                        <p className="font-bold text-gray-800">R$ {Number(order.changeFor).toFixed(2)}</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* DUPLA OPÇÃO DE GPS */}
+                            <div className="flex flex-col gap-2">
+                                {hasExactCoords && (
+                                    <a 
+                                        href={`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`}
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        className="flex items-center justify-center gap-2 w-full bg-green-50 text-green-700 font-bold py-2.5 rounded-xl border border-green-200 hover:bg-green-100"
+                                    >
+                                        <Crosshair className="w-5 h-5" /> GPS Exato (Coordenadas)
+                                    </a>
+                                )}
+                                {order.deliveryAddress && (
+                                    <a 
+                                        href={order.deliveryAddress.mapLink || addressSearchLink}
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        className="flex items-center justify-center gap-2 w-full bg-blue-50 text-blue-700 font-bold py-2.5 rounded-xl border border-blue-200 hover:bg-blue-100"
+                                    >
+                                        <MapPin className="w-5 h-5" /> GPS por Endereço (Texto)
+                                    </a>
+                                )}
+                            </div>
 
                             <div className="pt-4 border-t border-gray-100">
                                 <label className="text-sm font-bold text-gray-700 mb-2 block">Código de Entrega (se houver):</label>
@@ -310,22 +383,31 @@ const CourierView: React.FC<CourierViewProps> = ({
                                         placeholder="Ex: 1234"
                                         value={deliveryCode}
                                         onChange={(e) => setDeliveryCode(e.target.value)}
-                                        className="flex-1 border-2 border-gray-200 rounded-xl px-4 py-2 text-center text-lg font-bold tracking-widest focus:border-green-500 outline-none"
+                                        disabled={blockedByCashSettlement}
+                                        className="flex-1 border-2 border-gray-200 rounded-xl px-4 py-2 text-center text-lg font-bold tracking-widest focus:border-green-500 outline-none disabled:bg-gray-100 disabled:text-gray-400"
                                     />
                                     <button 
                                         onClick={() => {
                                             confirmDelivery(order.id, deliveryCode);
                                             setDeliveryCode('');
                                         }}
-                                        className="bg-green-600 text-white px-6 font-bold rounded-xl hover:bg-green-700 transition flex items-center gap-2"
+                                        disabled={blockedByCashSettlement}
+                                        className="bg-green-600 text-white px-6 font-bold rounded-xl hover:bg-green-700 transition flex items-center gap-2 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed"
                                     >
                                         <Check className="w-5 h-5" /> Entregue
                                     </button>
                                 </div>
+                                {blockedByCashSettlement && (
+                                    <p className="mt-2 text-xs font-bold text-red-600 flex items-center gap-1.5">
+                                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                                        Aguardando o caixa confirmar o acerto deste pedido.
+                                    </p>
+                                )}
                             </div>
                         </div>
                     </div>
-                ))
+                    );
+                })
             )}
           </div>
         )}
