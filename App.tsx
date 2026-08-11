@@ -566,8 +566,12 @@ if (!shouldFetch) return;
     query = query.eq('companyId', currentUser.id)
                  .in('status', ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering', 'delivered', 'cancelled', 'waiting_payment']);
 } else if (currentUser.role === 'courier') {
-    // Entregador puxa pedidos que estão prontos para coleta ou que já estão na sua rota
-    query = query.in('status', ['ready', 'waiting_courier', 'delivering']);
+    // Entregador só pode puxar pedidos do restaurante ao qual está vinculado
+    // (users.companyId). Sem vínculo, não busca nada.
+    const courierCompanyId = (currentUser as any).companyId;
+    if (!courierCompanyId) return;
+    query = query.eq('companyId', courierCompanyId)
+                 .in('status', ['ready', 'waiting_courier', 'delivering']);
 } else {
     return;
 }
@@ -1565,7 +1569,16 @@ const handlePlaceOrder = async (
    */
   const handleCourierAcceptOrder = async (orderId: string) => {
       if (!currentUser) return;
-      
+
+      // Trava de segurança: mesmo que a UI já filtre, garante que o entregador
+      // só consiga aceitar corridas do restaurante ao qual está vinculado.
+      const courierCompanyId = (currentUser as any).companyId;
+      const targetOrder = ordersRef.current.find(o => o.id === orderId);
+      if (!courierCompanyId || !targetOrder || (targetOrder as any).companyId !== courierCompanyId) {
+          alert("Você não está vinculado a este restaurante e não pode aceitar esta corrida.");
+          return;
+      }
+
       const updateData: { status: Order['status']; courierId: string } = {
           status: 'delivering',
           courierId: currentUser.id
