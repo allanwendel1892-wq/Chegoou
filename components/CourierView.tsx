@@ -19,6 +19,7 @@ import {
     CreditCard,
     AlertTriangle
 } from 'lucide-react';
+import DeliveryMap from './DeliveryMap';
 
 interface CourierViewProps {
   courier: User;
@@ -46,7 +47,7 @@ const CourierView: React.FC<CourierViewProps> = ({
   const [customerCoords, setCustomerCoords] = useState<Record<string, { lat?: number; lng?: number }>>({});
   const fetchedPhonesRef = React.useRef<Set<string>>(new Set());
 
-  // Pedidos atribuídos a ESTE motoboy que estão em andamento
+  // Pedidos atribuídos a ESTE motoboy que estão em andamento[cite: 1]
   const myActiveOrders = useMemo(() => {
     return (availableOrders || []).filter(o => 
         o.courierId === courier.id && 
@@ -54,9 +55,9 @@ const CourierView: React.FC<CourierViewProps> = ({
     );
   }, [availableOrders, courier.id]);
 
-  // Busca no Supabase (tabela `users`) a localização (lat/lng) dos clientes
-  // dos pedidos ativos, usando o telefone do pedido (customerPhone) para
-  // achar o usuário correspondente.
+  // Busca no Supabase (tabela `users`) a localização (lat/lng) dos clientes[cite: 1]
+  // dos pedidos ativos, usando o telefone do pedido (customerPhone) para[cite: 1]
+  // achar o usuário correspondente.[cite: 1]
   useEffect(() => {
       const phones = Array.from(new Set(
           myActiveOrders
@@ -86,7 +87,7 @@ const CourierView: React.FC<CourierViewProps> = ({
               const next = { ...prev };
               (data || []).forEach((row: any) => {
                   if (row.phone) {
-                      // latitude/longitude vêm como texto no banco; convertemos para número.
+                      // latitude/longitude vêm como texto no banco; convertemos para número.[cite: 1]
                       const lat = row.latitude !== null && row.latitude !== undefined && row.latitude !== ''
                           ? parseFloat(String(row.latitude).replace(',', '.'))
                           : undefined;
@@ -106,12 +107,12 @@ const CourierView: React.FC<CourierViewProps> = ({
       return () => { cancelled = true; };
   }, [myActiveOrders]);
 
-  // Pedidos liberados para todos (limbo)
+  // Pedidos liberados para todos (limbo)[cite: 1]
   const openPoolOrders = useMemo(() => {
     return (availableOrders || []).filter(o => o.status === 'waiting_courier');
   }, [availableOrders]);
 
-  // Pedidos concluídos por ESTE motoboy (Usado para o financeiro)
+  // Pedidos concluídos por ESTE motoboy (Usado para o financeiro)[cite: 1]
   const myCompletedOrders = useMemo(() => {
     return (availableOrders || []).filter(o => 
         o.courierId === courier.id && 
@@ -119,29 +120,29 @@ const CourierView: React.FC<CourierViewProps> = ({
     );
   }, [availableOrders, courier.id]);
 
-  // Pedidos concluídos por ESTE motoboy HOJE (Usado apenas para visualização)
+  // Pedidos concluídos por ESTE motoboy HOJE (Usado apenas para visualização)[cite: 1]
   const todaysCompletedOrders = useMemo(() => {
     const today = new Date().toDateString();
     
     return myCompletedOrders.filter(order => {
         const o = order as any;
-        // Busca os campos de data mais comuns do banco de dados (inclusive Firebase/Firestore)
+        // Busca os campos de data mais comuns do banco de dados (inclusive Firebase/Firestore)[cite: 1]
         const rawDate = o.deliveredAt || o.updatedAt || o.createdAt || o.timestamp || o.date;
         
-        // CORREÇÃO: Se não acharmos nenhuma data atrelada, NÃO exibimos na lista de "Hoje" para não vazar históricos antigos
+        // CORREÇÃO: Se não acharmos nenhuma data atrelada, NÃO exibimos na lista de "Hoje" para não vazar históricos antigos[cite: 1]
         if (!rawDate) return false; 
 
         try {
             let parsedDate: Date;
             
-            // Tratamento caso o banco retorne um Timestamp do Firestore (objeto com seconds)
+            // Tratamento caso o banco retorne um Timestamp do Firestore (objeto com seconds)[cite: 1]
             if (typeof rawDate === 'object' && rawDate.seconds) {
                 parsedDate = new Date(rawDate.seconds * 1000);
             } else {
                 parsedDate = new Date(rawDate);
             }
 
-            // Se a conversão gerar uma data inválida, ignoramos
+            // Se a conversão gerar uma data inválida, ignoramos[cite: 1]
             if (isNaN(parsedDate.getTime())) return false;
 
             return parsedDate.toDateString() === today;
@@ -151,8 +152,8 @@ const CourierView: React.FC<CourierViewProps> = ({
     });
   }, [myCompletedOrders]);
 
-  // CORREÇÃO CRÍTICA 1: O banco de dados usa "userId" para registrar o dono do saque. 
-  // Se o frontend tentar usar só courierId, ele não acha os saques antigos e o saldo fica infinito.
+  // CORREÇÃO CRÍTICA 1: O banco de dados usa "userId" para registrar o dono do saque.  [cite: 1]
+  // Se o frontend tentar usar só courierId, ele não acha os saques antigos e o saldo fica infinito.[cite: 1]
   const myWithdrawals = useMemo(() => {
     return (withdrawals || [])
       .filter(w => w.courierId === courier.id || (w as any).userId === courier.id)
@@ -161,36 +162,36 @@ const CourierView: React.FC<CourierViewProps> = ({
 
   const pendingWithdrawal = myWithdrawals.find(w => w.status === 'pending');
 
-  // Util para evitar erros de ponto flutuante (ex: 19.999999999998)
+  // Util para evitar erros de ponto flutuante (ex: 19.999999999998)[cite: 1]
   const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-  // --- LÓGICA DA CARTEIRA FINANCEIRA (LIVRO-CAIXA) ---
+  // --- LÓGICA DA CARTEIRA FINANCEIRA (LIVRO-CAIXA) ---[cite: 1]
   
-  // 1. Soma TUDO que o entregador produziu (entregas concluídas)
+  // 1. Soma TUDO que o entregador produziu (entregas concluídas)[cite: 1]
   const totalProduzido = round2(
     myCompletedOrders.reduce((acc, o) => acc + (Number(o.deliveryFee) || 0), 0)
   );
 
-  // 2. Soma TUDO que já foi PAGO (saques concluídos)
+  // 2. Soma TUDO que já foi PAGO (saques concluídos)[cite: 1]
   const totalRecebido = round2(
     myWithdrawals
       .filter(w => w.status === 'paid')
       .reduce((acc, w) => acc + (Number(w.amount) || 0), 0)
   );
 
-  // 3. Soma TUDO que está em ANÁLISE (pendente)
+  // 3. Soma TUDO que está em ANÁLISE (pendente)[cite: 1]
   const totalEmAnalise = round2(
     myWithdrawals
       .filter(w => w.status === 'pending')
       .reduce((acc, w) => acc + (Number(w.amount) || 0), 0)
   );
 
-  // 4. Saldo Disponível para saque (Produzido - Recebido - Em análise)
+  // 4. Saldo Disponível para saque (Produzido - Recebido - Em análise)[cite: 1]
   const availableBalance = Math.max(0, round2(totalProduzido - totalRecebido - totalEmAnalise));
   const walletBalance = availableBalance;
 
-  // CORREÇÃO CRÍTICA 2: Mapeamos exatamente QUAIS pedidos já foram sacados 
-  // para enviar ao backend. O banco usa "relatedOrderIds".
+  // CORREÇÃO CRÍTICA 2: Mapeamos exatamente QUAIS pedidos já foram sacados [cite: 1]
+  // para enviar ao backend. O banco usa "relatedOrderIds".[cite: 1]
   const withdrawnOrderIds = useMemo(() => {
       const ids = new Set<string>();
       myWithdrawals.forEach(w => {
@@ -204,7 +205,7 @@ const CourierView: React.FC<CourierViewProps> = ({
       return ids;
   }, [myWithdrawals]);
 
-  // Lista de IDs apenas das corridas que ainda NÃO tiveram o dinheiro solicitado
+  // Lista de IDs apenas das corridas que ainda NÃO tiveram o dinheiro solicitado[cite: 1]
   const availableOrderIdsToWithdraw = useMemo(() => {
       return myCompletedOrders
           .filter(o => !withdrawnOrderIds.has(o.id))
@@ -217,7 +218,7 @@ const CourierView: React.FC<CourierViewProps> = ({
       try {
           const targetCompanyId = myCompletedOrders.length > 0 ? myCompletedOrders[myCompletedOrders.length - 1].companyId : undefined;
           
-          // Enviamos os IDs novamente! Isso previne que a mesma corrida seja sacada 2x
+          // Enviamos os IDs novamente! Isso previne que a mesma corrida seja sacada 2x[cite: 1]
           await onRequestWithdrawal(
               courier.id, 
               availableBalance, 
@@ -334,8 +335,8 @@ const CourierView: React.FC<CourierViewProps> = ({
                     const pMethod = (order.paymentMethod || '').toLowerCase();
                     const isCash = pMethod.includes('cash') || pMethod.includes('dinheiro');
                     const isSettled = !!order.pay;
-                    // TRAVA: pedido em dinheiro cujo caixa ainda não confirmou o acerto
-                    // não pode ser concluído pelo entregador (evita "sumiço" de troco/valor).
+                    // TRAVA: pedido em dinheiro cujo caixa ainda não confirmou o acerto[cite: 1]
+                    // não pode ser concluído pelo entregador (evita "sumiço" de troco/valor).[cite: 1]
                     const blockedByCashSettlement = isCash && !isSettled;
 
                     const rawPhone = order.customerPhone ? String(order.customerPhone).replace(/\D/g, '') : '';
@@ -407,28 +408,37 @@ const CourierView: React.FC<CourierViewProps> = ({
                                 )}
                             </div>
 
-                            {/* DUPLA OPÇÃO DE GPS */}
-                            <div className="flex flex-col gap-2">
-                                {hasExactCoords && (
-                                    <a 
-                                        href={`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`}
-                                        target="_blank" 
-                                        rel="noopener noreferrer"
-                                        className="flex items-center justify-center gap-2 w-full bg-green-50 text-green-700 font-bold py-2.5 rounded-xl border border-green-200 hover:bg-green-100"
-                                    >
-                                        <Crosshair className="w-5 h-5" /> Abrir Localização
-                                    </a>
-                                )}
-                                {order.deliveryAddress && (
+                            {/* ÁREA DO MAPA EMBUTIDO E GPS */}
+                            <div className="flex flex-col gap-3 mt-2">
+                                {hasExactCoords ? (
+                                    <>
+                                        {/* Mapa Embutido no App */}
+                                        <DeliveryMap 
+                                            lat={lat} 
+                                            lng={lng} 
+                                            customerName={order.customerName} 
+                                        />
+                                        
+                                        {/* Botão de fallback (opcional, mas recomendado) */}
+                                        <a 
+                                            href={`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`}
+                                            target="_blank" 
+                                            rel="noopener noreferrer"
+                                            className="flex items-center justify-center gap-2 w-full bg-gray-100 text-gray-600 font-bold py-2 rounded-xl border border-gray-200 hover:bg-gray-200 text-xs"
+                                        >
+                                            <Crosshair className="w-4 h-4" /> Abrir Navegação por Voz (Google Maps)
+                                        </a>
+                                    </>
+                                ) : order.deliveryAddress ? (
                                     <a 
                                         href={order.deliveryAddress.mapLink || addressSearchLink}
                                         target="_blank" 
                                         rel="noopener noreferrer"
                                         className="flex items-center justify-center gap-2 w-full bg-blue-50 text-blue-700 font-bold py-2.5 rounded-xl border border-blue-200 hover:bg-blue-100"
                                     >
-                                        <MapPin className="w-5 h-5" /> Buscar Endereço
+                                        <MapPin className="w-5 h-5" /> Buscar Endereço no Mapa
                                     </a>
-                                )}
+                                ) : null}
                             </div>
 
                             <div className="pt-4 border-t border-gray-100">
