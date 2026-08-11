@@ -1778,6 +1778,7 @@ const handlePlaceOrder = async (
     case 'courier':
         ViewToRender = <CourierView 
             courier={currentUser} 
+            users={users}
             availableOrders={orders} 
             acceptOrder={handleCourierAcceptOrder}
             confirmDelivery={(id, code) => updateOrderStatus(id, 'delivered')}
