@@ -1267,7 +1267,7 @@ if (!shouldFetch) return;
   /**
    * Realiza a criação do pedido e processa pagamento
    */
-const handlePlaceOrder = async (
+  const handlePlaceOrder = async (
       cartItems: any[], 
       companyId: string, 
       finalTotal: number, 
@@ -1280,34 +1280,41 @@ const handlePlaceOrder = async (
       couponCode?: string, 
       discountAmount?: number,
       guestData?: { name: string, phone: string, address: any }
-  ): Promise<string | null> => { // 1. ALTERADO O TIPO DE RETORNO
+  ): Promise<string | null> => {
     
-    const customerId = currentUser ? currentUser.id : undefined;
-    const customerName = currentUser ? currentUser.name : guestData?.name || 'Cliente Avulso';
-    const rawPhone = currentUser ? currentUser.phone : guestData?.phone || '';
+    // 1. CORREÇÃO DO NOME E TELEFONE:
+    // Identifica se quem está fazendo o pedido é um cliente real, um visitante (guestData),
+    // ou se é você mesmo (dono da loja/admin) testando o próprio cardápio.
+    const isTestingAsAdmin = currentUser && (currentUser.role === 'partner' || currentUser.role === 'admin');
+    const isGuestCheckout = !!guestData || !currentUser || isTestingAsAdmin;
+
+    const customerId = isGuestCheckout ? undefined : currentUser?.id;
+    
+    // Agora o sistema dá prioridade MÁXIMA ao que foi digitado na tela de checkout (guestData)
+    const customerName = guestData?.name || (!isGuestCheckout ? currentUser?.name : 'Cliente Avulso');
+    const rawPhone = guestData?.phone || (!isGuestCheckout ? currentUser?.phone : '');
     const customerPhone = normalizeWhatsApp(rawPhone);
-    const deliveryAddress = currentUser ? currentUser.address : guestData?.address;
+    const deliveryAddress = guestData?.address || (!isGuestCheckout ? currentUser?.address : undefined);
 
     if (deliveryMethod === 'delivery' && !deliveryAddress) {
         alert("Erro: Por favor, informe um endereço de entrega válido.");
-        return null; // 2. SUBSTITUÍDO false POR null
+        return null;
     }
     
     const company = companies.find(c => c.id === companyId);
     if (!company) {
         alert("Erro: Empresa não identificada.");
-        return null; // 2. SUBSTITUÍDO false POR null
+        return null; 
     }
 
-    const isGuest = !currentUser;
-    const isOnlinePayment = paymentMethod !== 'cash';
-    const FIXED_SERVICE_FEE = isGuest ? 0 : 0.49; 
+    const FIXED_SERVICE_FEE = isGuestCheckout ? 0 : 0.49; 
     
     let repasseValue = 0;
     const subtotalAfterDiscount = subtotal - (discountAmount || 0);
 
-    if (!isGuest) {
-        if (isOnlinePayment) {
+    // Ajuste de repasse apenas se for pagamento via Cartão (Gateway)
+    if (!isGuestCheckout) {
+        if (paymentMethod === 'card') {
             if (company.deliveryType === 'own') {
                 repasseValue = subtotalAfterDiscount + deliveryFee;
             } else {
@@ -1321,6 +1328,10 @@ const handlePlaceOrder = async (
             }
         }
     }
+
+    // 2. CORREÇÃO DO STATUS E PIX:
+    // O Pix direto na chave da loja agora se comporta como dinheiro (entra como Pendente)
+    const initialStatus = (paymentMethod === 'cash' || paymentMethod === 'pix') ? 'pending' : 'waiting_payment';
 
     const newOrder: Order = {
         id: `ord-${Date.now()}`,
@@ -1343,7 +1354,7 @@ const handlePlaceOrder = async (
         deliveryMethod: deliveryMethod,
         paymentMethod: paymentMethod,
         changeFor: changeFor,
-        status: isGuest ? 'pending' : (paymentMethod === 'cash' ? 'pending' : 'waiting_payment'),
+        status: initialStatus, // <-- Novo status aplicado aqui
         timestamp: new Date(),
         deliveryCode: customerPhone.slice(-4) || '0000',
         deliveryAddress: deliveryAddress,
@@ -1351,7 +1362,7 @@ const handlePlaceOrder = async (
         deliveryType: company.deliveryType,
         paymentStatus: 'pending',
         repasseValue: repasseValue,
-        repasseStatus: isGuest ? 'ignored' : 'pending',
+        repasseStatus: isGuestCheckout ? 'ignored' : 'pending',
         couponCode: couponCode,
         discountAmount: discountAmount
     };
@@ -1360,10 +1371,13 @@ const handlePlaceOrder = async (
     
     if (error) {
         alert("Erro técnico ao registrar pedido: " + error.message);
-        return null; // 2. SUBSTITUÍDO false POR null
+        return null; 
     }
 
-    if (!isGuest && paymentMethod !== 'cash') {
+    // 3. CORREÇÃO DO "FAILED TO FETCH":
+    // Só chama o sistema de pagamento externo se o método for CARTÃO. 
+    // O Pix direto não usa gateway, então ele pula essa etapa e devolve sucesso na hora.
+    if (!isGuestCheckout && paymentMethod === 'card') {
         try {
             const paymentResponse = await PaymentService.processPayment(
                 finalTotal,
@@ -1375,33 +1389,25 @@ const handlePlaceOrder = async (
 
             if (paymentResponse.ticketUrl && !paymentResponse.copyPaste && !paymentResponse.qrCodeBase64) {
                 window.location.assign(paymentResponse.ticketUrl);
-                return newOrder.id; // 3. SUBSTITUÍDO true POR newOrder.id
-            }
-
-            if (paymentMethod === 'pix' && (paymentResponse.copyPaste || paymentResponse.qrCodeBase64)) {
-                 await supabase.from('orders').update({
-                    paymentPixCode: paymentResponse.copyPaste,
-                    paymentPixImage: paymentResponse.qrCodeBase64,
-                    paymentId: paymentResponse.paymentId
-                 }).eq('id', newOrder.id);
+                return newOrder.id; 
             }
 
             if (!paymentResponse.success) {
                 alert("Pagamento negado: " + paymentResponse.message);
                 await supabase.from('orders').update({ status: 'cancelled' }).eq('id', newOrder.id);
-                return null; // 2. SUBSTITUÍDO false POR null
+                return null; 
             }
 
         } catch (e: any) {
             alert("Falha crítica no checkout: " + (e.message || "Erro de conexão com o gateway."));
-            return null; // 2. SUBSTITUÍDO false POR null
+            return null; 
         }
     }
 
+    // Se chegou até aqui, o pedido de Pix ou Dinheiro deu certo!
     showInAppNotification("Pedido Criado!", "Seu pedido foi enviado com sucesso!", "🍟");
-    return newOrder.id; // 3. SUBSTITUÍDO true POR newOrder.id
+    return newOrder.id; 
   };
-
     /**
    * Busca pedido ativo pelo número do WhatsApp (Para Cardápio Digital Público)
    */
