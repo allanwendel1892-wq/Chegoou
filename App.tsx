@@ -284,11 +284,39 @@ const App: React.FC = () => {
   const publicMenuCompanyId = menuRouteMatch ? decodeURIComponent(menuRouteMatch[1]) : null;
 
   // ESTADOS DE AUTENTICAÇÃO E USUÁRIO
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  // CORREÇÃO DE SESSÃO (BUG DO APP DESLOGANDO EM SEGUNDO PLANO):
+  // O useState puro perdia o usuário sempre que o app ia para segundo
+  // plano no mobile (a aba/WebView é suspensa/recriada pelo SO). Agora o
+  // estado inicial tenta ler do localStorage antes de cair para `null`,
+  // então uma sessão já logada sobrevive a esse ciclo de suspensão.
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+      try {
+          const stored = localStorage.getItem('chegoou_user');
+          return stored ? JSON.parse(stored) : null;
+      } catch (e) {
+          console.error("Erro ao ler sessão salva do localStorage:", e);
+          return null;
+      }
+  });
   const currentUserRef = useRef<User | null>(null);
   
   useEffect(() => { 
     currentUserRef.current = currentUser; 
+  }, [currentUser]);
+
+  // Mantém o localStorage sempre sincronizado com o usuário logado.
+  // Dispara tanto no login (quando handleLogin chama setCurrentUser)
+  // quanto no logout (quando currentUser vira null).
+  useEffect(() => {
+      try {
+          if (currentUser) {
+              localStorage.setItem('chegoou_user', JSON.stringify(currentUser));
+          } else {
+              localStorage.removeItem('chegoou_user');
+          }
+      } catch (e) {
+          console.error("Erro ao persistir sessão no localStorage:", e);
+      }
   }, [currentUser]);
 
   // MUTEX/LOCK: Evita que o polling sobrescreva atualizações otimistas de pedidos
@@ -771,6 +799,11 @@ if (!shouldFetch) return;
   const handleLogout = () => {
     console.log("Encerrando sessão...");
     setCurrentUser(null);
+    try {
+        localStorage.removeItem('chegoou_user');
+    } catch (e) {
+        console.error("Erro ao limpar sessão do localStorage:", e);
+    }
   };
 
   /**
@@ -1406,6 +1439,21 @@ const handlePlaceOrder = async (
   };
 
   /**
+   * Alterna a flag "pay" (Acerto de Caixa) de um pedido — usado pelo botão
+   * rápido no OrderCard do restaurante para marcar/desmarcar um pedido como
+   * pago/acertado sem precisar abrir o modal de edição completo.
+   */
+  const handleTogglePayment = async (orderId: string, newStatus: boolean) => {
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, pay: newStatus } : o));
+    const { error } = await supabase.from('orders').update({ pay: newStatus }).eq('id', orderId);
+    if (error) {
+        console.error("Erro ao atualizar status de pagamento (Acerto de Caixa):", error);
+        // Reverte o estado local em caso de falha na persistência
+        setOrders(prev => prev.map(o => o.id === orderId ? { ...o, pay: !newStatus } : o));
+    }
+  };
+
+  /**
    * Exclusão física de pedido (Apenas Admin)
    */
   const handleDeleteOrder = async (orderId: string) => {
@@ -1723,6 +1771,7 @@ const handlePlaceOrder = async (
                 onSendMessage={handleSendMessage}
                 onUpdateFullOrder={handleUpdateFullOrder}
                 onDeleteOrder={handleDeleteOrder}
+                onTogglePayment={handleTogglePayment}
             />;
         }
         break;
