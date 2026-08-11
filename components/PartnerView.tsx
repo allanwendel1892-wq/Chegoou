@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem, WithdrawalRequest, Coupon, User } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
-import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle, ArrowRight, Lock, Unlock, Banknote, AlertCircle, Info, MessageSquare, CreditCard, Printer, TrendingUp, Copy, Link2 } from 'lucide-react';
+import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle, ArrowRight, Lock, Unlock, Banknote, AlertCircle, Info, MessageSquare, CreditCard, Printer, TrendingUp, Copy, Link2, StickyNote } from 'lucide-react';
 import { uploadProductImage, uploadCompanyImage } from '../services/imageUpload';
 import DashboardView from './DashboardView';
 import WhatsAppBotView from './WhatsAppBotView';
@@ -57,6 +57,7 @@ interface PartnerViewProps {
   onSendMessage: (orderId: string, text: string, senderId: string, role: 'client' | 'partner') => void;
   onUpdateFullOrder: (order: Order) => void;
   onDeleteOrder: (orderId: string) => void;
+  onTogglePayment?: (orderId: string, newStatus: boolean) => void;
 }
 
 // URL do Webhook do n8n (fluxo Evolution API / WhatsApp)
@@ -111,6 +112,7 @@ interface OrderCardProps {
   onOpenChat: (orderId: string) => void;
   onPrintOrder: (order: Order) => void;
   onToggleDeliveryMethod?: (order: Order) => void;
+  onTogglePayment?: (orderId: string, newStatus: boolean) => void;
 }
 
 // Compara apenas o que realmente importa para este cartão específico, evitando
@@ -127,7 +129,9 @@ const areOrderCardPropsEqual = (prev: OrderCardProps, next: OrderCardProps) => {
           prev.order.customerPhone !== next.order.customerPhone ||
           prev.order.changeFor !== next.order.changeFor ||
           prev.order.timestamp !== next.order.timestamp ||
-          prev.order.items !== next.order.items
+          prev.order.items !== next.order.items ||
+          (prev.order.pay !== next.order.pay) ||
+          (prev.order.observacoes !== next.order.observacoes)
       ) {
           return false;
       }
@@ -159,13 +163,15 @@ interface FormattedOrderItem {
   groups: FormattedOptionGroup[];
 }
 
-const OrderCard = React.memo(function OrderCard({ order, status, orderChats, products, onClickOrder, onDrop, onOpenChat, onPrintOrder, onToggleDeliveryMethod }: OrderCardProps) {
+const OrderCard = React.memo(function OrderCard({ order, status, orderChats, products, onClickOrder, onDrop, onOpenChat, onPrintOrder, onToggleDeliveryMethod, onTogglePayment }: OrderCardProps) {
   const hasMessages = orderChats.length > 0;
   const lastMsg = hasMessages ? orderChats[orderChats.length - 1] : null;
   const hasUnread = lastMsg?.senderRole === 'client';
   const isWhatsapp = order.origin?.toLowerCase() === 'whatsapp';
   const pMethod = order.paymentMethod?.toLowerCase() || '';
   const dMethod = order.deliveryMethod?.toLowerCase() || '';
+  const hasNote = !!order.observacoes;
+  const isPaid = !!order.pay;
 
   // Motor de cálculo (produto correspondente, agrupamento de opções, regra de
   // divisão de fração de pizza) movido para fora do JSX. Só recalcula quando
@@ -236,7 +242,14 @@ const OrderCard = React.memo(function OrderCard({ order, status, orderChats, pro
           )}
 
           <div className="flex justify-between items-start mb-2">
-              <span className="font-bold text-gray-900 group-hover:text-red-600 transition-colors">#{order.id.slice(-4)}</span>
+              <span className="font-bold text-gray-900 group-hover:text-red-600 transition-colors flex items-center gap-1.5">
+                  #{order.id.slice(-4)}
+                  {hasNote && (
+                      <span title="Existe observação interna neste pedido (oculta para o cliente)">
+                          <StickyNote className="w-3.5 h-3.5 text-amber-500" fill="currentColor" fillOpacity={0.15} />
+                      </span>
+                  )}
+              </span>
               <span className="text-xs text-gray-400 flex items-center gap-1 shrink-0">
                   <Clock className="w-3 h-3" />
                   {new Date(order.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
@@ -385,6 +398,20 @@ const OrderCard = React.memo(function OrderCard({ order, status, orderChats, pro
                               {dMethod.includes('pickup') || dMethod.includes('retirada') ? <Bike className="w-4 h-4" /> : <Store className="w-4 h-4" />}
                           </button>
                       )}
+
+                      {onTogglePayment && (
+                          <button
+                              onClick={(e) => { e.stopPropagation(); onTogglePayment(order.id, !isPaid); }}
+                              className={`p-1.5 rounded-lg transition-colors ${
+                                  isPaid
+                                      ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                      : 'bg-gray-100 text-gray-500 hover:bg-red-100 hover:text-red-600'
+                              }`}
+                              title={isPaid ? 'Acerto de Caixa: Pago (clique para marcar como pendente)' : 'Acerto de Caixa: Pendente (clique para marcar como pago)'}
+                          >
+                              <DollarSign className="w-4 h-4" />
+                          </button>
+                      )}
                   </div>
 
                   <div>
@@ -428,11 +455,12 @@ interface KanbanColumnProps {
   onPrintOrder: (order: Order) => void;
   products: Product[];
   onToggleDeliveryMethod?: (order: Order) => void;
+  onTogglePayment?: (orderId: string, newStatus: boolean) => void;
 }
 
 const EMPTY_CHATS: ChatMessage[] = [];
 
-const KanbanColumn: React.FC<KanbanColumnProps> = React.memo(({ title, status, items, color, isLast, onClickOrder, onDrop, chats, onOpenChat, onPrintOrder, products, onToggleDeliveryMethod }) => {
+const KanbanColumn: React.FC<KanbanColumnProps> = React.memo(({ title, status, items, color, isLast, onClickOrder, onDrop, chats, onOpenChat, onPrintOrder, products, onToggleDeliveryMethod, onTogglePayment }) => {
   const [isOver, setIsOver] = useState(false);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -481,6 +509,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = React.memo(({ title, status, i
                   onOpenChat={onOpenChat}
                   onPrintOrder={onPrintOrder}
                   onToggleDeliveryMethod={onToggleDeliveryMethod}
+                  onTogglePayment={onTogglePayment}
               />
           ))}
           {items.length === 0 && (
@@ -717,6 +746,20 @@ const EditOrderModal: React.FC<EditOrderModalProps> = ({ order, products, onClos
                    </div>
 
                    <div className="space-y-2">
+                       <label className="text-xs font-bold text-gray-400 uppercase flex items-center gap-1.5">
+                           <StickyNote className="w-3.5 h-3.5 text-amber-500" />
+                           Observações Internas (Oculto para o cliente)
+                       </label>
+                       <textarea
+                          value={localOrder.observacoes || ''}
+                          onChange={e => setLocalOrder({ ...localOrder, observacoes: e.target.value })}
+                          placeholder="Ex: cliente pediu para tocar a campainha, apto sem elevador, embalar separado..."
+                          rows={3}
+                          className="w-full border rounded-lg px-3 py-2 bg-amber-50/50 border-amber-200 focus:border-amber-400 outline-none text-sm resize-none"
+                       />
+                   </div>
+
+                   <div className="space-y-2">
                        <label className="text-xs font-bold text-gray-400 uppercase">Status do Pedido</label>
                        <select 
                           value={localOrder.status}
@@ -820,7 +863,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ orderId, messages, onSend, onClos
 
 const PartnerView: React.FC<PartnerViewProps> = ({ 
     company, orders, products, updateOrderStatus, updateCompany, onAddProduct, onUpdateProduct, onDeleteProduct, onLogout,
-    chats, onSendMessage, onUpdateFullOrder, onDeleteOrder
+    chats, onSendMessage, onUpdateFullOrder, onDeleteOrder, onTogglePayment
 }) => {
   const [view, setView] = useState<ViewState>(company.adminPin ? ViewState.POS : ViewState.DASHBOARD);
   const [isUnlocked, setIsUnlocked] = useState(!company.adminPin);
@@ -1635,6 +1678,12 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       });
   }, [onUpdateFullOrder]);
 
+  // Botão rápido "Acerto de Caixa" do OrderCard: alterna a flag `pay` direto
+  // no Supabase (feito no App.tsx) sem precisar abrir o modal de edição.
+  const handleTogglePayment = useCallback((orderId: string, newStatus: boolean) => {
+      onTogglePayment?.(orderId, newStatus);
+  }, [onTogglePayment]);
+
   const addGroup = () => {
       const newGroup: ProductGroup = {
           id: Date.now().toString(),
@@ -2388,6 +2437,7 @@ delete updated.mapLink;
                                 onPrintOrder={handlePrintOrder}
                                 products={products}
                                 onToggleDeliveryMethod={handleToggleDeliveryMethod}
+                                onTogglePayment={handleTogglePayment}
                             />
                             <KanbanColumn 
                                  title="Pendentes" 
@@ -2401,6 +2451,7 @@ delete updated.mapLink;
                                 onPrintOrder={handlePrintOrder}
                                 products={products}
                                 onToggleDeliveryMethod={handleToggleDeliveryMethod}
+                                onTogglePayment={handleTogglePayment}
                              />
                             <KanbanColumn 
                                 title="Em Preparo" 
@@ -2414,6 +2465,7 @@ delete updated.mapLink;
                                 onPrintOrder={handlePrintOrder}
                                 products={products}
                                 onToggleDeliveryMethod={handleToggleDeliveryMethod}
+                                onTogglePayment={handleTogglePayment}
                              />
                             <KanbanColumn 
                                 title="Pronto" 
@@ -2427,6 +2479,7 @@ delete updated.mapLink;
                                 onPrintOrder={handlePrintOrder}
                                  products={products}
                                 onToggleDeliveryMethod={handleToggleDeliveryMethod}
+                                onTogglePayment={handleTogglePayment}
                             />
                             <KanbanColumn 
                                  title="Em Entrega" 
@@ -2440,6 +2493,7 @@ delete updated.mapLink;
                                 onPrintOrder={handlePrintOrder}
                                  products={products}
                                 onToggleDeliveryMethod={handleToggleDeliveryMethod}
+                                onTogglePayment={handleTogglePayment}
                             />
                             <KanbanColumn 
                                  title="Concluídos" 
@@ -2453,6 +2507,7 @@ delete updated.mapLink;
                                 onPrintOrder={handlePrintOrder}
                                 products={products}
                                 onToggleDeliveryMethod={handleToggleDeliveryMethod}
+                                onTogglePayment={handleTogglePayment}
                               />
                             <KanbanColumn 
                                 title="Cancelados" 
@@ -2467,6 +2522,7 @@ delete updated.mapLink;
                                 onPrintOrder={handlePrintOrder}
                                  products={products}
                                 onToggleDeliveryMethod={handleToggleDeliveryMethod}
+                                onTogglePayment={handleTogglePayment}
                             />
                         </div>
                     </div>
