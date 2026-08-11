@@ -983,16 +983,95 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       fetchDashboardData();
   }, []);
 
-  // Busca os entregadores ativos do banco de dados
+  // Busca APENAS os entregadores vinculados a ESTE restaurante (companyId = company.id).
+  // Antes buscava todos os entregadores da plataforma (`.eq('role','courier')` sem filtro
+  // de loja), o que permitia que um restaurante despachasse/visse entregadores de outro.
+  // Também limitamos as colunas retornadas (evita baixar senha/endereço/etc de cada
+  // entregador só para popular um <select>, o que fica caro conforme a base cresce).
+  const fetchCouriers = useCallback(async () => {
+      const { data, error } = await supabase
+          .from('users')
+          .select('id, name, phone, role, companyId')
+          .eq('role', 'courier')
+          .eq('companyId', company.id);
+      if (!error && data) {
+          setCouriers(data as User[]);
+      }
+  }, [company.id]);
+
   useEffect(() => {
-      const fetchCouriers = async () => {
-          const { data, error } = await supabase.from('users').select('*').eq('role', 'courier');
-          if (!error && data) {
-              setCouriers(data);
-          }
-      };
       fetchCouriers();
-  }, []);
+  }, [fetchCouriers]);
+
+  // --- VINCULAÇÃO DE ENTREGADORES A ESTE RESTAURANTE ---
+  // Como o cadastro do entregador (conta) é feito fora do painel do parceiro, o
+  // vínculo com a loja é feito aqui: o parceiro localiza o entregador pelo telefone
+  // (WhatsApp) e associa a conta dele a este restaurante (users.companyId = company.id).
+  // Isso é o que impede um entregador de aparecer/aceitar corridas de outra loja.
+  const [courierSearchPhone, setCourierSearchPhone] = useState('');
+  const [isLinkingCourier, setIsLinkingCourier] = useState(false);
+  const [courierLinkError, setCourierLinkError] = useState('');
+
+  const handleLinkCourier = async () => {
+      const digits = courierSearchPhone.replace(/\D/g, '');
+      if (digits.length < 10) {
+          setCourierLinkError('Digite o telefone completo do entregador (com DDD).');
+          return;
+      }
+      setIsLinkingCourier(true);
+      setCourierLinkError('');
+      try {
+          // Localiza o entregador pelo telefone (busca por "contém" para tolerar
+          // diferenças de formatação/DDI já normalizadas no cadastro).
+          const { data: found, error: findError } = await supabase
+              .from('users')
+              .select('id, name, phone, role, companyId')
+              .eq('role', 'courier')
+              .ilike('phone', `%${digits}%`)
+              .limit(1);
+
+          if (findError) throw findError;
+
+          if (!found || found.length === 0) {
+              setCourierLinkError('Nenhum entregador cadastrado com esse telefone.');
+              return;
+          }
+
+          const courierFound = found[0] as any;
+
+          if (courierFound.companyId && courierFound.companyId !== company.id) {
+              setCourierLinkError('Este entregador já está vinculado a outro restaurante.');
+              return;
+          }
+
+          const { error: updateError } = await supabase
+              .from('users')
+              .update({ companyId: company.id })
+              .eq('id', courierFound.id);
+
+          if (updateError) throw updateError;
+
+          setCourierSearchPhone('');
+          await fetchCouriers();
+      } catch (e: any) {
+          setCourierLinkError(e.message || 'Erro ao vincular entregador.');
+      } finally {
+          setIsLinkingCourier(false);
+      }
+  };
+
+  const handleUnlinkCourier = async (courierId: string) => {
+      if (!window.confirm('Remover o vínculo deste entregador com o seu restaurante? Ele deixará de ver os pedidos da sua loja.')) return;
+      const { error } = await supabase
+          .from('users')
+          .update({ companyId: null })
+          .eq('id', courierId);
+      if (!error) {
+          setCouriers(prev => prev.filter(c => c.id !== courierId));
+      } else {
+          alert('Erro ao desvincular entregador: ' + error.message);
+      }
+  };
   
   useEffect(() => { setLocalCompany(company); }, [company]);
   useEffect(() => {
@@ -2289,6 +2368,59 @@ delete updated.mapLink;
                             </table>
                         </div>
                      </div>
+
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                        <div className="p-6 border-b border-gray-100">
+                            <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+                                <Bike className="w-5 h-5 text-gray-500" /> Entregadores do Restaurante
+                            </h3>
+                            <p className="text-sm text-gray-500 mt-1">
+                                Apenas entregadores vinculados aqui conseguem ver e aceitar os pedidos da sua loja.
+                                Peça para o entregador criar a conta dele primeiro (WhatsApp) e depois vincule pelo telefone.
+                            </p>
+                        </div>
+                        <div className="p-6 pt-4 space-y-4">
+                            <div className="flex flex-col sm:flex-row gap-3">
+                                <input
+                                    type="tel"
+                                    placeholder="Telefone do entregador (com DDD)"
+                                    value={courierSearchPhone}
+                                    onChange={e => { setCourierSearchPhone(e.target.value); setCourierLinkError(''); }}
+                                    className="flex-1 px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                />
+                                <button
+                                    onClick={handleLinkCourier}
+                                    disabled={isLinkingCourier}
+                                    className="px-6 py-3 bg-gray-900 text-white rounded-xl font-bold text-sm hover:bg-gray-800 disabled:opacity-50 flex items-center justify-center gap-2"
+                                >
+                                    {isLinkingCourier ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Vincular Entregador'}
+                                </button>
+                            </div>
+                            {courierLinkError && (
+                                <p className="text-sm text-red-600 font-medium">{courierLinkError}</p>
+                            )}
+
+                            <div className="divide-y divide-gray-100 border border-gray-100 rounded-xl overflow-hidden">
+                                {couriers.length === 0 && (
+                                    <p className="p-4 text-sm text-gray-400 text-center">Nenhum entregador vinculado ainda.</p>
+                                )}
+                                {couriers.map(c => (
+                                    <div key={c.id} className="flex items-center justify-between p-4">
+                                        <div>
+                                            <p className="font-bold text-gray-800 text-sm">{c.name}</p>
+                                            <p className="text-xs text-gray-500">{c.phone}</p>
+                                        </div>
+                                        <button
+                                            onClick={() => handleUnlinkCourier(c.id)}
+                                            className="text-xs font-bold text-red-600 hover:underline"
+                                        >
+                                            Desvincular
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
 
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                         <div className="p-6 border-b border-gray-100 flex justify-between items-center">
