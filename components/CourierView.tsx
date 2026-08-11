@@ -21,6 +21,7 @@ import {
 
 interface CourierViewProps {
   courier: User;
+  users: User[];
   availableOrders: Order[];
   acceptOrder: (orderId: string) => void;
   confirmDelivery: (orderId: string, code: string) => void;
@@ -31,7 +32,8 @@ interface CourierViewProps {
 
 const CourierView: React.FC<CourierViewProps> = ({ 
     courier, 
-    availableOrders, 
+    availableOrders,
+    users,
     acceptOrder, 
     confirmDelivery, 
     onLogout,
