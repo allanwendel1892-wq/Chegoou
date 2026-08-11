@@ -179,6 +179,8 @@ export interface Order {
 
   couponCode?: string;
   discountAmount?: number;
+  observacoes?: string;
+  pay?: boolean;
 }
 
 export interface FinancialRecord {
