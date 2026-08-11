@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Order, User, WithdrawalRequest } from '../types';
+import { supabase } from '../services/supabaseClient';
 import { 
     Navigation, 
     Bike, 
@@ -21,7 +22,6 @@ import {
 
 interface CourierViewProps {
   courier: User;
-  users: User[];
   availableOrders: Order[];
   acceptOrder: (orderId: string) => void;
   confirmDelivery: (orderId: string, code: string) => void;
@@ -32,8 +32,7 @@ interface CourierViewProps {
 
 const CourierView: React.FC<CourierViewProps> = ({ 
     courier, 
-    availableOrders,
-    users,
+    availableOrders, 
     acceptOrder, 
     confirmDelivery, 
     onLogout,
@@ -44,10 +43,8 @@ const CourierView: React.FC<CourierViewProps> = ({
   const [deliveryCode, setDeliveryCode] = useState('');
   const [requestingWithdrawal, setRequestingWithdrawal] = useState(false);
 
-  // Pedidos liberados para todos (limbo)
-  const openPoolOrders = useMemo(() => {
-    return (availableOrders || []).filter(o => o.status === 'waiting_courier');
-  }, [availableOrders]);
+  const [customerCoords, setCustomerCoords] = useState<Record<string, { lat?: number; lng?: number }>>({});
+  const fetchedPhonesRef = React.useRef<Set<string>>(new Set());
 
   // Pedidos atribuídos a ESTE motoboy que estão em andamento
   const myActiveOrders = useMemo(() => {
@@ -56,6 +53,63 @@ const CourierView: React.FC<CourierViewProps> = ({
         (o.status === 'delivering' || o.status === 'ready')
     );
   }, [availableOrders, courier.id]);
+
+  // Busca no Supabase (tabela `users`) a localização (lat/lng) dos clientes
+  // dos pedidos ativos, usando o telefone do pedido (customerPhone) para
+  // achar o usuário correspondente.
+  useEffect(() => {
+      const phones = Array.from(new Set(
+          myActiveOrders
+              .map(o => o.customerPhone)
+              .filter((p): p is string => !!p && !fetchedPhonesRef.current.has(p))
+      ));
+
+      if (phones.length === 0) return;
+      phones.forEach(p => fetchedPhonesRef.current.add(p));
+
+      let cancelled = false;
+
+      (async () => {
+          const { data, error } = await supabase
+              .from('users')
+              .select('phone, latitude, longitude')
+              .in('phone', phones);
+
+          if (cancelled) return;
+
+          if (error) {
+              console.error('Erro ao buscar localização dos clientes (tabela users):', error);
+              return;
+          }
+
+          setCustomerCoords(prev => {
+              const next = { ...prev };
+              (data || []).forEach((row: any) => {
+                  if (row.phone) {
+                      // latitude/longitude vêm como texto no banco; convertemos para número.
+                      const lat = row.latitude !== null && row.latitude !== undefined && row.latitude !== ''
+                          ? parseFloat(String(row.latitude).replace(',', '.'))
+                          : undefined;
+                      const lng = row.longitude !== null && row.longitude !== undefined && row.longitude !== ''
+                          ? parseFloat(String(row.longitude).replace(',', '.'))
+                          : undefined;
+                      next[row.phone] = {
+                          lat: lat !== undefined && !isNaN(lat) ? lat : undefined,
+                          lng: lng !== undefined && !isNaN(lng) ? lng : undefined,
+                      };
+                  }
+              });
+              return next;
+          });
+      })();
+
+      return () => { cancelled = true; };
+  }, [myActiveOrders]);
+
+  // Pedidos liberados para todos (limbo)
+  const openPoolOrders = useMemo(() => {
+    return (availableOrders || []).filter(o => o.status === 'waiting_courier');
+  }, [availableOrders]);
 
   // Pedidos concluídos por ESTE motoboy (Usado para o financeiro)
   const myCompletedOrders = useMemo(() => {
@@ -280,21 +334,16 @@ const CourierView: React.FC<CourierViewProps> = ({
                     const pMethod = (order.paymentMethod || '').toLowerCase();
                     const isCash = pMethod.includes('cash') || pMethod.includes('dinheiro');
                     const isSettled = !!order.pay;
+                    // TRAVA: pedido em dinheiro cujo caixa ainda não confirmou o acerto
+                    // não pode ser concluído pelo entregador (evita "sumiço" de troco/valor).
                     const blockedByCashSettlement = isCash && !isSettled;
 
                     const rawPhone = order.customerPhone ? String(order.customerPhone).replace(/\D/g, '') : '';
                     const whatsappLink = rawPhone ? `https://wa.me/${rawPhone}` : null;
 
-                    // --- NOVA LÓGICA DE LOCALIZAÇÃO VIA TABELA USERS ---
-                    // Encontra o cliente na lista de usuários pelo ID (que na sua imagem é o telefone) ou pelo customerId
-                    const customer = users?.find(u => u.id === order.customerId || String(u.id) === String(order.customerPhone)) as any;
-
-                    // Puxa as coordenadas diretamente do cliente na tabela users
-                    const lat = customer?.latitude || order.deliveryAddress?.lat;
-                    const lng = customer?.longitude || order.deliveryAddress?.lng;
+                    const lat = customerCoords[order.customerPhone]?.lat;
+                    const lng = customerCoords[order.customerPhone]?.lng;
                     const hasExactCoords = !!lat && !!lng;
-                    // ----------------------------------------------------
-
                     const addressSearchLink = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${order.deliveryAddress?.street || ''}, ${order.deliveryAddress?.number || ''}, ${order.deliveryAddress?.neighborhood || ''}, ${order.deliveryAddress?.city || ''}`)}`;
 
                     return (
@@ -367,7 +416,7 @@ const CourierView: React.FC<CourierViewProps> = ({
                                         rel="noopener noreferrer"
                                         className="flex items-center justify-center gap-2 w-full bg-green-50 text-green-700 font-bold py-2.5 rounded-xl border border-green-200 hover:bg-green-100"
                                     >
-                                        <Crosshair className="w-5 h-5" /> GPS Coordenadas
+                                        <Crosshair className="w-5 h-5" /> GPS Exato (Coordenadas)
                                     </a>
                                 )}
                                 {order.deliveryAddress && (
@@ -377,7 +426,7 @@ const CourierView: React.FC<CourierViewProps> = ({
                                         rel="noopener noreferrer"
                                         className="flex items-center justify-center gap-2 w-full bg-blue-50 text-blue-700 font-bold py-2.5 rounded-xl border border-blue-200 hover:bg-blue-100"
                                     >
-                                        <MapPin className="w-5 h-5" /> GPS
+                                        <MapPin className="w-5 h-5" /> GPS por Endereço (Texto)
                                     </a>
                                 )}
                             </div>
