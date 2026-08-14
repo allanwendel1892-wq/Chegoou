@@ -17,7 +17,8 @@ import {
     MessageCircle,
     Crosshair,
     CreditCard,
-    AlertTriangle
+    AlertTriangle,
+    Package // Ícone adicionado para o checklist
 } from 'lucide-react';
 
 interface CourierViewProps {
@@ -413,8 +414,49 @@ const CourierView: React.FC<CourierViewProps> = ({
                                 )}
                             </div>
 
+                            {/* ITENS DO PEDIDO (Checklist de Conferência) */}
+                            {(order as any).items && (order as any).items.length > 0 && (
+                                <div className="bg-gray-50 rounded-xl p-3 border border-gray-100 flex flex-col gap-2 mt-2">
+                                    <p className="text-[10px] text-gray-400 font-bold uppercase flex items-center gap-1">
+                                        <Package className="w-3.5 h-3.5" /> Conferência de Itens
+                                    </p>
+                                    
+                                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                                        {(order as any).items.map((item: any, idx: number) => (
+                                            <label 
+                                                key={item.id || idx} 
+                                                className="flex items-start gap-3 p-2.5 bg-white rounded-lg border border-gray-200 cursor-pointer hover:bg-gray-50 transition-colors shadow-sm"
+                                            >
+                                                <input 
+                                                    type="checkbox" 
+                                                    className="mt-0.5 w-4 h-4 text-green-600 rounded border-gray-300 focus:ring-green-500 cursor-pointer"
+                                                />
+                                                <div className="flex-1">
+                                                    <p className="text-sm font-bold text-gray-800 leading-tight">
+                                                        <span className="text-green-600 mr-1">{item.quantity}x</span> 
+                                                        {item.name || item.productName}
+                                                    </p>
+                                                    
+                                                    {item.observations && (
+                                                        <p className="text-xs text-gray-500 mt-1 italic">
+                                                            Obs: {item.observations}
+                                                        </p>
+                                                    )}
+                                                    
+                                                    {item.options && item.options.length > 0 && (
+                                                        <p className="text-xs text-gray-500 mt-1">
+                                                            + {item.options.join(', ')}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
                             {/* DUPLA OPÇÃO DE GPS */}
-                            <div className="flex flex-col gap-2">
+                            <div className="flex flex-col gap-2 mt-2">
                                 {hasExactCoords && (
                                     <a 
                                         href={`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`}
