@@ -308,6 +308,20 @@ const processInventoryDeduction = async (orderItems: any[], dbCompositions: any[
 };
 // >>> FIM DO MOTOR DE CÁLCULO <<<
 
+/**
+ * Utilitário de Timeout para evitar bloqueio infinito
+ * Garante que nenhuma requisição fique travada indefinidamente: se a
+ * promise não resolver dentro de `ms`, rejeita com um erro TIMEOUT.
+ */
+const withTimeout = <T,>(promise: Promise<T>, ms: number = 5000): Promise<T> => {
+    return Promise.race([
+        promise,
+        new Promise<T>((_, reject) =>
+            setTimeout(() => reject(new Error('TIMEOUT')), ms)
+        )
+    ]);
+};
+
 const App: React.FC = () => {
   // ---------------------------------------------------------------------------
   // ROTEAMENTO PÚBLICO: CARDÁPIO DIGITAL (SEM LOGIN)
@@ -641,9 +655,18 @@ if (!shouldFetch) return;
       };
 
       const fetchMessagesUpdate = async () => {
+          // FILTRO CRÍTICO: só busca mensagens dos pedidos que ainda estão
+          // em andamento, para não varrer a tabela inteira a cada 5s.
+          const activeOrderIds = ordersRef.current
+              .filter(o => ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering'].includes(o.status))
+              .map(o => o.id);
+
+          if (activeOrderIds.length === 0) return;
+
           const { data, error } = await supabase
               .from('messages')
               .select('*')
+              .in('orderId', activeOrderIds)
               .order('timestamp', { ascending: true });
 
           if (error || !data) return;
@@ -755,11 +778,14 @@ if (!shouldFetch) return;
       }
   };
 
-  const fetchInitialData = async () => {
-      setIsLoading(true);
-      setConnectionError(null);
-      console.log("Iniciando carregamento de dados globais otimizado...");
-
+  /**
+   * DADOS ESSENCIAIS (bloqueia a tela de carregamento)
+   * Busca apenas companies, products e pedidos ATIVOS — o mínimo para o
+   * usuário conseguir abrir o app e trabalhar (ex: motoboy ver suas rotas).
+   * É envolvida por `withTimeout` em `fetchInitialData`, então mesmo que
+   * demore, a tela é liberada no máximo em 5s.
+   */
+  const fetchEssentialData = async (): Promise<Order[]> => {
       // Usa o usuário logado (via ref, que já reflete o localStorage restaurado)
       // para decidir quais filtros aplicar nas queries ANTES de disparar tudo.
       const role = currentUserRef.current?.role;
@@ -767,114 +793,156 @@ if (!shouldFetch) return;
       const courierCompanyId = (currentUserRef.current as any)?.companyId; // Necessário para motoboys
 
       const ACTIVE_STATUSES = ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering', 'waiting_payment'];
+
+      // --- Monta as queries dinamicamente conforme o perfil de quem logou ---
+      let productsQuery: any = supabase.from('products').select('*').limit(5000);
+      let ordersQuery: any = supabase.from('orders').select('*').limit(5000);
+
+      if (role === 'partner' && userId) {
+          // Parceiro só precisa dos produtos/pedidos da própria loja.
+          productsQuery = supabase.from('products').select('*').eq('companyId', userId);
+
+          // Pedidos ativos da loja (histórico entra depois, em background).
+          ordersQuery = supabase.from('orders').select('*')
+              .eq('companyId', userId)
+              .in('status', ACTIVE_STATUSES);
+
+      } else if (role === 'client' && userId) {
+          // Cliente só precisa dos próprios pedidos.
+          ordersQuery = supabase.from('orders').select('*')
+              .eq('customerId', userId)
+              .limit(5000);
+
+      } else if (role === 'courier' && userId) {
+          // Entregador não precisa baixar o cardápio
+          productsQuery = Promise.resolve({ data: [], error: null }) as any;
+
+          if (courierCompanyId) {
+              // Entregador só baixa pedidos do restaurante que ele está vinculado
+              ordersQuery = supabase.from('orders').select('*').eq('companyId', courierCompanyId).limit(5000);
+          } else {
+              // Sem vínculo, não baixa pedidos
+              ordersQuery = Promise.resolve({ data: [], error: null }) as any;
+          }
+      }
+      // admin / não logado: mantém as queries completas (comportamento anterior).
+
+      // --- Dispara as requisições essenciais em paralelo (elimina o waterfall) ---
+      const [companiesRes, productsRes, ordersRes] = await Promise.all([
+          supabase.from('companies').select('*'),
+          productsQuery,
+          ordersQuery
+      ]);
+
+      // Erros críticos: qualquer um desses impede o app de funcionar corretamente.
+      if (companiesRes.error) throw companiesRes.error;
+      if (productsRes.error) throw productsRes.error;
+      if (ordersRes.error) throw ordersRes.error;
+
+      if (companiesRes.data) setCompanies(companiesRes.data);
+
+      if (productsRes.data) {
+          const enrichedProducts = await enrichProductsWithIngredients(productsRes.data);
+          setProducts(enrichedProducts);
+      }
+
+      const formattedOrders: Order[] = (ordersRes.data || []).map((o: any) => ({
+          ...o,
+          timestamp: new Date(o.timestamp)
+      }));
+      formattedOrders.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+      setOrders(formattedOrders);
+      // Atualiza a ref imediatamente (sem esperar o próximo render) para que
+      // fetchSecondaryData já possa filtrar mensagens pelos pedidos ativos.
+      ordersRef.current = formattedOrders;
+
+      return formattedOrders;
+  };
+
+  /**
+   * DADOS SECUNDÁRIOS (roda em background, não trava a tela)
+   * Busca histórico de pedidos, usuários, cupons, saques e mensagens.
+   * Erros aqui nunca disparam a tela de erro de conexão — só ficam de fora
+   * do estado, com um aviso no console.
+   */
+  const fetchSecondaryData = async () => {
+      const role = currentUserRef.current?.role;
+      const userId = currentUserRef.current?.id;
+
       const INACTIVE_STATUSES = ['delivered', 'cancelled'];
       const HISTORY_PAGE_SIZE = 50;
+      const ACTIVE_CHAT_STATUSES = ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering'];
+
+      let ordersHistoryQuery: PromiseLike<{ data: any[] | null; error: any }> = Promise.resolve({ data: [], error: null });
+      let usersQuery: any = supabase.from('users').select('*').limit(5000);
+      let couponsQuery: any = supabase.from('coupons').select('*');
+      let withdrawalsQuery: any = supabase.from('withdrawal_requests').select('*');
+
+      // Mensagens: NUNCA a tabela inteira — só as dos pedidos ativos, igual ao polling.
+      const activeOrderIds = ordersRef.current
+          .filter(o => ACTIVE_CHAT_STATUSES.includes(o.status))
+          .map(o => o.id);
+      let messagesQuery: PromiseLike<{ data: any[] | null; error: any }> = activeOrderIds.length > 0
+          ? supabase.from('messages').select('*').in('orderId', activeOrderIds).order('timestamp', { ascending: true })
+          : Promise.resolve({ data: [], error: null });
+
+      if (role === 'partner' && userId) {
+          // Últimos 50 pedidos inativos (concluídos/cancelados) da loja.
+          ordersHistoryQuery = supabase.from('orders').select('*')
+              .eq('companyId', userId)
+              .in('status', INACTIVE_STATUSES)
+              .order('timestamp', { ascending: false })
+              .limit(HISTORY_PAGE_SIZE);
+
+          // Baixar apenas os usuários que são o próprio parceiro OU entregadores vinculados a ele
+          usersQuery = supabase.from('users').select('*').or(`id.eq.${userId},companyId.eq.${userId}`);
+
+          // Baixar apenas cupons deste restaurante
+          couponsQuery = supabase.from('coupons').select('*').eq('companyId', userId);
+
+          // Baixar saques apenas deste restaurante (seja do parceiro ou repasses dos motoboys)
+          withdrawalsQuery = supabase.from('withdrawal_requests').select('*').or(`userId.eq.${userId},companyId.eq.${userId}`);
+
+      } else if (role === 'courier' && userId) {
+          // O entregador não deve baixar usuários.
+          usersQuery = Promise.resolve({ data: [], error: null }) as any;
+
+          // Entregador só baixa seus próprios saques
+          withdrawalsQuery = supabase.from('withdrawal_requests').select('*').eq('userId', userId);
+      }
+      // client / admin / não logado: mantém as queries completas (comportamento anterior).
 
       try {
-          // --- Monta as queries dinamicamente conforme o perfil de quem logou ---
-          let productsQuery: any = supabase.from('products').select('*').limit(5000);
-          let ordersQuery: any = supabase.from('orders').select('*').limit(5000);
-          let ordersHistoryQuery: PromiseLike<{ data: any[] | null; error: any }> = Promise.resolve({ data: [], error: null });
-          
-          // QUERIES GLOBAIS QUE AGORA SÃO DINÂMICAS PARA NÃO TRAVAR O SISTEMA
-          let usersQuery: any = supabase.from('users').select('*').limit(5000);
-          let couponsQuery: any = supabase.from('coupons').select('*');
-          let withdrawalsQuery: any = supabase.from('withdrawal_requests').select('*');
-          let messagesQuery: any = supabase.from('messages').select('*').order('timestamp', { ascending: true });
-
-          if (role === 'partner' && userId) {
-              // Parceiro só precisa dos produtos/pedidos da própria loja.
-              productsQuery = supabase.from('products').select('*').eq('companyId', userId);
-              
-              // Pedidos ativos da loja (sem limite de histórico).
-              ordersQuery = supabase.from('orders').select('*')
-                  .eq('companyId', userId)
-                  .in('status', ACTIVE_STATUSES);
-                  
-              // Últimos 50 pedidos inativos (concluídos/cancelados) da loja.
-              ordersHistoryQuery = supabase.from('orders').select('*')
-                  .eq('companyId', userId)
-                  .in('status', INACTIVE_STATUSES)
-                  .order('timestamp', { ascending: false })
-                  .limit(HISTORY_PAGE_SIZE);
-
-              // Baixar apenas os usuários que são o próprio parceiro OU entregadores vinculados a ele
-              usersQuery = supabase.from('users').select('*').or(`id.eq.${userId},companyId.eq.${userId}`);
-              
-              // Baixar apenas cupons deste restaurante
-              couponsQuery = supabase.from('coupons').select('*').eq('companyId', userId);
-              
-              // Baixar saques apenas deste restaurante (seja do parceiro ou repasses dos motoboys)
-              withdrawalsQuery = supabase.from('withdrawal_requests').select('*').or(`userId.eq.${userId},companyId.eq.${userId}`);
-
-          } else if (role === 'client' && userId) {
-              // Cliente só precisa dos próprios pedidos.
-              ordersQuery = supabase.from('orders').select('*')
-                  .eq('customerId', userId)
-                  .limit(5000);
-
-          } else if (role === 'courier' && userId) {
-              // Entregador não precisa baixar o cardápio
-              productsQuery = Promise.resolve({ data: [], error: null }) as any;
-              
-              if (courierCompanyId) {
-                  // Entregador só baixa pedidos do restaurante que ele está vinculado
-                  ordersQuery = supabase.from('orders').select('*').eq('companyId', courierCompanyId).limit(5000);
-              } else {
-                  // Sem vínculo, não baixa pedidos
-                  ordersQuery = Promise.resolve({ data: [], error: null }) as any;
-              }
-              
-              // Entregador só baixa seus próprios saques
-              withdrawalsQuery = supabase.from('withdrawal_requests').select('*').eq('userId', userId);
-          }
-          // admin / não logado: mantém as queries completas (comportamento anterior).
-
-          // --- Dispara TODAS as requisições principais em paralelo (elimina o waterfall) ---
-          const [
-              companiesRes,
-              productsRes,
-              ordersRes,
-              ordersHistoryRes,
-              usersRes,
-              couponsRes,
-              withdrawalsRes,
-              messagesRes
-          ] = await Promise.all([
-              supabase.from('companies').select('*'),
-              productsQuery,
-              ordersQuery,
+          const [ordersHistoryRes, usersRes, couponsRes, withdrawalsRes, messagesRes] = await Promise.all([
               ordersHistoryQuery,
-              usersQuery,       // <-- Agora usa a query otimizada
-              couponsQuery,     // <-- Agora usa a query otimizada
-              withdrawalsQuery, // <-- Agora usa a query otimizada
+              usersQuery,
+              couponsQuery,
+              withdrawalsQuery,
               messagesQuery
           ]);
 
-          // Erros críticos: qualquer um desses impede o app de funcionar corretamente.
-          if (companiesRes.error) throw companiesRes.error;
-          if (productsRes.error) throw productsRes.error;
-          if (ordersRes.error) throw ordersRes.error;
-          if (ordersHistoryRes.error) throw ordersHistoryRes.error;
-          if (usersRes.error) throw usersRes.error;
-
-          if (companiesRes.data) setCompanies(companiesRes.data);
-
-          if (productsRes.data) {
-              const enrichedProducts = await enrichProductsWithIngredients(productsRes.data);
-              setProducts(enrichedProducts);
+          // Mescla o histórico recém-chegado aos pedidos ativos já em tela, sem duplicar.
+          if (!ordersHistoryRes.error && ordersHistoryRes.data && ordersHistoryRes.data.length > 0) {
+              setOrders(prevOrders => {
+                  const merged = new Map<string, Order>(prevOrders.map(o => [o.id, o]));
+                  (ordersHistoryRes.data as any[]).forEach((o: any) => {
+                      if (!merged.has(o.id)) {
+                          merged.set(o.id, { ...o, timestamp: new Date(o.timestamp) });
+                      }
+                  });
+                  const combined = Array.from(merged.values()).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+                  ordersRef.current = combined;
+                  return combined;
+              });
+          } else if (ordersHistoryRes.error) {
+              console.warn("Histórico de pedidos não acessível.");
           }
 
-          // Une pedidos ativos + últimos 50 históricos (quando parceiro) em um único estado.
-          const combinedOrders = [...(ordersRes.data || []), ...(ordersHistoryRes.data || [])];
-          const formattedOrders = combinedOrders.map((o: any) => ({
-              ...o,
-              timestamp: new Date(o.timestamp)
-          }));
-          formattedOrders.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-          setOrders(formattedOrders);
-
-          if (usersRes.data) setUsers(usersRes.data);
+          if (!usersRes.error && usersRes.data) {
+              setUsers(usersRes.data);
+          } else if (usersRes.error) {
+              console.warn("Tabela de usuários não acessível.");
+          }
 
           // Erros não-críticos: não travam o app, só ficam de fora do estado.
           if (!couponsRes.error && couponsRes.data) {
@@ -902,25 +970,46 @@ if (!shouldFetch) return;
           } else if (messagesRes.error) {
               console.error("Erro ao carregar histórico de mensagens.");
           }
+      } catch (error) {
+          // Dados secundários nunca devem travar a tela nem gerar erro de conexão.
+          console.error("Erro ao carregar dados secundários (background):", error);
+      }
+  };
 
+  const fetchInitialData = async () => {
+      setIsLoading(true);
+      setConnectionError(null);
+      console.log("Iniciando carregamento de dados globais otimizado...");
+
+      try {
+          // 1. Busca APENAS o essencial para a tela abrir, com limite de 5 segundos
+          await withTimeout(fetchEssentialData(), 5000);
       } catch (error: any) {
-          console.error("Erro fatal ao carregar dados iniciais:", error);
-          let errorType: 'network' | 'permission' | 'unknown' = 'unknown';
-          let title = "Erro de Conexão";
-          let message = error.message || "Erro desconhecido ao conectar com o servidor.";
+          if (error.message === 'TIMEOUT') {
+              console.warn("Carregamento essencial demorou muito, liberando interface com dados parciais.");
+          } else {
+              console.error("Erro fatal ao carregar dados iniciais:", error);
+              let errorType: 'network' | 'permission' | 'unknown' = 'unknown';
+              let title = "Erro de Conexão";
+              let message = error.message || "Erro desconhecido ao conectar com o servidor.";
 
-          if (error.code === '42501') {
-              errorType = 'permission';
-              title = "Acesso Bloqueado (RLS)";
-              message = "Permissão negada pelo banco de dados. Verifique suas políticas de segurança.";
-          } else if (error.message && (error.message.includes('fetch') || error.message.includes('network'))) {
-              errorType = 'network';
-              title = "Erro de Rede";
-              message = "Servidor do Supabase inalcançável. Verifique sua conexão com a internet.";
+              if (error.code === '42501') {
+                  errorType = 'permission';
+                  title = "Acesso Bloqueado (RLS)";
+                  message = "Permissão negada pelo banco de dados. Verifique suas políticas de segurança.";
+              } else if (error.message && (error.message.includes('fetch') || error.message.includes('network'))) {
+                  errorType = 'network';
+                  title = "Erro de Rede";
+                  message = "Servidor do Supabase inalcançável. Verifique sua conexão com a internet.";
+              }
+              setConnectionError({ title, message, type: errorType });
           }
-          setConnectionError({ title, message, type: errorType });
       } finally {
+          // 2. LIBERA A TELA IMEDIATAMENTE
           setIsLoading(false);
+
+          // 3. Busca histórico, mensagens, usuários e financeiro em background
+          fetchSecondaryData();
       }
   };
 
