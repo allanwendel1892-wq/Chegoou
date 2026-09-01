@@ -895,8 +895,7 @@ if (!shouldFetch) return;
               .limit(HISTORY_PAGE_SIZE);
 
           // Baixar apenas os usuários que são o próprio parceiro OU entregadores vinculados a ele
-          const activePhones = Array.from(new Set(ordersRef.current.map(o => o.customerPhone).filter(Boolean)));
-          usersQuery = supabase.from('users').select('*').in('id', [userId, ...activePhones]);
+          usersQuery = supabase.from('users').select('*').or(`id.eq.${userId},companyId.eq.${userId}`);
 
           // Baixar apenas cupons deste restaurante
           couponsQuery = supabase.from('coupons').select('*').eq('companyId', userId);
