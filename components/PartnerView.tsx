@@ -513,14 +513,14 @@ const KanbanColumn: React.FC<KanbanColumnProps> = React.memo(({ title, status, i
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
           {items.map(order => {
-              // CORREÇÃO: Busca o cliente vinculando o ID do usuário ao telefone do pedido
+              // Verifica a localização do cliente vinculado ao pedido
               const customer = users?.find(u => u.id === order.customerPhone || u.phone === order.customerPhone) as any;
 
 const hasLocation = !!(
     customer && 
     customer.latitude && customer.latitude !== 'NULL' && 
     customer.longitude && customer.longitude !== 'NULL'
-);[cite: 1]
+);
 
               return (
                   <OrderCard
