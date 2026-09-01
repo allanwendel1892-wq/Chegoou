@@ -516,12 +516,11 @@ const KanbanColumn: React.FC<KanbanColumnProps> = React.memo(({ title, status, i
               // CORREÇÃO: Busca o cliente vinculando o ID do usuário ao telefone do pedido
               const customer = users?.find(u => u.id === order.customerPhone) as any;
               
-              // Verifica se o cliente encontrado possui latitude e longitude válidas salvas no banco
-              const hasLocation = !!(
-                  customer && 
-                  customer.latitude && customer.latitude !== 'NULL' && 
-                  customer.longitude && customer.longitude !== 'NULL'
-              );
+const hasLocation = !!(
+    customer && 
+    customer.latitude && customer.latitude !== 'NULL' && 
+    customer.longitude && customer.longitude !== 'NULL'
+);
 
               return (
                   <OrderCard
