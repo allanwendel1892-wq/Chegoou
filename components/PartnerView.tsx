@@ -58,7 +58,6 @@ interface PartnerViewProps {
   onUpdateFullOrder: (order: Order) => void;
   onDeleteOrder: (orderId: string) => void;
   onTogglePayment?: (orderId: string, newStatus: boolean) => void;
-  users: User[];
 }
 
 // URL do Webhook do n8n (fluxo Evolution API / WhatsApp)
@@ -114,7 +113,6 @@ interface OrderCardProps {
   onPrintOrder: (order: Order) => void;
   onToggleDeliveryMethod?: (order: Order) => void;
   onTogglePayment?: (orderId: string, newStatus: boolean) => void;
-  hasLocation: boolean;
 }
 
 // Compara apenas o que realmente importa para este cartão específico, evitando
@@ -165,7 +163,7 @@ interface FormattedOrderItem {
   groups: FormattedOptionGroup[];
 }
 
-const OrderCard = React.memo(function OrderCard({ order, status, hasLocation, orderChats, products, onClickOrder, onDrop, onOpenChat, onPrintOrder, onToggleDeliveryMethod, onTogglePayment }: OrderCardProps) {
+const OrderCard = React.memo(function OrderCard({ order, status, orderChats, products, onClickOrder, onDrop, onOpenChat, onPrintOrder, onToggleDeliveryMethod, onTogglePayment }: OrderCardProps) {
   const hasMessages = orderChats.length > 0;
   const lastMsg = hasMessages ? orderChats[orderChats.length - 1] : null;
   const hasUnread = lastMsg?.senderRole === 'client';
@@ -276,19 +274,6 @@ const OrderCard = React.memo(function OrderCard({ order, status, hasLocation, or
                       {order.customerName.charAt(0)}
                   </div>
                   <span className="text-sm font-medium text-gray-800 truncate">{order.customerName}</span>
-                  
-                  {/* --- AQUI ENTRA O INDICADOR DE LOCALIZAÇÃO DO N8N --- */}
-                  {hasLocation ? (
-                      <span className="ml-auto flex items-center gap-1 text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold shrink-0">
-                          <MapPin className="w-3 h-3" /> GPS OK
-                      </span>
-                  ) : (
-                      <span className="ml-auto flex items-center gap-1 text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold shrink-0">
-                          <MapPin className="w-3 h-3" /> Sem GPS
-                      </span>
-                  )}
-                  {/* ---------------------------------------------------- */}
-                  
               </div>
               {order.deliveryAddress && (
                   <p className="text-[10px] text-gray-500 flex items-start gap-1 pl-1 line-clamp-2">
@@ -296,6 +281,7 @@ const OrderCard = React.memo(function OrderCard({ order, status, hasLocation, or
                   </p>
               )}
           </div>
+
           <div className="space-y-2 bg-gray-50 p-2.5 rounded-lg mb-3 border border-gray-100">
               {formattedItems.length > 0 ? (
                   <>
@@ -470,12 +456,11 @@ interface KanbanColumnProps {
   products: Product[];
   onToggleDeliveryMethod?: (order: Order) => void;
   onTogglePayment?: (orderId: string, newStatus: boolean) => void;
-  users: User[];
 }
 
 const EMPTY_CHATS: ChatMessage[] = [];
 
-const KanbanColumn: React.FC<KanbanColumnProps> = React.memo(({ title, status, items, color, isLast, onClickOrder, onDrop, chats, onOpenChat, onPrintOrder, products, onToggleDeliveryMethod, onTogglePayment, users }) => {
+const KanbanColumn: React.FC<KanbanColumnProps> = React.memo(({ title, status, items, color, isLast, onClickOrder, onDrop, chats, onOpenChat, onPrintOrder, products, onToggleDeliveryMethod, onTogglePayment }) => {
   const [isOver, setIsOver] = useState(false);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -512,32 +497,21 @@ const KanbanColumn: React.FC<KanbanColumnProps> = React.memo(({ title, status, i
         <span className="bg-white px-2 py-1 rounded-lg text-xs font-bold text-gray-500 shadow-sm shrink-0">{items.length}</span>
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
-          {items.map(order => {
-              // Verifica a localização do cliente vinculado ao pedido
-              const customer = users?.find(u => u.id === order.customerPhone) as any;
-
-const hasLocation = !!(
-    customer && 
-    customer.latitude && customer.latitude !== 'NULL' && 
-    customer.longitude && customer.longitude !== 'NULL'
-);
-              return (
-                  <OrderCard
-                      key={order.id}
-                      order={order}
-                      status={status}
-                      hasLocation={hasLocation}
-                      orderChats={chats[order.id] || EMPTY_CHATS}
-                      products={products}
-                      onClickOrder={onClickOrder}
-                      onDrop={onDrop}
-                      onOpenChat={onOpenChat}
-                      onPrintOrder={onPrintOrder}
-                      onToggleDeliveryMethod={onToggleDeliveryMethod}
-                      onTogglePayment={onTogglePayment}
-                  />
-              );
-          })}
+          {items.map(order => (
+              <OrderCard
+                  key={order.id}
+                  order={order}
+                  status={status}
+                  orderChats={chats[order.id] || EMPTY_CHATS}
+                  products={products}
+                  onClickOrder={onClickOrder}
+                  onDrop={onDrop}
+                  onOpenChat={onOpenChat}
+                  onPrintOrder={onPrintOrder}
+                  onToggleDeliveryMethod={onToggleDeliveryMethod}
+                  onTogglePayment={onTogglePayment}
+              />
+          ))}
           {items.length === 0 && (
               <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-50 pointer-events-none">
                   <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center mb-2 shrink-0">
