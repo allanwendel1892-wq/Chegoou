@@ -2034,6 +2034,7 @@ if (!shouldFetch) return;
                 company={myCompany} 
                 orders={partnerOrders} 
                 products={partnerProducts} 
+                users={users}
                 updateOrderStatus={updateOrderStatus}
                 updateCompany={(data) => handleUpdateCompany(myCompany.id, data)}
                 onAddProduct={handleAddProduct}
