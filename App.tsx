@@ -894,21 +894,8 @@ if (!shouldFetch) return;
               .order('timestamp', { ascending: false })
               .limit(HISTORY_PAGE_SIZE);
 
-          // 1. Extrai os telefones dos clientes dos pedidos ativos na memória (removendo duplicatas)
-          const activeCustomerPhones = Array.from(
-              new Set(ordersRef.current.map(o => o.customerPhone).filter(Boolean))
-          );
-
-          // 2. Filtro base: O dono do restaurante e os motoboys vinculados a ele
-          let userFilter = `id.eq.${userId},companyId.eq.${userId}`;
-
-          // 3. Se houver pedidos ativos, adicionamos os telefones desses clientes na busca
-          if (activeCustomerPhones.length > 0) {
-              userFilter += `,id.in.(${activeCustomerPhones.join(',')})`;
-          }
-
-          // 4. Executa a query otimizada
-          usersQuery = supabase.from('users').select('*').or(userFilter);
+          // Baixar apenas os usuários que são o próprio parceiro OU entregadores vinculados a ele
+          usersQuery = supabase.from('users').select('*').or(`id.eq.${userId},companyId.eq.${userId}`);
 
           // Baixar apenas cupons deste restaurante
           couponsQuery = supabase.from('coupons').select('*').eq('companyId', userId);
@@ -2047,7 +2034,6 @@ if (!shouldFetch) return;
                 company={myCompany} 
                 orders={partnerOrders} 
                 products={partnerProducts} 
-                users={users}
                 updateOrderStatus={updateOrderStatus}
                 updateCompany={(data) => handleUpdateCompany(myCompany.id, data)}
                 onAddProduct={handleAddProduct}
