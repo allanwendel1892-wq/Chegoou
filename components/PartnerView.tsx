@@ -2515,8 +2515,8 @@ delete updated.mapLink;
             )}
 
             {view === ViewState.HISTORY && (
-                <HistoryView orders={orders} />
-            )}
+    <HistoryView companyId={company.id} />
+)}
 
              {view === ViewState.ORDERS && (
                 <div className="h-[calc(100vh-8rem)] flex flex-col">
