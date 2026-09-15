@@ -996,46 +996,75 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const [courierLinkError, setCourierLinkError] = useState('');
 
   const handleLinkCourier = async () => {
-      const digits = courierSearchPhone.replace(/\D/g, '');
-      if (digits.length < 10) {
-          setCourierLinkError('Digite o telefone completo do entregador (com DDD).');
-          return;
+      let digits = courierSearchPhone.replace(/\D/g, '');
+      
+      // 1. Verifica se tem 55. Se tiver, retira temporariamente para isolar DDD e Número
+      if (digits.startsWith('55')) {
+          digits = digits.slice(2);
       }
+      
+      // 2. Se o tamanho total for 8 ou 9, significa que está sem DDD. Assume 81.
+      if (digits.length <= 9) {
+          digits = '81' + digits;
+      }
+      
+      const ddd = digits.slice(0, 2);
+      let number = digits.slice(2);
+      
+      // 3. Verifica se tem o 9 na frente (ficando com 9 dígitos). Se tiver, remove.
+      if (number.length === 9 && number.startsWith('9')) {
+          number = number.slice(1);
+      }
+      
+      // Monta o telefone no padrão exato para salvar ou buscar (ex: 558300000000)
+      const finalPhone = `55${ddd}${number}`;
+      
       setIsLinkingCourier(true);
       setCourierLinkError('');
+      
       try {
-          // Localiza o entregador pelo telefone (busca por "contém" para tolerar
-          // diferenças de formatação/DDI já normalizadas no cadastro).
+          // Localiza o usuário pelo telefone.
+          // Removida a trava .eq('role', 'courier') para achar clientes normais.
+          // O ilike com `%` garante que ele ache o usuário no banco independente se 
+          // no registro original ele salvou com ou sem o 9 extra.
           const { data: found, error: findError } = await supabase
               .from('users')
               .select('id, name, phone, role, companyId')
-              .eq('role', 'courier')
-              .ilike('phone', `%${digits}%`)
+              .ilike('phone', `%${ddd}%${number}%`)
               .limit(1);
 
           if (findError) throw findError;
 
           if (!found || found.length === 0) {
-              setCourierLinkError('Nenhum entregador cadastrado com esse telefone.');
+              setCourierLinkError('Nenhum usuário cadastrado com esse telefone.');
               return;
           }
 
           const courierFound = found[0] as any;
 
+          // Se já for entregador de outra loja, barra a operação
           if (courierFound.companyId && courierFound.companyId !== company.id) {
-              setCourierLinkError('Este entregador já está vinculado a outro restaurante.');
+              setCourierLinkError('Este usuário já está vinculado a outro restaurante.');
               return;
           }
 
+          // Atualiza o perfil: Vincula a loja E promove a entregador
           const { error: updateError } = await supabase
               .from('users')
-              .update({ companyId: company.id })
+              .update({ 
+                  companyId: company.id,
+                  role: 'courier' 
+              })
               .eq('id', courierFound.id);
 
           if (updateError) throw updateError;
 
           setCourierSearchPhone('');
           await fetchCouriers();
+          
+          // Opcional: Feedback visual de sucesso
+          alert(`Usuário ${courierFound.name} foi promovido a entregador e vinculado com sucesso!`);
+          
       } catch (e: any) {
           setCourierLinkError(e.message || 'Erro ao vincular entregador.');
       } finally {
