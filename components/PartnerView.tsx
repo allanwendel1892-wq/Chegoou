@@ -1076,10 +1076,13 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   };
 
   const handleUnlinkCourier = async (courierId: string) => {
-      if (!window.confirm('Remover o vínculo deste entregador com o seu restaurante? Ele deixará de ver os pedidos da sua loja.')) return;
+      if (!window.confirm('Remover o vínculo deste entregador com o seu restaurante? Ele deixará de ver os pedidos da sua loja e voltará a ser cliente comum.')) return;
       const { error } = await supabase
           .from('users')
-          .update({ companyId: null })
+          .update({ 
+              companyId: null,
+              role: 'client' 
+          })
           .eq('id', courierId);
       if (!error) {
           setCouriers(prev => prev.filter(c => c.id !== courierId));
@@ -1107,7 +1110,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
         setView(newView);
     }
   };
-
   const handleVerifyPin = () => {
       if (pinInput === localCompany.adminPin) {
           setIsUnlocked(true);
