@@ -244,34 +244,55 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
     }, [compositions]);
 
     const handleSaveRecipe = async () => {
-        if (!editingRecipeName) { alert('O Nome da Receita (Ex: Calabresa) é obrigatório!'); return; }
-        
-        try {
-            await supabase.from('compositions').delete().eq('reference_id', editingRecipeName);
+    if (!editingRecipeName) { alert('O Nome da Receita (Ex: Calabresa) é obrigatório!'); return; }
+    
+    try {
+        // 1. Deleta a receita antiga verificando erros
+        const { error: deleteError } = await supabase
+            .from('compositions')
+            .delete()
+            .eq('reference_id', editingRecipeName);
             
-            const validIngredients = recipeIngredients.filter(r => r.invId && r.amount > 0);
-            if (validIngredients.length > 0) {
-                const newComps = validIngredients.map(r => ({
-                    id: self.crypto.randomUUID(),
-                    reference_id: editingRecipeName,
-                    inventory_item_id: r.invId,
-                    amount_needed: r.amount
-                }));
-                await supabase.from('compositions').insert(newComps);
+        if (deleteError) {
+            alert(`Erro ao limpar receita antiga: ${deleteError.message}`);
+            return;
+        }
+        
+        const validIngredients = recipeIngredients.filter(r => r.invId && r.amount > 0);
+        
+        if (validIngredients.length > 0) {
+            const newComps = validIngredients.map(r => ({
+                id: self.crypto.randomUUID(),
+                reference_id: editingRecipeName,
+                inventory_item_id: r.invId,
+                amount_needed: r.amount
+            }));
+            
+            // 2. Insere a nova receita verificando erros
+            const { error: insertError } = await supabase
+                .from('compositions')
+                .insert(newComps);
                 
-                const otherComps = compositions.filter(c => c.reference_id !== editingRecipeName);
-                setCompositions([...otherComps, ...newComps]);
-            } else {
-                setCompositions(compositions.filter(c => c.reference_id !== editingRecipeName));
+            if (insertError) {
+                alert(`Erro ao salvar no banco: ${insertError.message}`);
+                console.error("Detalhes do erro:", insertError);
+                return;
             }
             
-            setIsRecipeModalOpen(false);
-            setEditingRecipeName('');
-            setRecipeIngredients([]);
-        } catch (err) {
-            alert("Erro ao salvar a receita.");
+            const otherComps = compositions.filter(c => c.reference_id !== editingRecipeName);
+            setCompositions([...otherComps, ...newComps]);
+        } else {
+            setCompositions(compositions.filter(c => c.reference_id !== editingRecipeName));
         }
-    };
+        
+        setIsRecipeModalOpen(false);
+        setEditingRecipeName('');
+        setRecipeIngredients([]);
+    } catch (err) {
+        console.error(err);
+        alert("Erro fatal na aplicação ao salvar a receita.");
+    }
+};
 
     const handleDeleteRecipe = async (recipeName: string) => {
         if (window.confirm(`Excluir a receita de ${recipeName}?`)) {
