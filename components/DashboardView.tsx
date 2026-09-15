@@ -1,19 +1,17 @@
-import React, { useState, useMemo } from 'react';
-import { 
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend
-} from 'recharts';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   ArrowUpRight, ArrowDownRight, DollarSign, ShoppingBag, 
-  Sparkles, Activity, Calendar, Package, ShoppingCart, Calculator
+  Sparkles, Activity, Calendar, Package, ShoppingCart, Calculator, Loader2
 } from 'lucide-react';
 import { SalesHistoryItem, Order } from '../types';
+import { supabase } from '../services/supabaseClient';
 
 export interface Composition {
   id: string;
   reference_id: string; 
   inventory_item_id: string;
   amount_needed: number;
+  companyId?: string;
 }
 
 export interface InventoryItem {
@@ -24,13 +22,11 @@ export interface InventoryItem {
   current_stock: number;
   min_stock: number;
   cost_price: number;
+  companyId?: string;
 }
 
 interface DashboardViewProps {
-  salesData: SalesHistoryItem[];
-  orders: Order[];
-  compositions: Composition[];     
-  inventoryItems: InventoryItem[]; 
+  companyId: string;
 }
 
 const MARGEM_SEGURANCA = 1.20; // 20% de margem
@@ -59,8 +55,71 @@ const StatCard = ({ title, value, icon: Icon, trend, trendValue, trendDesc, colo
   );
 };
 
-const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = [], compositions = [], inventoryItems = [] }) => {
+const DashboardView: React.FC<DashboardViewProps> = ({ companyId }) => {
   const [timeRange, setTimeRange] = useState('7days');
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [compositions, setCompositions] = useState<Composition[]>([]);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Busca autônoma e segura de dados vinculada estritamente ao ID do restaurante
+  useEffect(() => {
+    if (!companyId) return;
+
+    const fetchDashboardData = async () => {
+      setLoading(true);
+      try {
+        const [ordersRes, compRes, invRes] = await Promise.all([
+          supabase.from('orders').select('*').eq('companyId', companyId),
+          supabase.from('compositions').select('*').eq('companyId', companyId),
+          supabase.from('inventory_items').select('*').eq('companyId', companyId)
+        ]);
+
+        if (ordersRes.data) setOrders(ordersRes.data);
+        if (compRes.data) setCompositions(compRes.data);
+        if (invRes.data) {
+          const mappedInventory: InventoryItem[] = invRes.data.map((item: any) => ({
+            id: item.id,
+            name: item.name,
+            category: item.category,
+            unit: item.unit,
+            current_stock: item.current_stock ?? item.currentStock ?? 0,
+            min_stock: item.min_stock ?? item.minStock ?? 0,
+            cost_price: item.cost_price ?? item.costPrice ?? 0,
+            companyId: item.companyId
+          }));
+          setInventoryItems(mappedInventory);
+        }
+      } catch (error) {
+        console.error("Erro ao carregar dados independentes do dashboard:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, [companyId]);
+
+  // Cálculo dinâmico do histórico de vendas com base nos pedidos próprios da loja
+  const salesData: SalesHistoryItem[] = useMemo(() => {
+    const grouped: Record<string, { revenue: number, count: number }> = {};
+    orders.forEach(o => {
+      if (['delivered', 'delivering', 'ready', 'preparing', 'pending'].includes(o.status)) {
+        const dateObj = new Date(o.timestamp);
+        if (!isNaN(dateObj.getTime())) {
+          const dateKey = dateObj.toLocaleDateString('en-CA');
+          if (!grouped[dateKey]) grouped[dateKey] = { revenue: 0, count: 0 };
+          grouped[dateKey].revenue += o.total || 0;
+          grouped[dateKey].count += 1;
+        }
+      }
+    });
+    return Object.keys(grouped).map(date => ({
+      date,
+      revenue: grouped[date].revenue,
+      ordersCount: grouped[date].count
+    })).sort((a, b) => a.date.localeCompare(b.date));
+  }, [orders]);
 
   // FILTRO CENTRAL E CONTAGEM DE DIAS PARA MÉDIA
   const { filteredOrders, filteredSales, diasNoFiltro } = useMemo(() => {
@@ -80,16 +139,14 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = 
       dias = 15;
     } else if (timeRange === 'month') {
       dataLimite = new Date(now.getFullYear(), now.getMonth(), 1); 
-      // Conta exatamente quantos dias se passaram neste mês até hoje para não distorcer a média
       dias = Math.max(1, Math.ceil((now.getTime() - dataLimite.getTime()) / (1000 * 60 * 60 * 24)));
     } else if (timeRange === 'all') {
       dataLimite = new Date(0);
-      dias = 30; // Evita divisão por zero. A lógica abaixo corrige se houver pedidos.
+      dias = 30; 
     }
 
-    // Leitura BLINDADA de datas
     const getSafeDate = (item: any) => {
-      const rawDate = item.created_at || item.createdAt || item.date;
+      const rawDate = item.created_at || item.createdAt || item.date || item.timestamp;
       if (rawDate) {
         const parsed = new Date(rawDate);
         if (!isNaN(parsed.getTime())) return parsed;
@@ -98,13 +155,12 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = 
         const tsMatch = item.id.match(/\d{13}/);
         if (tsMatch) return new Date(parseInt(tsMatch[0]));
       }
-      return new Date(0); // Retorna 1970 em vez de "Hoje" para não poluir os filtros curtos
+      return new Date(0);
     };
 
     const filteredOrd = orders.filter(order => getSafeDate(order) >= dataLimite);
     const filteredSD = salesData.filter(sale => getSafeDate(sale) >= dataLimite);
 
-    // Se for 'all', calcula a quantidade de dias entre o pedido mais antigo e hoje
     if (timeRange === 'all' && filteredOrd.length > 0) {
       const oldestDate = Math.min(...filteredOrd.map(o => getSafeDate(o).getTime()));
       dias = Math.max(1, Math.ceil((now.getTime() - oldestDate) / (1000 * 60 * 60 * 24)));
@@ -118,13 +174,13 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = 
     const totalRevenue = filteredSales.reduce((acc, curr) => acc + curr.revenue, 0);
     const totalOrders = filteredSales.reduce((acc, curr) => acc + curr.ordersCount, 0);
     const aiSalesCount = filteredOrders.filter(o => o.id && o.id.startsWith('ord-ia')).length;
-    const manualSalesCount = filteredOrders.length - aiSalesCount; // Usando length do array filtrado para maior precisão
+    const manualSalesCount = filteredOrders.length - aiSalesCount;
     const avgTicket = totalOrders > 0 ? (totalRevenue / totalOrders) : 0;
 
     return { totalRevenue, totalOrders, aiSalesCount, manualSalesCount, avgTicket };
   }, [filteredSales, filteredOrders]);
 
-  // 2. MOTOR DINÂMICO DE ESTOQUE (Corrigido para Média Diária -> Projeção de 7 Dias)
+  // 2. MOTOR DINÂMICO DE ESTOQUE
   const previsaoInsumos = useMemo(() => {
     const demandaSabores: Record<string, number> = {};
 
@@ -162,16 +218,9 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = 
       const itemEstoque = inventoryItems.find(i => i.id === inventoryId);
       if (!itemEstoque) return; 
 
-      // A MATEMÁTICA CORRETA AQUI:
-      // 1. Descobre a média de consumo por dia
       const consumoDiario = consumoTotalNoFiltro / diasNoFiltro;
-      
-      // 2. Projeta quanto vai precisar para 7 dias corridos (Meta padrão de reposição)
       const projecao7Dias = consumoDiario * 7;
-      
-      // 3. Adiciona a margem de segurança de 20%
       const metaConsumoSemanal = projecao7Dias * MARGEM_SEGURANCA;
-      
       const faltaComprar = Math.max(0, metaConsumoSemanal - itemEstoque.current_stock);
       const custoEstimado = faltaComprar * Number(itemEstoque.cost_price);
 
@@ -195,6 +244,14 @@ const DashboardView: React.FC<DashboardViewProps> = ({ salesData = [], orders = 
     };
 
   }, [filteredOrders, compositions, inventoryItems, diasNoFiltro]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-red-600" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
