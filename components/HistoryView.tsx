@@ -1,20 +1,72 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Order } from '../types';
-import { Search, Calendar, Store, MessageSquare, ShoppingBag, Printer } from 'lucide-react';
+import { Search, Calendar, Store, MessageSquare, ShoppingBag, Printer, Loader2 } from 'lucide-react';
+import { supabase } from '../services/supabaseClient';
 
 interface HistoryViewProps {
-  orders: Order[]; // Modificado: Agora recebe a lista pronta do PartnerView
+  companyId: string;
 }
 
-const HistoryView: React.FC<HistoryViewProps> = ({ orders = [] }) => {
+const HistoryView: React.FC<HistoryViewProps> = ({ companyId }) => {
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterOrigin, setFilterOrigin] = useState<string>('all');
-  
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  // Lógica de Filtragem (Totalmente funcional e instantânea)
+  useEffect(() => {
+    if (!companyId) {
+      setLoading(false);
+      return;
+    }
+
+    const fetchOrdersHistory = async () => {
+      setLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('orders')
+          .select('*')
+          .eq('companyId', companyId)
+          .order('timestamp', { ascending: false });
+
+        if (error) throw error;
+
+        if (data) {
+          const mappedOrders: Order[] = data.map((item: any) => ({
+            id: item.id,
+            companyId: item.companyId || item.company_id,
+            customerName: item.customer_name || item.customerName || 'Cliente sem nome',
+            customerPhone: item.customer_phone || item.customerPhone || '',
+            total: Number(item.total || 0),
+            subtotal: Number(item.subtotal || 0),
+            status: item.status || 'pending',
+            origin: item.origin || 'app',
+            timestamp: item.timestamp || item.created_at || new Date().toISOString(),
+            items: typeof item.items === 'string' ? JSON.parse(item.items) : (item.items || []),
+            deliveryMethod: item.delivery_method || item.deliveryMethod || 'delivery',
+            deliveryFee: Number(item.delivery_fee || item.deliveryFee || 0),
+            serviceFee: Number(item.service_fee || item.serviceFee || 0),
+            paymentMethod: item.payment_method || item.paymentMethod || '',
+            changeFor: item.change_for ? Number(item.change_for) : undefined,
+            deliveryAddress: item.delivery_address || item.deliveryAddress,
+            observacoes: item.observacoes || item.notes || ''
+          }));
+
+          setOrders(mappedOrders);
+        }
+      } catch (err) {
+        console.error("Erro ao buscar histórico de pedidos:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchOrdersHistory();
+  }, [companyId]);
+
   const filteredOrders = useMemo(() => {
     return orders.filter(order => {
       const name = (order.customerName || '').toLowerCase();
@@ -22,13 +74,9 @@ const HistoryView: React.FC<HistoryViewProps> = ({ orders = [] }) => {
       const idStr = (order.id || '').toLowerCase();
       const query = searchTerm.toLowerCase().trim();
 
-      // Filtro de Texto (Nome, Telefone ou ID)
       const matchesSearch = !query || name.includes(query) || phone.includes(query) || idStr.includes(query);
-      
-      // Filtro de Status
       const matchesStatus = filterStatus === 'all' || order.status === filterStatus;
       
-      // Filtro de Origem
       const isWhatsapp = order.origin?.toLowerCase() === 'whatsapp';
       const isPDV = order.origin?.toLowerCase() === 'pdv';
       const matchesOrigin = filterOrigin === 'all' 
@@ -36,14 +84,13 @@ const HistoryView: React.FC<HistoryViewProps> = ({ orders = [] }) => {
                             || (filterOrigin === 'pdv' && isPDV)
                             || (filterOrigin === 'app' && !isWhatsapp && !isPDV);
 
-      // Filtro de Data (Corrigido para evitar bugs de fuso horário UTC x Local)
       let matchesDate = true;
       if (startDate || endDate) {
         const orderDateObj = new Date(order.timestamp);
         const year = orderDateObj.getFullYear();
         const month = String(orderDateObj.getMonth() + 1).padStart(2, '0');
         const day = String(orderDateObj.getDate()).padStart(2, '0');
-        const orderDateStr = `${year}-${month}-${day}`; // Formato YYYY-MM-DD local
+        const orderDateStr = `${year}-${month}-${day}`;
 
         if (startDate && endDate) {
             matchesDate = orderDateStr >= startDate && orderDateStr <= endDate;
@@ -62,45 +109,48 @@ const HistoryView: React.FC<HistoryViewProps> = ({ orders = [] }) => {
     .filter(o => o.status === 'delivered')
     .reduce((acc, order) => acc + (Number(order.total) || 0), 0);
 
-  const handlePrint = () => {
-    window.print();
-  };
+  const handlePrint = () => window.print();
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-red-600" />
+        <span className="text-gray-500 font-medium text-sm">Carregando histórico completo...</span>
+      </div>
+    );
+  }
 
   return (
-    // Estrutura principal ocupando a altura ideal e flexível
     <div className="h-[calc(100vh-6rem)] md:h-[calc(100vh-5rem)] flex flex-col gap-3 print:h-auto print:block">
       
-      {/* PAINEL DE CONTROLE E FILTROS COMPACTOS */}
       <div className="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-4 print:hidden shrink-0">
         
-        {/* Cabeçalho */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
           <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
             <Calendar className="w-5 h-5 text-red-600" />
-            Histórico
+            Panorama de Vendas
           </h2>
           
           <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
             <div className="flex items-center justify-between gap-3 bg-gray-50 px-3 py-2 md:py-1.5 rounded-lg border border-gray-100 flex-1 md:flex-none">
-              <span className="text-xs text-gray-500 font-bold uppercase">Pedidos</span>
+              <span className="text-xs text-gray-500 font-bold uppercase">Resultados</span>
               <span className="text-sm font-bold text-gray-900">{filteredOrders.length}</span>
             </div>
             <div className="flex items-center justify-between gap-3 bg-green-50 px-3 py-2 md:py-1.5 rounded-lg border border-green-100 flex-1 md:flex-none">
-              <span className="text-xs text-green-700 font-bold uppercase">Receita (Entregues)</span>
+              <span className="text-xs text-green-700 font-bold uppercase">Faturamento (Entregues)</span>
               <span className="text-sm font-bold text-green-700">R$ {totalRevenue.toFixed(2)}</span>
             </div>
             <button 
               onClick={handlePrint}
               className="p-2 bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-700 rounded-lg transition-colors flex-none"
-              title="Imprimir Histórico"
+              title="Imprimir Relatório"
             >
               <Printer className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Grade de Filtros Responsiva (Adapta perfeitamente para celular) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-2 md:gap-3">
           <div className="relative sm:col-span-2 md:col-span-2">
             <input 
               type="text" 
@@ -153,13 +203,12 @@ const HistoryView: React.FC<HistoryViewProps> = ({ orders = [] }) => {
           >
             <option value="all">Origem: Todas</option>
             <option value="app">App</option>
-            <option value="pdv">Balcão (PDV)</option>
+            <option value="pdv">Balcão</option>
             <option value="whatsapp">WhatsApp</option>
           </select>
         </div>
       </div>
 
-      {/* ÁREA DA TABELA (Rola perfeitamente preservando os filtros no topo) */}
       <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col overflow-hidden print:border-none print:shadow-none print:overflow-visible">
         <div className="flex-1 overflow-x-auto overflow-y-auto">
           <table className="w-full text-left min-w-[750px]">
@@ -177,12 +226,12 @@ const HistoryView: React.FC<HistoryViewProps> = ({ orders = [] }) => {
               {filteredOrders.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="p-8 text-center text-gray-400 text-sm font-medium">
-                    Nenhum pedido encontrado.
+                    Nenhum pedido atende aos filtros atuais.
                   </td>
                 </tr>
               ) : (
                 filteredOrders.map(order => (
-                  <tr key={order.id} className="hover:bg-gray-50/80 transition-colors print:break-inside-avoid group">
+                  <tr key={order.id} className="hover:bg-gray-50/80 transition-colors print:break-inside-avoid">
                     <td className="p-3 text-xs font-medium text-gray-600 whitespace-nowrap">
                       {new Date(order.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
                     </td>
