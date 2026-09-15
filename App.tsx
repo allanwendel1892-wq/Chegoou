@@ -135,7 +135,7 @@ const enrichProductsWithIngredients = async (fetchedProducts: Product[]): Promis
         const { data: compositions, error: compositionsError } = await supabase
             .from('compositions')
             .select('*')
-            .in('referenceId', referenceIdsArray);
+            .in('reference_id', referenceIdsArray);
 
         if (compositionsError) throw compositionsError;
         if (!compositions || compositions.length === 0) return fetchedProducts;
@@ -279,7 +279,7 @@ const processInventoryDeduction = async (orderItems: any[], dbCompositions: any[
 
   orderItems.forEach(item => {
     // 1. Desconta insumos ligados DIRETAMENTE ao produto base
-    const baseCompositions = dbCompositions.filter(c => c.referenceId === item.productId);
+    const baseCompositions = dbCompositions.filter(c => c.reference_id === item.productId);
     baseCompositions.forEach(comp => {
       const totalToDeduct = comp.amount_needed * item.quantity;
       stockDeductions[comp.inventory_item_id] = (stockDeductions[comp.inventory_item_id] || 0) + totalToDeduct;
@@ -290,11 +290,11 @@ const processInventoryDeduction = async (orderItems: any[], dbCompositions: any[
       // Conta quantos sabores a pizza tem para saber se é 1/2, 1/3, etc.
       const fractions = item.selectedOptions.length;
       const fractionMultiplier = 1 / fractions; 
-
+//Atenção, esse comentário foi colocado apenas para que o github aceite o commit, pois a edição foi minima, portanto deve ser ignorado
       item.selectedOptions.forEach((option: any) => {
         // Assume que o optionName ou ID da opção é a referência na ficha técnica
         const referenceToSearch = option.id || option.name || option.optionName;
-        const optionCompositions = dbCompositions.filter(c => c.referenceId === referenceToSearch);
+        const optionCompositions = dbCompositions.filter(c => c.reference_id === referenceToSearch);
         
         optionCompositions.forEach(comp => {
           const totalToDeduct = (comp.amount_needed * fractionMultiplier) * item.quantity;
