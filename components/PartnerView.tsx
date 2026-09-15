@@ -2521,12 +2521,12 @@ delete updated.mapLink;
                     <div className="flex justify-between items-center mb-6">
                         <div>
                              <h2 className="text-2xl font-bold text-gray-800">Gestão de Pedidos</h2>
-                            <p className="text-gray-500">Arraste os pedidos para mudar o status (Drag & Drop).</p>
+                            <p className="text-gray-500"></p>
                         </div>
                         <div className="flex gap-2">
                              <div className="px-4 py-2 bg-white rounded-lg border border-gray-200 text-sm font-bold flex items-center gap-2">
                                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                                 Atualização em Tempo Real
+                                 Online
                              </div>
                         </div>
                     </div>
