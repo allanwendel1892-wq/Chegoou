@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
 import { ViewState, Company } from '../types';
 import { supabase } from '../services/supabaseClient';
-import { LayoutDashboard, UtensilsCrossed, MessageSquare, ShoppingBag, LogOut, Settings, Wallet, Ticket, MonitorStop, History, Package } from 'lucide-react'; 
+import { 
+    LayoutDashboard, UtensilsCrossed, MessageSquare, ShoppingBag, 
+    LogOut, Settings, Wallet, Ticket, MonitorStop, History, Package, 
+    QrCode, X, RefreshCw 
+} from 'lucide-react'; 
 
 interface SidebarProps {
   currentView: ViewState;
@@ -27,6 +31,12 @@ const Sidebar: React.FC<SidebarProps> = ({
   
   const [botActive, setBotActive] = useState(company?.chatbot !== 'disconnected');
   const [isUpdatingBot, setIsUpdatingBot] = useState(false);
+  
+  // Estados para o Modal do QR Code
+  const [showWaModal, setShowWaModal] = useState(false);
+  const [qrCodeBase64, setQrCodeBase64] = useState<string | null>(null);
+  const [isFetchingQr, setIsFetchingQr] = useState(false);
+  const [qrError, setQrError] = useState<string | null>(null);
 
   const handleToggleChatbot = async () => {
       if (!company?.id) return;
@@ -50,6 +60,47 @@ const Sidebar: React.FC<SidebarProps> = ({
       }
   };
 
+  // Função que busca o QR Code na Evolution API baseada no ID da Empresa
+  const handleFetchQr = async () => {
+      if (!company?.id) return;
+
+      setIsFetchingQr(true);
+      setQrCodeBase64(null);
+      setQrError(null);
+
+      try {
+          // O URL da sua API Evolution
+          const EVOLUTION_URL = 'https://evolution.znzrqn.easypanel.host';
+          // Aqui garantimos que a instância é sempre e unicamente o ID da empresa logada
+          const INSTANCE_NAME = company.id; 
+          // Recomenda-se colocar a API KEY no .env (ex: import.meta.env.VITE_EVO_API_KEY)
+          const API_KEY = 'SUA_GLOBAL_API_KEY_AQUI'; 
+
+          const response = await fetch(`${EVOLUTION_URL}/instance/connect/${INSTANCE_NAME}`, {
+              headers: { 'apikey': API_KEY }
+          });
+          
+          if (!response.ok) {
+              throw new Error('Falha ao comunicar com a Evolution API');
+          }
+
+          const data = await response.json();
+          
+          if (data?.base64) {
+              setQrCodeBase64(data.base64);
+          } else if (data?.instance?.state === 'open') {
+              setQrError('A instância já está conectada!');
+          } else {
+              setQrError('Não foi possível gerar o QR Code no momento.');
+          }
+      } catch (error) {
+          console.error('Erro ao buscar QR Code:', error);
+          setQrError('Erro de conexão com o servidor do WhatsApp.');
+      } finally {
+          setIsFetchingQr(false);
+      }
+  };
+
   const menuItems = [
     { id: ViewState.DASHBOARD, label: 'Dashboard', icon: LayoutDashboard },
     { id: ViewState.POS, label: 'Frente de Caixa (PDV)', icon: MonitorStop },
@@ -59,12 +110,52 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: ViewState.INVENTORY, label: 'Estoque', icon: Package },
     { id: ViewState.FINANCE, label: 'Financeiro', icon: Wallet },
     { id: ViewState.COUPONS, label: 'Cupons', icon: Ticket },
-    // { id: ViewState.WHATSAPP, label: 'Bot WhatsApp', icon: MessageSquare }, // <-- CONTINUA COMENTADO PARA OCULTAR A TELA DE DISPAROS
     { id: ViewState.SETTINGS, label: 'Configurações', icon: Settings },
   ];
 
   return (
     <>
+      {/* Modal do QR Code (Fica sobre toda a tela) */}
+      {showWaModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl relative flex flex-col items-center animate-scale-in">
+                  <button
+                      onClick={() => setShowWaModal(false)}
+                      className="absolute top-4 right-4 p-2 text-gray-400 hover:bg-gray-100 rounded-full transition-colors"
+                  >
+                      <X className="w-5 h-5" />
+                  </button>
+                  <h3 className="text-xl font-bold text-gray-900 mb-2">Conectar WhatsApp</h3>
+                  <p className="text-sm text-gray-500 text-center mb-6">
+                      Aponte a câmera do seu celular para o código abaixo para restabelecer a conexão do robô.
+                  </p>
+                  
+                  <div className="w-64 h-64 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center mb-6 overflow-hidden">
+                      {isFetchingQr ? (
+                          <div className="flex flex-col items-center text-gray-400">
+                              <RefreshCw className="w-8 h-8 animate-spin mb-2" />
+                              <span className="text-sm font-medium">Gerando código...</span>
+                          </div>
+                      ) : qrCodeBase64 ? (
+                          <img src={qrCodeBase64} alt="WhatsApp QR Code" className="w-full h-full object-contain p-2" />
+                      ) : (
+                          <span className="text-sm text-red-500 font-medium text-center px-4">
+                              {qrError || "Clique abaixo para gerar o código."}
+                          </span>
+                      )}
+                  </div>
+                  
+                  <button
+                      onClick={handleFetchQr}
+                      className="w-full py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
+                  >
+                      <RefreshCw className={`w-4 h-4 ${isFetchingQr ? 'animate-spin' : ''}`} />
+                      {qrError ? 'Tentar Novamente' : 'Atualizar QR Code'}
+                  </button>
+              </div>
+          </div>
+      )}
+
       {/* Mobile Overlay */}
       {isMobileOpen && (
         <div 
@@ -120,8 +211,9 @@ const Sidebar: React.FC<SidebarProps> = ({
             })}
         </nav>
 
-        {/* Footer com Status da Loja e Logout */}
+        {/* Footer com Status da Loja, WhatsApp e Logout */}
         <div className="p-5 border-t border-gray-100 bg-white shrink-0">
+            
             {/* Botão Status da Loja */}
             <button 
                 onClick={onToggleStatus}
@@ -140,7 +232,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                  <p className="text-[10px] text-gray-400 mt-1">Clique para alterar</p>
             </button>
 
-            {/* MÓDULO DO BOT DO WHATSAPP - RESTAURADO */}
+            {/* Módulo Robô WhatsApp */}
             <div className="bg-gray-50 border border-gray-100 rounded-2xl p-3 mb-4 transition-colors hover:bg-gray-100">
                 <div className="flex justify-between items-center mb-1">
                     <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Robô WhatsApp</span>
@@ -157,13 +249,23 @@ const Sidebar: React.FC<SidebarProps> = ({
                     </label>
                 </div>
                 
-                <span className="text-[10px] text-gray-500 font-medium">
-                    {botActive 
-                        ? '🟢 Respondendo clientes' 
-                        : '⏸️ Pausado (Modo Manual)'}
-                </span>
+                <div className="flex items-center justify-between mt-2">
+                    <span className="text-[10px] text-gray-500 font-medium truncate mr-2">
+                        {botActive 
+                            ? '🟢 Ativo' 
+                            : '⏸️ Pausado'}
+                    </span>
+                    
+                    <button
+                        onClick={() => { setShowWaModal(true); handleFetchQr(); }}
+                        className="text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-1 rounded hover:bg-blue-200 flex items-center gap-1 transition-colors shrink-0"
+                    >
+                        <QrCode className="w-3 h-3" /> Reconectar
+                    </button>
+                </div>
             </div> 
 
+            {/* Logout */}
             <button 
                 onClick={onLogout}
                 className="flex items-center justify-center gap-3 px-4 py-3 w-full text-sm font-bold text-gray-500 hover:text-red-600 rounded-xl hover:bg-red-50 transition-colors cursor-pointer"
