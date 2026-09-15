@@ -17,6 +17,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ companyId }) => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
+  // Busca independente: Traz o histórico completo do restaurante diretamente do banco
   useEffect(() => {
     if (!companyId) {
       setLoading(false);
@@ -30,7 +31,8 @@ const HistoryView: React.FC<HistoryViewProps> = ({ companyId }) => {
           .from('orders')
           .select('*')
           .eq('companyId', companyId)
-          .order('timestamp', { ascending: false });
+          .order('timestamp', { ascending: false })
+          .limit(500000000000000000000000000000000000000); // Traz um panorama gigante sem travar o navegador
 
         if (error) throw error;
 
@@ -67,6 +69,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ companyId }) => {
     fetchOrdersHistory();
   }, [companyId]);
 
+  // Motor de Filtragem Instantâneo
   const filteredOrders = useMemo(() => {
     return orders.filter(order => {
       const name = (order.customerName || '').toLowerCase();
@@ -115,7 +118,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ companyId }) => {
     return (
       <div className="flex flex-col items-center justify-center h-64 gap-3">
         <Loader2 className="w-8 h-8 animate-spin text-red-600" />
-        <span className="text-gray-500 font-medium text-sm">Carregando histórico completo...</span>
+        <span className="text-gray-500 font-medium text-sm">Baixando histórico completo...</span>
       </div>
     );
   }
@@ -123,6 +126,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ companyId }) => {
   return (
     <div className="h-[calc(100vh-6rem)] md:h-[calc(100vh-5rem)] flex flex-col gap-3 print:h-auto print:block">
       
+      {/* PAINEL SUPERIOR COMPACTO (TÍTULO E RESUMO) */}
       <div className="bg-white p-3 md:p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-4 print:hidden shrink-0">
         
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
@@ -150,6 +154,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ companyId }) => {
           </div>
         </div>
 
+        {/* FILTROS RESPONSIVOS - Grid Perfeito para Celular */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-2 md:gap-3">
           <div className="relative sm:col-span-2 md:col-span-2">
             <input 
@@ -209,6 +214,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ companyId }) => {
         </div>
       </div>
 
+      {/* ÁREA DA TABELA (Rolagem individual flexível) */}
       <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col overflow-hidden print:border-none print:shadow-none print:overflow-visible">
         <div className="flex-1 overflow-x-auto overflow-y-auto">
           <table className="w-full text-left min-w-[750px]">
