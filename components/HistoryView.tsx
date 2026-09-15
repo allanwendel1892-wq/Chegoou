@@ -1,15 +1,12 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Order } from '../types';
-import { Search, Calendar, Store, MessageSquare, ShoppingBag, Printer, Loader2 } from 'lucide-react';
-import { supabase } from '../services/supabaseClient';
+import { Search, Calendar, Filter, DollarSign, ShoppingBag, Store, MessageSquare, Printer } from 'lucide-react';
 
 interface HistoryViewProps {
-  companyId: string;
+  orders: Order[];
 }
 
-const HistoryView: React.FC<HistoryViewProps> = ({ companyId }) => {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+const HistoryView: React.FC<HistoryViewProps> = ({ orders }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterOrigin, setFilterOrigin] = useState<string>('all');
@@ -17,62 +14,11 @@ const HistoryView: React.FC<HistoryViewProps> = ({ companyId }) => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  // Busca autônoma e segura de pedidos vinculada estritamente ao ID do restaurante
-  useEffect(() => {
-    if (!companyId) return;
-
-    const fetchOrdersHistory = async () => {
-      setLoading(true);
-      try {
-        const { data, error } = await supabase
-          .from('orders')
-          .select('*')
-          .eq('companyId', companyId)
-          .order('timestamp', { ascending: false });
-
-        if (error) throw error;
-
-        if (data) {
-          const mappedOrders: Order[] = data.map((item: any) => ({
-            id: item.id,
-            companyId: item.companyId || item.company_id,
-            customerName: item.customer_name || item.customerName || 'Cliente sem nome',
-            customerPhone: item.customer_phone || item.customerPhone || '',
-            total: Number(item.total || 0),
-            subtotal: Number(item.subtotal || 0),
-            status: item.status || 'pending',
-            origin: item.origin || 'app',
-            timestamp: item.timestamp || item.created_at || new Date().toISOString(),
-            items: typeof item.items === 'string' ? JSON.parse(item.items) : (item.items || []),
-            deliveryMethod: item.delivery_method || item.deliveryMethod || 'delivery',
-            deliveryFee: Number(item.delivery_fee || item.deliveryFee || 0),
-            serviceFee: Number(item.service_fee || item.serviceFee || 0),
-            paymentMethod: item.payment_method || item.paymentMethod || '',
-            changeFor: item.change_for ? Number(item.change_for) : undefined,
-            deliveryAddress: item.delivery_address || item.deliveryAddress,
-            observacoes: item.observacoes || item.notes || ''
-          }));
-
-          setOrders(mappedOrders);
-        }
-      } catch (err) {
-        console.error("Erro ao buscar histórico de pedidos:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchOrdersHistory();
-  }, [companyId]);
-
   const filteredOrders = useMemo(() => {
     return orders.filter(order => {
-      const name = (order.customerName || '').toLowerCase();
-      const phone = (order.customerPhone || '').toLowerCase();
-      const idStr = (order.id || '').toLowerCase();
-      const query = searchTerm.toLowerCase().trim();
-
-      const matchesSearch = !query || name.includes(query) || phone.includes(query) || idStr.includes(query);
+      const matchesSearch = order.customerName.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                            order.id.toLowerCase().includes(searchTerm.toLowerCase());
+      
       const matchesStatus = filterStatus === 'all' || order.status === filterStatus;
       
       const isWhatsapp = order.origin?.toLowerCase() === 'whatsapp';
@@ -98,7 +44,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ companyId }) => {
       }
 
       return matchesSearch && matchesStatus && matchesOrigin && matchesDate;
-    });
+    }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }, [orders, searchTerm, filterStatus, filterOrigin, startDate, endDate]);
 
   const totalRevenue = filteredOrders
@@ -109,45 +55,36 @@ const HistoryView: React.FC<HistoryViewProps> = ({ companyId }) => {
     window.print();
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-8 h-8 animate-spin text-red-600" />
-      </div>
-    );
-  }
-
   return (
-    <div className="h-[calc(100vh-6rem)] print:h-auto flex flex-col space-y-3">
+    // Reduzido space-y-6 para space-y-4 para ganhar espaço vertical
+    <div className="h-[calc(100vh-8rem)] print:h-auto flex flex-col space-y-4">
       
-      {/* HEADER COMPACTO */}
-      <div className="bg-white p-3.5 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 print:shadow-none print:border-none print:p-0">
-        <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-red-50 rounded-lg">
-                <Calendar className="w-5 h-5 text-red-600 print:text-black" />
-            </div>
-            <div>
-                <h2 className="text-lg font-bold text-gray-800 leading-tight">Histórico de Pedidos</h2>
-                <p className="text-xs text-gray-500">
-                    {startDate && endDate 
-                        ? `${new Date(`${startDate}T00:00:00`).toLocaleDateString()} até ${new Date(`${endDate}T00:00:00`).toLocaleDateString()}` 
-                        : 'Acompanhe e filtre os pedidos passados.'}
-                </p>
-            </div>
+      {/* HEADER E RESUMO - Mais compacto */}
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100 print:shadow-none print:border-none print:p-0">
+        <div className="w-full xl:w-auto">
+            <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-red-600 print:text-black" /> Histórico de Pedidos
+            </h2>
+            <p className="text-gray-500 text-xs mt-1">
+                {startDate && endDate 
+                    ? `Relatório de ${new Date(`${startDate}T00:00:00`).toLocaleDateString()} até ${new Date(`${endDate}T00:00:00`).toLocaleDateString()}` 
+                    : 'Acompanhe e filtre os pedidos passados da sua loja.'}
+            </p>
         </div>
-
-        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-end">
-            <div className="bg-gray-50 border border-gray-100 px-3 py-1.5 rounded-lg flex items-center gap-2 print:border-none print:bg-transparent">
-                <span className="text-[11px] font-bold text-gray-500 uppercase">Filtrados:</span>
-                <span className="text-sm font-bold text-gray-900">{filteredOrders.length}</span>
+        
+        {/* Cards responsivos: lado a lado no celular, esticando proporcionalmente */}
+        <div className="flex flex-wrap sm:flex-nowrap w-full xl:w-auto gap-2 items-center">
+            <div className="bg-gray-50 border border-gray-100 p-2 md:p-3 rounded-lg flex flex-col items-end flex-1 print:border-none print:bg-transparent">
+                <span className="text-[10px] font-bold text-gray-500 uppercase">Pedidos Filtrados</span>
+                <span className="text-lg md:text-xl font-bold text-gray-900">{filteredOrders.length}</span>
             </div>
-            <div className="bg-green-50 border border-green-100 px-3 py-1.5 rounded-lg flex items-center gap-2 print:border-none print:bg-transparent">
-                <span className="text-[11px] font-bold text-green-700 uppercase">Faturamento:</span>
-                <span className="text-sm font-bold text-green-700">R$ {totalRevenue.toFixed(2)}</span>
+            <div className="bg-green-50 border border-green-100 p-2 md:p-3 rounded-lg flex flex-col items-end flex-1 min-w-[130px] print:border-none print:bg-transparent">
+                <span className="text-[10px] font-bold text-green-700 uppercase">Faturamento</span>
+                <span className="text-lg md:text-xl font-bold text-green-700">R$ {totalRevenue.toFixed(2)}</span>
             </div>
             <button 
                 onClick={handlePrint}
-                className="print:hidden bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-colors shadow-sm ml-auto md:ml-0"
+                className="w-full sm:w-auto print:hidden bg-red-600 hover:bg-red-700 text-white p-2 md:p-3 py-3 md:py-3 rounded-lg flex items-center justify-center gap-2 transition-colors font-semibold text-sm"
             >
                 <Printer className="w-4 h-4" />
                 Imprimir
@@ -155,113 +92,116 @@ const HistoryView: React.FC<HistoryViewProps> = ({ companyId }) => {
         </div>
       </div>
 
-      {/* FILTROS COMPACTOS */}
-      <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-wrap gap-2.5 items-center print:hidden">
-        <div className="relative flex-1 min-w-[200px]">
+      {/* FILTROS - Responsivos para Mobile */}
+      <div className="flex flex-col lg:flex-row gap-3 bg-white p-3 rounded-xl shadow-sm border border-gray-100 print:hidden">
+        <div className="relative flex-1 w-full">
             <input 
                 type="text" 
-                placeholder="Buscar por nome, telefone ou código..." 
+                placeholder="Buscar por nome ou código..." 
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg outline-none focus:border-red-400 text-xs font-medium bg-gray-50/50"
+                className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg outline-none focus:border-red-300 text-sm"
             />
-            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
+            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-3" />
         </div>
         
-        <div className="flex items-center gap-1.5 bg-gray-50/50 border border-gray-200 rounded-lg px-2.5 py-1.5">
-            <span className="text-[11px] font-bold text-gray-400 uppercase">De:</span>
-            <input 
-                type="date" 
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="bg-transparent outline-none text-xs font-medium text-gray-700 cursor-pointer"
-            />
-            <span className="text-[11px] font-bold text-gray-400 uppercase ml-1">Até:</span>
-            <input 
-                type="date" 
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="bg-transparent outline-none text-xs font-medium text-gray-700 cursor-pointer"
-            />
-        </div>
-        
-        <div className="flex gap-2 w-full lg:w-auto">
-            <select 
-                value={filterStatus} 
-                onChange={e => setFilterStatus(e.target.value)}
-                className="flex-1 lg:flex-initial border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-red-400 bg-gray-50/50 text-xs font-medium text-gray-700"
-            >
-                <option value="all">Todos os Status</option>
-                <option value="delivered">Entregues</option>
-                <option value="cancelled">Cancelados</option>
-                <option value="pending">Pendentes</option>
-                <option value="preparing">Em Preparo</option>
-            </select>
+        <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+            {/* Filtros de Data */}
+            <div className="flex gap-2 items-center justify-between sm:justify-start">
+                <span className="text-xs font-medium text-gray-500">De:</span>
+                <input 
+                    type="date" 
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="border border-gray-200 rounded-lg px-2 py-2 outline-none focus:border-red-300 bg-white text-sm w-full sm:w-auto"
+                />
+                <span className="text-xs font-medium text-gray-500">Até:</span>
+                <input 
+                    type="date" 
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="border border-gray-200 rounded-lg px-2 py-2 outline-none focus:border-red-300 bg-white text-sm w-full sm:w-auto"
+                />
+            </div>
+            
+            {/* Selects */}
+            <div className="flex gap-2 w-full sm:w-auto">
+                <select 
+                    value={filterStatus} 
+                    onChange={e => setFilterStatus(e.target.value)}
+                    className="flex-1 sm:flex-none border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-red-300 bg-white text-sm"
+                >
+                    <option value="all">Todos os Status</option>
+                    <option value="delivered">Entregues</option>
+                    <option value="cancelled">Cancelados</option>
+                    <option value="pending">Pendentes</option>
+                </select>
 
-            <select 
-                value={filterOrigin} 
-                onChange={e => setFilterOrigin(e.target.value)}
-                className="flex-1 lg:flex-initial border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-red-400 bg-gray-50/50 text-xs font-medium text-gray-700"
-            >
-                <option value="all">Todas Origens</option>
-                <option value="app">App / Online</option>
-                <option value="pdv">Balcão (PDV)</option>
-                <option value="whatsapp">WhatsApp</option>
-            </select>
+                <select 
+                    value={filterOrigin} 
+                    onChange={e => setFilterOrigin(e.target.value)}
+                    className="flex-1 sm:flex-none border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-red-300 bg-white text-sm"
+                >
+                    <option value="all">Todas Origens</option>
+                    <option value="app">App / Online</option>
+                    <option value="pdv">Balcão (PDV)</option>
+                    <option value="whatsapp">WhatsApp</option>
+                </select>
+            </div>
         </div>
       </div>
 
-      {/* TABELA DE RESULTADOS COM MAIS ESPAÇO */}
+      {/* TABELA DE RESULTADOS - Com rolagem horizontal no mobile (overflow-x-auto) */}
       <div className="flex-1 overflow-hidden print:overflow-visible bg-white rounded-xl shadow-sm border border-gray-100 print:border-none print:shadow-none flex flex-col">
-          <div className="overflow-y-auto print:overflow-visible flex-1">
-              <table className="w-full text-left border-collapse">
-                  <thead className="bg-gray-50 print:bg-transparent sticky top-0 z-10 print:static border-b border-gray-100">
+          <div className="overflow-x-auto overflow-y-auto print:overflow-visible flex-1">
+              {/* min-w-[700px] garante que a tabela não esprema no celular, permitindo o scroll horizontal */}
+              <table className="w-full text-left min-w-[700px]">
+                  <thead className="bg-gray-50 print:bg-transparent sticky top-0 z-10 print:static">
                       <tr>
-                          <th className="py-3 px-4 text-xs font-semibold text-gray-500 uppercase print:text-black">Data / Hora</th>
-                          <th className="py-3 px-4 text-xs font-semibold text-gray-500 uppercase print:text-black">Código</th>
-                          <th className="py-3 px-4 text-xs font-semibold text-gray-500 uppercase print:text-black">Cliente</th>
-                          <th className="py-3 px-4 text-xs font-semibold text-gray-500 uppercase print:text-black">Origem</th>
-                          <th className="py-3 px-4 text-xs font-semibold text-gray-500 uppercase print:text-black">Status</th>
-                          <th className="py-3 px-4 text-xs font-semibold text-gray-500 uppercase print:text-black text-right">Total</th>
+                          <th className="p-3 text-xs font-semibold text-gray-500 uppercase print:text-black print:border-b">Data / Hora</th>
+                          <th className="p-3 text-xs font-semibold text-gray-500 uppercase print:text-black print:border-b">Código</th>
+                          <th className="p-3 text-xs font-semibold text-gray-500 uppercase print:text-black print:border-b">Cliente</th>
+                          <th className="p-3 text-xs font-semibold text-gray-500 uppercase print:text-black print:border-b">Origem</th>
+                          <th className="p-3 text-xs font-semibold text-gray-500 uppercase print:text-black print:border-b">Status</th>
+                          <th className="p-3 text-xs font-semibold text-gray-500 uppercase print:text-black print:border-b">Total</th>
                       </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100 print:divide-gray-300">
                       {filteredOrders.length === 0 ? (
                           <tr>
-                              <td colSpan={6} className="p-12 text-center text-gray-400 text-sm font-medium">Nenhum pedido encontrado com esses filtros.</td>
+                              <td colSpan={6} className="p-8 text-center text-gray-400">Nenhum pedido encontrado com esses filtros.</td>
                           </tr>
                       ) : (
                           filteredOrders.map(order => (
-                              <tr key={order.id} className="hover:bg-gray-50/80 transition-colors print:break-inside-avoid">
-                                  <td className="py-3 px-4 text-xs font-medium text-gray-600 print:text-black whitespace-nowrap">
+                              <tr key={order.id} className="hover:bg-gray-50 transition-colors print:break-inside-avoid">
+                                  <td className="p-3 text-sm font-medium text-gray-600 print:text-black">
                                       {new Date(order.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
                                   </td>
-                                  <td className="py-3 px-4 text-xs font-bold text-gray-900 print:text-black whitespace-nowrap">
+                                  <td className="p-3 text-sm font-bold text-gray-900 print:text-black">
                                       #{order.id.slice(-4)}
                                   </td>
-                                  <td className="py-3 px-4 text-xs font-medium text-gray-800 print:text-black">
+                                  <td className="p-3 text-sm text-gray-800 print:text-black">
                                       {order.customerName}
-                                      {order.customerPhone && <span className="block text-[10px] text-gray-400 font-normal">{order.customerPhone}</span>}
                                   </td>
-                                  <td className="py-3 px-4 whitespace-nowrap">
+                                  <td className="p-3">
                                       {order.origin === 'pdv' ? (
-                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 rounded text-[11px] font-bold border border-purple-100"><Store className="w-3 h-3 print:hidden"/> Balcão</span>
+                                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 print:bg-transparent print:border print:border-gray-300 text-purple-700 print:text-black rounded text-[11px] font-bold"><Store className="w-3 h-3 print:hidden"/> Balcão</span>
                                       ) : order.origin?.toLowerCase() === 'whatsapp' ? (
-                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-700 rounded text-[11px] font-bold border border-green-100"><MessageSquare className="w-3 h-3 print:hidden"/> WhatsApp</span>
+                                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 print:bg-transparent print:border print:border-gray-300 text-green-700 print:text-black rounded text-[11px] font-bold"><MessageSquare className="w-3 h-3 print:hidden"/> WhatsApp</span>
                                       ) : (
-                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-[11px] font-bold border border-blue-100"><ShoppingBag className="w-3 h-3 print:hidden"/> App</span>
+                                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 print:bg-transparent print:border print:border-gray-300 text-blue-700 print:text-black rounded text-[11px] font-bold"><ShoppingBag className="w-3 h-3 print:hidden"/> App</span>
                                       )}
                                   </td>
-                                  <td className="py-3 px-4 whitespace-nowrap">
-                                      <span className={`px-2 py-0.5 rounded text-[11px] font-bold uppercase
-                                          ${order.status === 'delivered' ? 'bg-green-50 text-green-700 border border-green-100' : ''}
-                                          ${order.status === 'cancelled' ? 'bg-red-50 text-red-700 border border-red-100' : ''}
-                                          ${order.status !== 'delivered' && order.status !== 'cancelled' ? 'bg-yellow-50 text-yellow-700 border border-yellow-100' : ''}
+                                  <td className="p-3">
+                                      <span className={`px-2 py-1 rounded text-[11px] font-bold uppercase print:bg-transparent print:border print:border-gray-300 print:text-black
+                                          ${order.status === 'delivered' ? 'bg-green-100 text-green-700' : ''}
+                                          ${order.status === 'cancelled' ? 'bg-red-100 text-red-700' : ''}
+                                          ${order.status !== 'delivered' && order.status !== 'cancelled' ? 'bg-yellow-100 text-yellow-700' : ''}
                                       `}>
                                           {order.status === 'delivered' ? 'Entregue' : order.status === 'cancelled' ? 'Cancelado' : 'Em Andamento'}
                                       </span>
                                   </td>
-                                  <td className="py-3 px-4 text-xs font-bold text-gray-900 print:text-black text-right whitespace-nowrap">
+                                  <td className="p-3 text-sm font-bold text-gray-900 print:text-black">
                                       R$ {order.total.toFixed(2)}
                                   </td>
                               </tr>
