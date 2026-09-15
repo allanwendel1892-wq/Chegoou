@@ -25,7 +25,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   company 
 }) => {
   
-  // Mantido caso precise reativar no futuro
   const [botActive, setBotActive] = useState(company?.chatbot !== 'disconnected');
   const [isUpdatingBot, setIsUpdatingBot] = useState(false);
 
@@ -60,7 +59,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: ViewState.INVENTORY, label: 'Estoque', icon: Package },
     { id: ViewState.FINANCE, label: 'Financeiro', icon: Wallet },
     { id: ViewState.COUPONS, label: 'Cupons', icon: Ticket },
-    // { id: ViewState.WHATSAPP, label: 'Bot WhatsApp', icon: MessageSquare }, // <-- COMENTADO PARA OCULTAR DO MENU
+    // { id: ViewState.WHATSAPP, label: 'Bot WhatsApp', icon: MessageSquare }, // <-- CONTINUA COMENTADO PARA OCULTAR A TELA DE DISPAROS
     { id: ViewState.SETTINGS, label: 'Configurações', icon: Settings },
   ];
 
@@ -141,8 +140,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                  <p className="text-[10px] text-gray-400 mt-1">Clique para alterar</p>
             </button>
 
-            {/* --- MÓDULO DO BOT DO WHATSAPP COMENTADO PARA OCULTAR --- */}
-            {/* 
+            {/* MÓDULO DO BOT DO WHATSAPP - RESTAURADO */}
             <div className="bg-gray-50 border border-gray-100 rounded-2xl p-3 mb-4 transition-colors hover:bg-gray-100">
                 <div className="flex justify-between items-center mb-1">
                     <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Robô WhatsApp</span>
@@ -165,7 +163,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                         : '⏸️ Pausado (Modo Manual)'}
                 </span>
             </div> 
-            */}
 
             <button 
                 onClick={onLogout}
