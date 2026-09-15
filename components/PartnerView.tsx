@@ -13,13 +13,19 @@ import HistoryView from './HistoryView';
 import InventoryView, { InventoryItem } from './InventoryView';
 
 // Componente isolado para não quebrar o React
-const InventoryModule = () => {
+const InventoryModule = ({ companyId }: { companyId: string }) => {
     const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+    
     useEffect(() => {
+        if (!companyId) return;
         const fetchInventory = async () => {
-            const { data } = await supabase.from('inventory_items').select('*').order('name');
+            const { data } = await supabase
+                .from('inventory_items')
+                .select('*')
+                .eq('company_id', companyId) // <-- Isolamento garantido
+                .order('name');
+                
             if (data) {
-                // TRADUÇÃO CRÍTICA: Mapeando os dados do banco (snake_case) para a UI (camelCase)
                 const mappedData: InventoryItem[] = data.map((item: any) => ({
                     id: item.id,
                     name: item.name,
@@ -33,12 +39,13 @@ const InventoryModule = () => {
             }
         };
         fetchInventory();
-    }, []);
-    // O setItems agora só atualiza a tela local. O salvamento no DB ocorre no próprio InventoryView.
+    }, [companyId]);
+
     return (
         <InventoryView 
             items={inventoryItems} 
-            setItems={setInventoryItems} 
+            setItems={setInventoryItems}
+            companyId={companyId} 
         />
     );
 };
@@ -2663,7 +2670,7 @@ delete updated.mapLink;
           
       {view === ViewState.INVENTORY && (
                 <div className="space-y-6">
-                    <InventoryModule />
+                    <InventoryModule companyId="{company.id}"/>
                 </div>
             )}  
                 
