@@ -16,31 +16,7 @@ import InventoryView, { InventoryItem } from './InventoryView';
 const InventoryModule = ({ companyId }: { companyId: string }) => {
     const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
     
-    useEffect(() => {
-        if (!companyId) return;
-        const fetchInventory = async () => {
-            const { data } = await supabase
-                .from('inventory_items')
-                .select('*')
-                .eq('company_id', companyId) // <-- Isolamento garantido
-                .order('name');
-                
-            if (data) {
-                const mappedData: InventoryItem[] = data.map((item: any) => ({
-                    id: item.id,
-                    name: item.name,
-                    category: item.category,
-                    unit: item.unit,
-                    currentStock: item.current_stock || 0,
-                    minStock: item.min_stock || 0,
-                    costPrice: item.cost_price || 0
-                }));
-                setInventoryItems(mappedData);
-            }
-        };
-        fetchInventory();
-    }, [companyId]);
-
+    // O InventoryView agora vai assumir o controle total das buscas
     return (
         <InventoryView 
             items={inventoryItems} 
