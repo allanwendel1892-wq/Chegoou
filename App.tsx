@@ -163,8 +163,8 @@ const enrichProductsWithIngredients = async (fetchedProducts: Product[]): Promis
         // Agrupa os nomes de ingredientes por reference_id (sabor/opção)
         const ingredientsByReference = new Map<string, string[]>();
         compositions.forEach((comp: any) => {
-            const referenceId = comp.reference_id ?? comp.referenceId;
-            const inventoryItemId = comp.inventory_item_id ?? comp.inventoryItemId;
+            const referenceId = comp.reference_id;
+            const inventoryItemId = comp.inventory_item_id;
             if (!referenceId || !inventoryItemId) return;
 
             const ingredientName = inventoryMap.get(String(inventoryItemId));
@@ -1625,7 +1625,10 @@ if (!shouldFetch) return;
               const orderToDeduct = orders.find(o => o.id === orderId);
               if (orderToDeduct && orderToDeduct.items) {
                   // Puxa as fichas técnicas do banco de dados
-                  const { data: compositions } = await supabase.from('compositions').select('*');
+                  const { data: compositions } = await supabase
+                      .from('compositions')
+                      .select('*')
+                      .eq('company_id', orderToDeduct.companyId);
                   
                   if (compositions) {
                       // Roda a calculadora de estoque
