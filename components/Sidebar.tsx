@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { LayoutDashboard, UtensilsCrossed, MessageSquare, ShoppingBag, LogOut, Settings, Wallet, Ticket, MonitorStop, History } from 'lucide-react';
 import { ViewState, Company } from '../types';
-import { supabase } from '../services/supabaseClient'; // Importação do Supabase adicionada
+import { supabase } from '../services/supabaseClient';
 import { LayoutDashboard, UtensilsCrossed, MessageSquare, ShoppingBag, LogOut, Settings, Wallet, Ticket, MonitorStop, History, Package } from 'lucide-react'; 
 
 interface SidebarProps {
@@ -12,7 +11,7 @@ interface SidebarProps {
   onLogout: () => void;
   companyStatus: Company['status'];
   onToggleStatus: () => void;
-  company: Company; // <- ADICIONADO para poder atualizar o bot no banco de dados
+  company: Company;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ 
@@ -23,10 +22,10 @@ const Sidebar: React.FC<SidebarProps> = ({
   onLogout, 
   companyStatus, 
   onToggleStatus,
-  company // <- Recebendo a company aqui
+  company 
 }) => {
   
-  // Estado local para controlar o visual do interruptor do bot mais rápido
+  // Mantido caso precise reativar no futuro
   const [botActive, setBotActive] = useState(company?.chatbot !== 'disconnected');
   const [isUpdatingBot, setIsUpdatingBot] = useState(false);
 
@@ -43,10 +42,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               .eq('id', company.id);
 
           if (error) throw error;
-
-          // Atualiza visualmente na hora
           setBotActive(newStatus === 'connected');
-          
       } catch (error) {
           console.error('Erro ao alternar o robô:', error);
           alert('Erro ao alterar status do robô. Tente novamente.');
@@ -61,10 +57,10 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: ViewState.ORDERS, label: 'Pedidos (Kanban)', icon: ShoppingBag },
     { id: ViewState.HISTORY, label: 'Histórico de Pedidos', icon: History },
     { id: ViewState.MENU, label: 'Cardápio', icon: UtensilsCrossed },
-    { id: ViewState.INVENTORY, label: 'Estoque', icon: Package }, // <-- ADICIONE ESTA LINHA AQUI
+    { id: ViewState.INVENTORY, label: 'Estoque', icon: Package },
     { id: ViewState.FINANCE, label: 'Financeiro', icon: Wallet },
     { id: ViewState.COUPONS, label: 'Cupons', icon: Ticket },
-    { id: ViewState.WHATSAPP, label: 'Bot WhatsApp', icon: MessageSquare },
+    // { id: ViewState.WHATSAPP, label: 'Bot WhatsApp', icon: MessageSquare }, // <-- COMENTADO PARA OCULTAR DO MENU
     { id: ViewState.SETTINGS, label: 'Configurações', icon: Settings },
   ];
 
@@ -125,7 +121,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             })}
         </nav>
 
-        {/* Footer com Status da Loja, Bot e Logout */}
+        {/* Footer com Status da Loja e Logout */}
         <div className="p-5 border-t border-gray-100 bg-white shrink-0">
             {/* Botão Status da Loja */}
             <button 
@@ -145,7 +141,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                  <p className="text-[10px] text-gray-400 mt-1">Clique para alterar</p>
             </button>
 
-            {/* --- INÍCIO: TOGGLE ATENDENTE N8N --- */}
+            {/* --- MÓDULO DO BOT DO WHATSAPP COMENTADO PARA OCULTAR --- */}
+            {/* 
             <div className="bg-gray-50 border border-gray-100 rounded-2xl p-3 mb-4 transition-colors hover:bg-gray-100">
                 <div className="flex justify-between items-center mb-1">
                     <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Robô WhatsApp</span>
@@ -167,8 +164,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                         ? '🟢 Respondendo clientes' 
                         : '⏸️ Pausado (Modo Manual)'}
                 </span>
-            </div>
-            {/* --- FIM: TOGGLE ATENDENTE N8N --- */}
+            </div> 
+            */}
 
             <button 
                 onClick={onLogout}
