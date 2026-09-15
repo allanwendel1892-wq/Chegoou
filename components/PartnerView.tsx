@@ -1076,7 +1076,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   };
 
   const handleUnlinkCourier = async (courierId: string) => {
-      if (!window.confirm('Remover o vínculo deste entregador com o seu restaurante? Ele deixará de ver os pedidos da sua loja e voltará a ser cliente comum.')) return;
+      if (!window.confirm('Essa ação vai remover o vínculo deste entregador com o seu restaurante. "OK" pra confirmar')) return;
       const { error } = await supabase
           .from('users')
           .update({ 
