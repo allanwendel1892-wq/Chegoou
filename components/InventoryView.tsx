@@ -2,127 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Plus, Search, Edit, Trash2, AlertTriangle, ShoppingCart, Package, X, Save, Printer, BookOpen } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
-// ============================================================================
-// MOTOR AUTÔNOMO DE BAIXA DE ESTOQUE (LOCK ATÔMICO NO SUPABASE)
-// ============================================================================
-
-let isPollingActive = false;
-
 const normalize = (str: any) => String(str || '').trim().toLowerCase();
-
-const processOrderDeduction = async (orderItems: any[]) => {
-    console.log("🔥 [ESTOQUE] Iniciando processo de baixa. Itens recebidos:", orderItems);
-    try {
-        const { data: compositions, error: compError } = await supabase.from('compositions').select('*');
-        if (compError || !compositions || compositions.length === 0) return;
-
-        const deductions: Record<string, number> = {};
-
-        const addDeduction = (invId: string, amount: number) => {
-            if (!deductions[invId]) deductions[invId] = 0;
-            deductions[invId] += amount;
-        };
-
-        for (const item of orderItems) {
-            // 1. Abate Produto Principal
-            const mainComps = compositions.filter(c => normalize(c.reference_id) === normalize(item.productName));
-            for (const comp of mainComps) {
-                addDeduction(comp.inventory_item_id, Number(comp.amount_needed) * Number(item.quantity));
-            }
-
-            // 2. Abate Sabores e Lógica de Fração Rigorosa
-            const optsArray = item.selectedOptions?.length ? item.selectedOptions : (item.options || []);
-            
-            if (optsArray.length > 0) {
-                for (const opt of optsArray) {
-                    let fraction = 1;
-                    const rawName = normalize(opt.name);
-                    const optName = normalize(opt.optionName);
-                    
-                    if (rawName.includes("1/2") || rawName.includes("meia")) fraction = 0.5;
-                    else if (rawName.includes("1/3")) fraction = 1 / 3;
-                    else if (rawName.includes("1/4")) fraction = 0.25;
-                    else if (opt.dividePrice === true || String(opt.dividePrice) === 'true') {
-                        const countInGroup = optsArray.filter((o: any) => 
-                            (o.groupName === opt.groupName || o.groupIndex === opt.groupIndex) && 
-                            (o.dividePrice === true || String(o.dividePrice) === 'true')
-                        ).length;
-                        if (countInGroup > 0) fraction = 1 / countInGroup;
-                    }
-
-                    let matchedRecipes = compositions.filter(c => normalize(c.reference_id) === rawName);
-                    if (matchedRecipes.length === 0 && optName) {
-                        matchedRecipes = compositions.filter(c => normalize(c.reference_id) === optName);
-                    }
-
-                    for (const comp of matchedRecipes) {
-                        const deductionValue = Number(comp.amount_needed) * Number(item.quantity) * Number(fraction);
-                        console.log(`🍕 Sabor Encontrado: ${opt.name} | Receita Aplicada: ${comp.reference_id} | Abatimento Matemático: ${comp.amount_needed} * ${item.quantity} * ${fraction} = ${deductionValue}`);
-                        addDeduction(comp.inventory_item_id, deductionValue);
-                    }
-                }
-            }
-        }
-
-        // Executa todas as deduções consolidadas no banco
-        for (const [invId, amountToDeduct] of Object.entries(deductions)) {
-            if (amountToDeduct > 0) {
-                const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', invId).single();
-                if (inv) {
-                    const novoEstoque = Number(inv.current_stock) - amountToDeduct;
-                    await supabase.from('inventory_items').update({ current_stock: novoEstoque }).eq('id', invId);
-                    console.log(`✅ [ESTOQUE] Insumo atualizado! Abatido: ${amountToDeduct}. Novo Saldo: ${novoEstoque}`);
-                }
-            }
-        }
-    } catch (error) {
-        console.error("❌ [ESTOQUE] Erro fatal no motor de baixa:", error);
-    }
-};
-
-// O RADAR: Roda a cada 5 segundos buscando apenas o que o Postgres disser que é novo
-if (!isPollingActive) {
-    console.log("📡 [ESTOQUE] Ligando o Radar com Lock Atômico no Postgres...");
-    isPollingActive = true;
-
-    setInterval(async () => {
-        try {
-            const { data: pendingStockOrders, error } = await supabase
-                .from('orders')
-                .select('id, items, status')
-                .in('status', ['delivered', 'completed', 'concluido', 'entregue', 'Concluído', 'Entregue', 'concluído', 'Delivered'])
-                .eq('stock_processed', false)
-                .limit(10);
-
-            if (error || !pendingStockOrders || pendingStockOrders.length === 0) return;
-
-            for (const order of pendingStockOrders) {
-                // LOCK ATÔMICO: Apenas 1 dispositivo conseguirá fazer este update e receber a linha de volta
-                const { data: lockData, error: lockError } = await supabase
-                    .from('orders')
-                    .update({ stock_processed: true })
-                    .eq('id', order.id)
-                    .eq('stock_processed', false)
-                    .select('id');
-                
-                if (lockError || !lockData || lockData.length === 0) {
-                    console.log(`🔒 [ESTOQUE] Pedido ${order.id} abortado. Outro aparelho já fez a baixa no banco.`);
-                    continue; 
-                }
-
-                console.log(`🚚 [ESTOQUE] NOVO PEDIDO EXCLUSIVO CAPTURADO: ${order.id}`);
-                const orderItems = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
-                await processOrderDeduction(orderItems);
-            }
-        } catch (err) {
-            console.error("❌ [ESTOQUE] Erro interno no Radar:", err);
-        }
-    }, 5000); 
-}
-
-// ============================================================================
-// COMPONENTE VISUAL REACT
-// ============================================================================
 
 export interface InventoryItem {
     id: string;
@@ -139,14 +19,16 @@ export interface Composition {
     reference_id: string;
     inventory_item_id: string;
     amount_needed: number;
+    company_id?: string;
 }
 
 interface InventoryViewProps {
     items: InventoryItem[];
     setItems: (items: InventoryItem[] | ((prev: InventoryItem[]) => InventoryItem[])) => void;
+    companyId: string; // <-- OBRIGATÓRIO PARA ISOLAMENTO
 }
 
-const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
+const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyId }) => {
     const [activeTab, setActiveTab] = useState<'insumos' | 'receitas'>('insumos');
     const [searchTerm, setSearchTerm] = useState('');
     
@@ -160,24 +42,18 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
     const [compositions, setCompositions] = useState<Composition[]>([]);
     const [isRecipeModalOpen, setIsRecipeModalOpen] = useState(false);
     const [editingRecipeName, setEditingRecipeName] = useState('');
-    const [recipeIngredients, setRecipeIngredients] = useState<{ invId: string, amount: number }[]>([]);
+    const [recipeIngredients, setRecipeIngredients] = useState<{ invId: string, amount: number | string }[]>([]);
 
+    // Busca e Atualização em Tempo Real ISOLADAS POR EMPRESA
     useEffect(() => {
+        if (!companyId) return;
+
         const fetchData = async () => {
-            const { data: invData } = await supabase.from('inventory_items').select('*').order('name');
-            if (invData) {
-                const mappedData = invData.map((item: any) => ({
-                    id: item.id,
-                    name: item.name,
-                    category: item.category,
-                    unit: item.unit,
-                    currentStock: Number(item.current_stock) || 0,
-                    minStock: Number(item.min_stock) || 0,
-                    costPrice: Number(item.cost_price) || 0
-                }));
-                setItems(mappedData);
-            }
-            const { data: compData } = await supabase.from('compositions').select('*');
+            const { data: compData } = await supabase
+                .from('compositions')
+                .select('*')
+                .eq('company_id', companyId); // <-- Isolamento
+                
             if (compData) {
                 setCompositions(compData);
             }
@@ -186,7 +62,117 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
         fetchData();
         const interval = setInterval(fetchData, 5000); 
         return () => clearInterval(interval);
-    }, [setItems]);
+    }, [companyId]);
+
+    // ============================================================================
+    // MOTOR AUTÔNOMO DE BAIXA DE ESTOQUE (RADAR) - AGORA ISOLADO E INTERNO
+    // ============================================================================
+    useEffect(() => {
+        if (!companyId) return;
+        let isPollingActive = true;
+
+        const processOrderDeduction = async (orderItems: any[]) => {
+            try {
+                const { data: dbCompositions, error: compError } = await supabase
+                    .from('compositions')
+                    .select('*')
+                    .eq('company_id', companyId); // <-- Isolamento
+
+                if (compError || !dbCompositions || dbCompositions.length === 0) return;
+
+                const deductions: Record<string, number> = {};
+                const addDeduction = (invId: string, amount: number) => {
+                    if (!deductions[invId]) deductions[invId] = 0;
+                    deductions[invId] += amount;
+                };
+
+                for (const item of orderItems) {
+                    const mainComps = dbCompositions.filter(c => normalize(c.reference_id) === normalize(item.productName));
+                    for (const comp of mainComps) {
+                        addDeduction(comp.inventory_item_id, Number(comp.amount_needed) * Number(item.quantity));
+                    }
+
+                    const optsArray = item.selectedOptions?.length ? item.selectedOptions : (item.options || []);
+                    if (optsArray.length > 0) {
+                        for (const opt of optsArray) {
+                            let fraction = 1;
+                            const rawName = normalize(opt.name);
+                            const optName = normalize(opt.optionName);
+                            
+                            if (rawName.includes("1/2") || rawName.includes("meia")) fraction = 0.5;
+                            else if (rawName.includes("1/3")) fraction = 1 / 3;
+                            else if (rawName.includes("1/4")) fraction = 0.25;
+                            else if (opt.dividePrice === true || String(opt.dividePrice) === 'true') {
+                                const countInGroup = optsArray.filter((o: any) => 
+                                    (o.groupName === opt.groupName || o.groupIndex === opt.groupIndex) && 
+                                    (o.dividePrice === true || String(o.dividePrice) === 'true')
+                                ).length;
+                                if (countInGroup > 0) fraction = 1 / countInGroup;
+                            }
+
+                            let matchedRecipes = dbCompositions.filter(c => normalize(c.reference_id) === rawName);
+                            if (matchedRecipes.length === 0 && optName) {
+                                matchedRecipes = dbCompositions.filter(c => normalize(c.reference_id) === optName);
+                            }
+
+                            for (const comp of matchedRecipes) {
+                                const deductionValue = Number(comp.amount_needed) * Number(item.quantity) * Number(fraction);
+                                addDeduction(comp.inventory_item_id, deductionValue);
+                            }
+                        }
+                    }
+                }
+
+                for (const [invId, amountToDeduct] of Object.entries(deductions)) {
+                    if (amountToDeduct > 0) {
+                        const { data: inv } = await supabase.from('inventory_items').select('current_stock').eq('id', invId).single();
+                        if (inv) {
+                            const novoEstoque = Number(inv.current_stock) - amountToDeduct;
+                            await supabase.from('inventory_items').update({ current_stock: novoEstoque }).eq('id', invId);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error("❌ [ESTOQUE] Erro fatal no motor de baixa:", error);
+            }
+        };
+
+        const radarInterval = setInterval(async () => {
+            if (!isPollingActive) return;
+            try {
+                const { data: pendingStockOrders, error } = await supabase
+                    .from('orders')
+                    .select('id, items, status')
+                    .eq('companyId', companyId) // <-- ISOLAMENTO DE PEDIDOS DA EMPRESA
+                    .in('status', ['delivered', 'completed', 'concluido', 'entregue', 'Concluído', 'Entregue', 'concluído', 'Delivered'])
+                    .eq('stock_processed', false)
+                    .limit(10);
+
+                if (error || !pendingStockOrders || pendingStockOrders.length === 0) return;
+
+                for (const order of pendingStockOrders) {
+                    const { data: lockData, error: lockError } = await supabase
+                        .from('orders')
+                        .update({ stock_processed: true })
+                        .eq('id', order.id)
+                        .eq('stock_processed', false)
+                        .select('id');
+                    
+                    if (lockError || !lockData || lockData.length === 0) continue;
+
+                    const orderItems = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
+                    await processOrderDeduction(orderItems);
+                }
+            } catch (err) {
+                console.error("❌ [ESTOQUE] Erro interno no Radar:", err);
+            }
+        }, 5000);
+
+        return () => {
+            isPollingActive = false;
+            clearInterval(radarInterval);
+        };
+    }, [companyId]);
 
     const shoppingList = useMemo(() => items.filter(item => Number(item.currentStock) <= Number(item.minStock)), [items]);
     const filteredItems = items.filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase()) || item.category.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -209,6 +195,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
 
         const dbItem = {
             id: editingItem ? editingItem.id : self.crypto.randomUUID(),
+            company_id: companyId, // <-- ISOLAMENTO DE INSUMO
             name: itemFormData.name,
             category: itemFormData.category || 'Ingredientes',
             unit: itemFormData.unit || 'KG',
@@ -224,12 +211,26 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
             setEditingItem(null);
             setItemFormData({ name: '', category: 'Ingredientes', unit: 'KG', currentStock: 0, minStock: 0, costPrice: 0 });
             setStockEntry('');
+            
+            // Atualiza localmente a lista de itens
+            setItems(prev => {
+                const filtered = prev.filter(i => i.id !== dbItem.id);
+                return [...filtered, {
+                    id: dbItem.id,
+                    name: dbItem.name,
+                    category: dbItem.category,
+                    unit: dbItem.unit,
+                    currentStock: dbItem.current_stock,
+                    minStock: dbItem.min_stock,
+                    costPrice: dbItem.cost_price
+                }].sort((a, b) => a.name.localeCompare(b.name));
+            });
         } catch (err) { alert("Erro ao salvar."); }
     };
 
     const handleDeleteItem = async (id: string) => {
         if (window.confirm('Excluir este insumo permanentemente?')) {
-            await supabase.from('inventory_items').delete().eq('id', id);
+            await supabase.from('inventory_items').delete().eq('id', id).eq('company_id', companyId);
             setItems(prev => prev.filter(i => i.id !== id));
         }
     };
@@ -244,59 +245,61 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
     }, [compositions]);
 
     const handleSaveRecipe = async () => {
-    if (!editingRecipeName) { alert('O Nome da Receita (Ex: Calabresa) é obrigatório!'); return; }
-    
-    try {
-        // 1. Deleta a receita antiga verificando erros
-        const { error: deleteError } = await supabase
-            .from('compositions')
-            .delete()
-            .eq('reference_id', editingRecipeName);
+        const recipeName = editingRecipeName.trim();
+        if (!recipeName) { alert('O Nome da Receita (Ex: Calabresa) é obrigatório!'); return; }
+        
+        try {
+            // Conversão de qualquer string restante para float seguro
+            const normalizedIngredients = recipeIngredients.map(r => ({
+                invId: r.invId,
+                amount: typeof r.amount === 'string' ? parseFloat(r.amount.replace(',', '.')) : r.amount
+            }));
+
+            const validIngredients = normalizedIngredients.filter(r => r.invId && !isNaN(r.amount) && r.amount > 0);
             
-        if (deleteError) {
-            alert(`Erro ao limpar receita antiga: ${deleteError.message}`);
-            return;
-        }
-        
-        const validIngredients = recipeIngredients.filter(r => r.invId && r.amount > 0);
-        
-        if (validIngredients.length > 0) {
+            if (validIngredients.length === 0) {
+                alert('⚠️ Selecione um insumo e informe uma quantidade maior que zero!');
+                return;
+            }
+
+            // Exclui receita antiga apenas DESTA empresa
+            const { error: deleteError } = await supabase
+                .from('compositions')
+                .delete()
+                .eq('reference_id', recipeName)
+                .eq('company_id', companyId);
+                
+            if (deleteError) { alert(`Erro ao limpar receita antiga: ${deleteError.message}`); return; }
+            
             const newComps = validIngredients.map(r => ({
-                id: self.crypto.randomUUID(),
-                reference_id: editingRecipeName,
+                reference_id: recipeName,
                 inventory_item_id: r.invId,
-                amount_needed: r.amount
+                amount_needed: r.amount,
+                company_id: companyId // <-- ISOLAMENTO DE RECEITA
             }));
             
-            // 2. Insere a nova receita verificando erros
-            const { error: insertError } = await supabase
-                .from('compositions')
-                .insert(newComps);
-                
+            const { error: insertError } = await supabase.from('compositions').insert(newComps);
+            
             if (insertError) {
-                alert(`Erro ao salvar no banco: ${insertError.message}`);
-                console.error("Detalhes do erro:", insertError);
+                alert(`Erro ao salvar receita no banco: ${insertError.message}`);
                 return;
             }
             
-            const otherComps = compositions.filter(c => c.reference_id !== editingRecipeName);
-            setCompositions([...otherComps, ...newComps]);
-        } else {
-            setCompositions(compositions.filter(c => c.reference_id !== editingRecipeName));
+            const otherComps = compositions.filter(c => c.reference_id !== recipeName);
+            setCompositions([...otherComps, ...newComps] as Composition[]);
+            
+            setIsRecipeModalOpen(false);
+            setEditingRecipeName('');
+            setRecipeIngredients([]);
+        } catch (err) {
+            console.error(err);
+            alert("Erro ao salvar a receita.");
         }
-        
-        setIsRecipeModalOpen(false);
-        setEditingRecipeName('');
-        setRecipeIngredients([]);
-    } catch (err) {
-        console.error(err);
-        alert("Erro fatal na aplicação ao salvar a receita.");
-    }
-};
+    };
 
     const handleDeleteRecipe = async (recipeName: string) => {
         if (window.confirm(`Excluir a receita de ${recipeName}?`)) {
-            await supabase.from('compositions').delete().eq('reference_id', recipeName);
+            await supabase.from('compositions').delete().eq('reference_id', recipeName).eq('company_id', companyId);
             setCompositions(prev => prev.filter(c => c.reference_id !== recipeName));
         }
     };
@@ -309,7 +312,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                 amount: c.amount_needed
             })));
         } else {
-            setRecipeIngredients([{ invId: '', amount: 0 }]);
+            setRecipeIngredients([{ invId: '', amount: '' }]);
         }
         setIsRecipeModalOpen(true);
     };
@@ -319,7 +322,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
                 <div>
                     <h1 className="text-3xl font-black text-gray-900 flex items-center gap-3"><Package className="w-8 h-8 text-red-600" /> Controle de Estoque</h1>
-                    <p className="text-gray-500 font-medium">Gerencie insumos e fichas técnicas</p>
+                    <p className="text-gray-500 font-medium">Gerencie insumos e fichas técnicas da sua loja</p>
                 </div>
                 
                 <div className="flex bg-gray-100 p-1 rounded-xl">
@@ -490,11 +493,12 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                                             {items.map(i => <option key={i.id} value={i.id}>{i.name} ({i.unit})</option>)}
                                         </select>
                                         <input 
-                                            type="number" 
+                                            type="text" 
                                             value={ing.amount} 
                                             onChange={e => {
                                                 const newIng = [...recipeIngredients];
-                                                newIng[idx].amount = parseFloat(e.target.value);
+                                                // Permite digitar com vírgula de forma amigável
+                                                newIng[idx].amount = e.target.value;
                                                 setRecipeIngredients(newIng);
                                             }}
                                             className="w-24 border border-gray-200 rounded-lg px-2 py-2 text-sm outline-none text-center"
@@ -506,7 +510,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems }) => {
                                     </div>
                                 ))}
 
-                                <button onClick={() => setRecipeIngredients([...recipeIngredients, { invId: '', amount: 0 }])} className="text-sm font-bold text-blue-600 mt-4 hover:underline flex items-center gap-1">
+                                <button onClick={() => setRecipeIngredients([...recipeIngredients, { invId: '', amount: '' }])} className="text-sm font-bold text-blue-600 mt-4 hover:underline flex items-center gap-1">
                                     <Plus className="w-4 h-4"/> Adicionar Insumo
                                 </button>
                             </div>
