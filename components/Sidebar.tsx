@@ -74,7 +74,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           // Aqui garantimos que a instância é sempre e unicamente o ID da empresa logada
           const INSTANCE_NAME = company.id; 
           // Recomenda-se colocar a API KEY no .env (ex: import.meta.env.VITE_EVO_API_KEY)
-          const API_KEY = 'SUA_GLOBAL_API_KEY_AQUI'; 
+          const API_KEY = 'f39d1eeee991decd02aceaea0e9d1310b31106e360d702744ed8c6020f08036b'; 
 
           const response = await fetch(`${EVOLUTION_URL}/instance/connect/${INSTANCE_NAME}`, {
               headers: { 'apikey': API_KEY }
