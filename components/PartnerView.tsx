@@ -2645,10 +2645,10 @@ delete updated.mapLink;
             )}
           
       {view === ViewState.INVENTORY && (
-                <div className="space-y-6">
-                    <InventoryModule companyId="{company.id}"/>
-                </div>
-            )}  
+    <div className="space-y-6">
+        <InventoryModule companyId={company.id} />
+    </div>
+)}
                 
           {view === ViewState.MENU && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
