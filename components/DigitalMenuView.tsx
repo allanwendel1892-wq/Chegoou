@@ -555,14 +555,20 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                     <div className="bg-white w-full max-w-md h-[100dvh] sm:h-auto sm:max-h-[92vh] rounded-none sm:rounded-2xl shadow-2xl flex flex-col">
                         <div className="px-5 pt-6 sm:pt-4 pb-3 border-b border-gray-100 shrink-0">
                             <div className="flex justify-between items-center mb-3">
-                                <h2 className="font-bold text-lg text-gray-900 flex items-center gap-2">
-                                    {checkoutStep === 1 && <><ShoppingBag className="w-5 h-5 text-red-600" /> Sua Sacola</>}
-                                    {checkoutStep === 2 && <><User className="w-5 h-5 text-red-600" /> Seus Dados</>}
-                                    {checkoutStep === 3 && <><Truck className="w-5 h-5 text-red-600" /> Entrega</>}
-                                    {checkoutStep === 4 && <><CreditCard className="w-5 h-5 text-red-600" /> Pagamento</>}
-                                </h2>
-                                <button onClick={() => setIsCartOpen(false)} className="p-2 bg-gray-100 hover:bg-gray-200 rounded-full shrink-0"><X className="w-5 h-5 text-gray-600" /></button>
-                            </div>
+    <h2 className="font-bold text-lg text-gray-900 flex items-center gap-2">
+        {checkoutStep === 1 && <><ShoppingBag className="w-5 h-5 text-red-600" /> Sua Sacola</>}
+        {checkoutStep === 2 && <><User className="w-5 h-5 text-red-600" /> Seus Dados</>}
+        {checkoutStep === 3 && <><Truck className="w-5 h-5 text-red-600" /> Entrega</>}
+        {checkoutStep === 4 && <><CreditCard className="w-5 h-5 text-red-600" /> Pagamento</>}
+    </h2>
+    
+    <button 
+        onClick={() => setIsCartOpen(false)} 
+        className="text-sm font-bold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors border border-red-100 shrink-0"
+    >
+        + Adicionar itens
+    </button>
+</div>
                             <div>
                                 <div className="flex justify-between items-center mb-1.5">
                                     <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Etapa {checkoutStep}/{TOTAL_STEPS}</span>
