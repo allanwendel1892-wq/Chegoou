@@ -2204,12 +2204,7 @@ delete updated.mapLink;
             
             {view === ViewState.DASHBOARD && (
                 <div className="space-y-8">
-                    <DashboardView 
-                        salesData={calculatedSalesHistory} 
-                        orders={orders} 
-                        compositions={compositions}
-                        inventoryItems={dashboardInventoryItems}
-                    />
+                    <DashboardView companyId={company.id} />
                     
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                         <div className="flex justify-between items-center mb-6">
