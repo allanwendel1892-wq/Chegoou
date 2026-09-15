@@ -46,23 +46,49 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyI
 
     // Busca e Atualização em Tempo Real ISOLADAS POR EMPRESA
     useEffect(() => {
-        if (!companyId) return;
+        // Trava de segurança: se o ID não chegar, ele não tenta buscar (evita erros)
+        if (!companyId) {
+            console.warn("⚠️ companyId não foi recebido no InventoryView!");
+            return;
+        }
 
         const fetchData = async () => {
+            // 1. Busca apenas os Insumos desta loja
+            const { data: invData } = await supabase
+                .from('inventory_items')
+                .select('*')
+                .eq('company_id', companyId)
+                .order('name');
+                
+            if (invData) {
+                const mappedData = invData.map((item: any) => ({
+                    id: item.id,
+                    name: item.name,
+                    category: item.category,
+                    unit: item.unit,
+                    currentStock: Number(item.current_stock) || 0,
+                    minStock: Number(item.min_stock) || 0,
+                    costPrice: Number(item.cost_price) || 0
+                }));
+                setItems(mappedData);
+            }
+
+            // 2. Busca apenas as Receitas desta loja
             const { data: compData } = await supabase
                 .from('compositions')
                 .select('*')
-                .eq('company_id', companyId); // <-- Isolamento
+                .eq('company_id', companyId);
                 
             if (compData) {
                 setCompositions(compData);
             }
         };
 
-        fetchData();
-        const interval = setInterval(fetchData, 5000); 
+        fetchData(); // Roda a primeira vez imediatamente
+        const interval = setInterval(fetchData, 5000); // Fica checando atualizações
+        
         return () => clearInterval(interval);
-    }, [companyId]);
+    }, [companyId, setItems]);
 
     // ============================================================================
     // MOTOR AUTÔNOMO DE BAIXA DE ESTOQUE (RADAR) - AGORA ISOLADO E INTERNO
