@@ -2354,7 +2354,6 @@ delete updated.mapLink;
                             </h3>
                             <p className="text-sm text-gray-500 mt-1">
                                 Apenas entregadores vinculados aqui conseguem ver e aceitar os pedidos da sua loja.
-                                Peça para o entregador criar a conta dele primeiro (WhatsApp) e depois vincule pelo telefone.
                             </p>
                         </div>
                         <div className="p-6 pt-4 space-y-4">
@@ -2409,8 +2408,7 @@ delete updated.mapLink;
                         </div>
                         <div className="px-6 pt-4">
                             <p className="text-sm text-gray-500">
-                                Analise e aprove os repasses solicitados pelos entregadores que atenderam pedidos deste restaurante. Ao aprovar, o valor é abatido da carteira do entregador.
-                            </p>
+                                Analise e aprove os repasses solicitados pelos entregadores.</p>
                         </div>
                         <div className="overflow-x-auto mt-4">
                             <table className="w-full text-left">
