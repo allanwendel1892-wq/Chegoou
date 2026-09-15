@@ -1,13 +1,14 @@
-//Versão Atualizada
+//Versão Atualizada com Gestão e Aplicação de Cupons
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Company, Product, ProductOption } from '../types';
+import { Company, Product, ProductOption, Coupon } from '../types';
 import {
     ShoppingBag, MapPin, Bike, Clock, ChevronRight, ChevronLeft,
     X, CheckCircle, Store, DollarSign, CreditCard, QrCode, Loader2, 
     User, Truck, AlertTriangle, Search, RefreshCw, Copy, Utensils, 
-    BookOpen, Menu, Check, Package
+    BookOpen, Menu, Check, Package, Ticket, Percent
 } from 'lucide-react';
+import { supabase } from '../services/supabaseClient';
 
 export interface ActiveOrder {
     id: string;
@@ -125,6 +126,12 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
     const [changeAmount, setChangeAmount] = useState<string>('');
     const [isProcessing, setIsProcessing] = useState(false);
 
+    // --- ESTADOS DE CUPOM ---
+    const [availableCoupons, setAvailableCoupons] = useState<Coupon[]>([]);
+    const [couponInput, setCouponInput] = useState('');
+    const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
+    const [couponMessage, setCouponMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
     const [activeOrder, setActiveOrder] = useState<ActiveOrder | null>(null);
     const [isTrackingViewOpen, setIsTrackingViewOpen] = useState(false);
     const [isTrackModalOpen, setIsTrackModalOpen] = useState(false);
@@ -132,6 +139,26 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
     const [isSearchingPhone, setIsSearchingPhone] = useState(false);
     const [trackModalError, setTrackModalError] = useState('');
     const [isRefreshingStatus, setIsRefreshingStatus] = useState(false);
+
+    // Busca cupons ativos do restaurante no Supabase
+    useEffect(() => {
+        const fetchActiveCoupons = async () => {
+            if (!company?.id) return;
+            try {
+                const { data, error } = await supabase
+                    .from('coupons')
+                    .select('*')
+                    .eq('companyId', company.id)
+                    .eq('isActive', true);
+                if (!error && data) {
+                    setAvailableCoupons(data);
+                }
+            } catch (err) {
+                console.error("Erro ao buscar cupons:", err);
+            }
+        };
+        fetchActiveCoupons();
+    }, [company?.id]);
 
     const handleRefreshStatus = async () => {
         if (!activeOrder || !onTrackOrderById) return;
@@ -172,7 +199,53 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
     }, [deliveryMethod, neighborhood, company]);
 
     const serviceFeeValue = 0.00; 
-    const finalTotal = useMemo(() => productTotal + activeDeliveryFee + serviceFeeValue, [productTotal, activeDeliveryFee]);
+
+    // --- CÁLCULO DE DESCONTO DO CUPOM ---
+    const discountAmount = useMemo(() => {
+        if (!appliedCoupon) return 0;
+        if (appliedCoupon.minOrderValue && productTotal < appliedCoupon.minOrderValue) {
+            return 0;
+        }
+        if (appliedCoupon.discountType === 'fixed') {
+            return Math.min(productTotal, appliedCoupon.discountValue);
+        } else {
+            return productTotal * (appliedCoupon.discountValue / 100);
+        }
+    }, [appliedCoupon, productTotal]);
+
+    const finalTotal = useMemo(() => {
+        const total = productTotal + activeDeliveryFee + serviceFeeValue - discountAmount;
+        return Math.max(0, total);
+    }, [productTotal, activeDeliveryFee, discountAmount]);
+
+    const handleApplyCoupon = () => {
+        setCouponMessage(null);
+        const codeClean = couponInput.trim().toUpperCase();
+        if (!codeClean) {
+            setCouponMessage({ text: 'Digite o código do cupom.', type: 'error' });
+            return;
+        }
+
+        const found = availableCoupons.find(c => c.code === codeClean);
+        if (!found) {
+            setCouponMessage({ text: 'Cupom inválido ou inativo.', type: 'error' });
+            return;
+        }
+
+        if (found.minOrderValue && productTotal < found.minOrderValue) {
+            setCouponMessage({ text: `Pedido mínimo para este cupom é de R$ ${found.minOrderValue.toFixed(2)}.`, type: 'error' });
+            return;
+        }
+
+        setAppliedCoupon(found);
+        setCouponMessage({ text: `Cupom ${found.code} aplicado com sucesso!`, type: 'success' });
+        setCouponInput('');
+    };
+
+    const handleRemoveCoupon = () => {
+        setAppliedCoupon(null);
+        setCouponMessage(null);
+    };
 
     const trackingPixPayload = useMemo(() => {
         if (!activeOrder || activeOrder.paymentMethod !== 'pix' || !company.pixKey) return '';
@@ -209,7 +282,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
             }
         };
         checkCache();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
     
     useEffect(() => {
@@ -316,8 +388,8 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
             productTotal,
             paymentMethod,
             changeForValue,
-            undefined, 
-            undefined, 
+            appliedCoupon ? appliedCoupon.code : undefined,
+            appliedCoupon ? discountAmount : undefined,
             guestData 
         );
 
@@ -460,10 +532,9 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                 </div>
             )}
 
-            {/* MODAL DE CUSTOMIZAÇÃO DE PRODUTO (Mantido Inalterado) */}
+            {/* MODAL DE CUSTOMIZAÇÃO DE PRODUTO */}
             {customizingProduct && (
                 <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4 animate-fade-in">
-                    {/* ... (Conteúdo do customizingProduct mantido idêntico) ... */}
                     <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl relative flex flex-col max-h-[90vh] overflow-hidden">
                         <div className="p-4 border-b border-gray-100 bg-white flex justify-between items-center shrink-0">
                             <h2 className="font-bold text-xl truncate pr-4">{customizingProduct.name}</h2>
@@ -493,14 +564,13 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                                 className={`p-3 border rounded-xl mt-2 flex justify-between items-center cursor-pointer transition-all ${isSelected ? 'bg-red-50 border-red-500 text-red-700' : 'bg-white border-gray-200 hover:bg-gray-50'}`}
                                             >
                                                 <div className="flex flex-col flex-1 pr-4 overflow-hidden">
-    <span className="font-medium text-gray-800">{o.name}</span>
-    {/* Adicionando a renderização dos ingredientes que vêm no o.description */}
-    {o.description && (
-        <span className="text-xs text-gray-500 mt-0.5 line-clamp-2 leading-tight">
-            {o.description}
-        </span>
-    )}
-</div>
+                                                    <span className="font-medium text-gray-800">{o.name}</span>
+                                                    {o.description && (
+                                                        <span className="text-xs text-gray-500 mt-0.5 line-clamp-2 leading-tight">
+                                                            {o.description}
+                                                        </span>
+                                                    )}
+                                                </div>
                                                 <span className="font-bold text-sm shrink-0">
                                                     {isSelected && <CheckCircle className="inline w-4 h-4 mr-1" />}
                                                     {o.price > 0 ? `+ R$ ${o.price.toFixed(2)}` : '+ R$ 0.00'}
@@ -548,27 +618,26 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                 </div>
             )}
 
-            {/* MODAL DO CARRINHO E CHECKOUT (Mantido Inalterado) */}
+            {/* MODAL DO CARRINHO E CHECKOUT */}
             {isCartOpen && (
                 <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4 animate-fade-in">
-                    {/* ... (Checkout mantido sem alterações visuais profundas para focar no Tracking Hub pedido) ... */}
                     <div className="bg-white w-full max-w-md h-[100dvh] sm:h-auto sm:max-h-[92vh] rounded-none sm:rounded-2xl shadow-2xl flex flex-col">
                         <div className="px-5 pt-6 sm:pt-4 pb-3 border-b border-gray-100 shrink-0">
                             <div className="flex justify-between items-center mb-3">
-    <h2 className="font-bold text-lg text-gray-900 flex items-center gap-2">
-        {checkoutStep === 1 && <><ShoppingBag className="w-5 h-5 text-red-600" /> Sua Sacola</>}
-        {checkoutStep === 2 && <><User className="w-5 h-5 text-red-600" /> Seus Dados</>}
-        {checkoutStep === 3 && <><Truck className="w-5 h-5 text-red-600" /> Entrega</>}
-        {checkoutStep === 4 && <><CreditCard className="w-5 h-5 text-red-600" /> Pagamento</>}
-    </h2>
-    
-    <button 
-        onClick={() => setIsCartOpen(false)} 
-        className="text-sm font-bold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors border border-red-100 shrink-0"
-    >
-        + Adicionar itens
-    </button>
-</div>
+                                <h2 className="font-bold text-lg text-gray-900 flex items-center gap-2">
+                                    {checkoutStep === 1 && <><ShoppingBag className="w-5 h-5 text-red-600" /> Sua Sacola</>}
+                                    {checkoutStep === 2 && <><User className="w-5 h-5 text-red-600" /> Seus Dados</>}
+                                    {checkoutStep === 3 && <><Truck className="w-5 h-5 text-red-600" /> Entrega</>}
+                                    {checkoutStep === 4 && <><CreditCard className="w-5 h-5 text-red-600" /> Pagamento</>}
+                                </h2>
+                                
+                                <button 
+                                    onClick={() => setIsCartOpen(false)} 
+                                    className="text-sm font-bold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors border border-red-100 shrink-0"
+                                >
+                                    + Adicionar itens
+                                </button>
+                            </div>
                             <div>
                                 <div className="flex justify-between items-center mb-1.5">
                                     <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Etapa {checkoutStep}/{TOTAL_STEPS}</span>
@@ -639,19 +708,69 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                     </div>
                                 )}
                                 {checkoutStep === 4 && (
-                                    <div className="bg-white p-4 rounded-xl border border-gray-100">
-                                        <p className="text-xs text-gray-500 mb-3 font-medium">Como você deseja pagar o pedido?</p>
-                                        <div className="flex gap-2 mb-3">
-                                            <button onClick={() => setPaymentMethod('pix')} className={`flex-1 flex flex-col items-center py-4 rounded-xl border-2 transition-all ${paymentMethod === 'pix' ? 'border-teal-500 bg-teal-50 text-teal-700 shadow-sm' : 'border-gray-100 text-gray-500 hover:bg-gray-50'}`}><QrCode className="w-6 h-6 mb-1.5" /><span className="text-[11px] font-bold">Pix</span></button>
-                                            <button onClick={() => setPaymentMethod('card')} className={`flex-1 flex flex-col items-center py-4 rounded-xl border-2 transition-all ${paymentMethod === 'card' ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm' : 'border-gray-100 text-gray-500 hover:bg-gray-50'}`}><CreditCard className="w-6 h-6 mb-1.5" /><span className="text-[11px] font-bold">Cartão</span></button>
-                                            <button onClick={() => setPaymentMethod('cash')} className={`flex-1 flex flex-col items-center py-4 rounded-xl border-2 transition-all ${paymentMethod === 'cash' ? 'border-green-500 bg-green-50 text-green-700 shadow-sm' : 'border-gray-100 text-gray-500 hover:bg-gray-50'}`}><DollarSign className="w-6 h-6 mb-1.5" /><span className="text-[11px] font-bold">Dinheiro</span></button>
+                                    <div className="space-y-4">
+                                        {/* SEÇÃO DE CUPOM DE DESCONTO */}
+                                        <div className="bg-white p-4 rounded-xl border border-gray-100">
+                                            <label className="text-xs font-bold text-gray-700 uppercase flex items-center gap-1.5 mb-2">
+                                                <Ticket className="w-4 h-4 text-red-600" /> Cupom de Desconto
+                                            </label>
+                                            
+                                            {appliedCoupon ? (
+                                                <div className="flex items-center justify-between bg-green-50 border border-green-200 p-3 rounded-lg">
+                                                    <div className="flex items-center gap-2">
+                                                        <CheckCircle className="w-5 h-5 text-green-600 shrink-0" />
+                                                        <div>
+                                                            <p className="font-bold text-green-900 text-sm font-mono">{appliedCoupon.code}</p>
+                                                            <p className="text-xs text-green-700">
+                                                                {appliedCoupon.discountType === 'fixed' 
+                                                                    ? `Desconto de R$ ${appliedCoupon.discountValue.toFixed(2)}` 
+                                                                    : `Desconto de ${appliedCoupon.discountValue}%`}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <button onClick={handleRemoveCoupon} className="text-xs font-bold text-red-600 bg-white border border-red-200 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors">
+                                                        Remover
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <div className="flex gap-2">
+                                                    <input 
+                                                        type="text" 
+                                                        placeholder="Digite o código (Ex: PROMO10)" 
+                                                        value={couponInput} 
+                                                        onChange={e => setCouponInput(e.target.value.toUpperCase())} 
+                                                        className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5 text-sm uppercase font-mono outline-none focus:border-red-400" 
+                                                    />
+                                                    <button 
+                                                        onClick={handleApplyCoupon} 
+                                                        className="bg-gray-900 hover:bg-black text-white px-5 py-2.5 rounded-lg font-bold text-sm transition-colors shadow-sm"
+                                                    >
+                                                        Aplicar
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                            {couponMessage && (
+                                                <p className={`text-xs font-bold mt-2 ${couponMessage.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                                                    {couponMessage.text}
+                                                </p>
+                                            )}
                                         </div>
-                                        {paymentMethod === 'cash' && (
-                                            <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 animate-fade-in mt-4">
-                                                <label className="text-sm font-bold text-yellow-900 block mb-2">Precisa de troco para quanto?</label>
-                                                <input type="number" placeholder="Ex: 50.00" value={changeAmount} onChange={e => setChangeAmount(e.target.value)} className="w-full bg-white border border-yellow-300 rounded-lg px-4 py-3 text-sm font-bold text-gray-800 outline-none focus:ring-2 focus:ring-yellow-400" />
+
+                                        <div className="bg-white p-4 rounded-xl border border-gray-100">
+                                            <p className="text-xs text-gray-500 mb-3 font-medium">Como você deseja pagar o pedido?</p>
+                                            <div className="flex gap-2 mb-3">
+                                                <button onClick={() => setPaymentMethod('pix')} className={`flex-1 flex flex-col items-center py-4 rounded-xl border-2 transition-all ${paymentMethod === 'pix' ? 'border-teal-500 bg-teal-50 text-teal-700 shadow-sm' : 'border-gray-100 text-gray-500 hover:bg-gray-50'}`}><QrCode className="w-6 h-6 mb-1.5" /><span className="text-[11px] font-bold">Pix</span></button>
+                                                <button onClick={() => setPaymentMethod('card')} className={`flex-1 flex flex-col items-center py-4 rounded-xl border-2 transition-all ${paymentMethod === 'card' ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm' : 'border-gray-100 text-gray-500 hover:bg-gray-50'}`}><CreditCard className="w-6 h-6 mb-1.5" /><span className="text-[11px] font-bold">Cartão</span></button>
+                                                <button onClick={() => setPaymentMethod('cash')} className={`flex-1 flex flex-col items-center py-4 rounded-xl border-2 transition-all ${paymentMethod === 'cash' ? 'border-green-500 bg-green-50 text-green-700 shadow-sm' : 'border-gray-100 text-gray-500 hover:bg-gray-50'}`}><DollarSign className="w-6 h-6 mb-1.5" /><span className="text-[11px] font-bold">Dinheiro</span></button>
                                             </div>
-                                        )}
+                                            {paymentMethod === 'cash' && (
+                                                <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 animate-fade-in mt-4">
+                                                    <label className="text-sm font-bold text-yellow-900 block mb-2">Precisa de troco para quanto?</label>
+                                                    <input type="number" placeholder="Ex: 50.00" value={changeAmount} onChange={e => setChangeAmount(e.target.value)} className="w-full bg-white border border-yellow-300 rounded-lg px-4 py-3 text-sm font-bold text-gray-800 outline-none focus:ring-2 focus:ring-yellow-400" />
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 )}
                                 {stepError && (
@@ -666,6 +785,12 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                             <div className="space-y-1.5 text-sm text-gray-600">
                                 <div className="flex justify-between"><span>Subtotal</span><span>R$ {productTotal.toFixed(2)}</span></div>
                                 {deliveryMethod === 'delivery' && <div className="flex justify-between"><span>Taxa de Entrega</span><span>R$ {activeDeliveryFee.toFixed(2)}</span></div>}
+                                {appliedCoupon && (
+                                    <div className="flex justify-between text-green-600 font-medium">
+                                        <span>Desconto ({appliedCoupon.code})</span>
+                                        <span>- R$ {discountAmount.toFixed(2)}</span>
+                                    </div>
+                                )}
                             </div>
                             <div className="flex justify-between font-bold text-xl text-gray-900 border-t border-gray-100 pt-3">
                                 <span>Total a Pagar</span>
@@ -693,10 +818,9 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                 </div>
             )}
 
-            {/* --- NOVO TRACKING HUB: ESTRUTURA VISUAL E LÓGICA REFATORADA --- */}
+            {/* --- TRACKING HUB --- */}
             {isTrackingViewOpen && activeOrder && (
                 <div className="fixed inset-0 z-[60] bg-gray-50 flex flex-col animate-fade-in overflow-y-auto font-sans">
-                    {/* Header Premium */}
                     <div className="bg-white px-5 py-4 sticky top-0 z-20 shadow-[0_2px_10px_rgba(0,0,0,0.03)] flex justify-between items-center">
                         <div>
                             <h2 className="font-bold text-gray-900 text-lg leading-tight">Acompanhar Pedido</h2>
@@ -708,15 +832,10 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                     </div>
 
                     <div className="flex-1 p-5 space-y-6 flex flex-col max-w-md mx-auto w-full pb-10">
-                        
-                        {/* Stepper de Status do Pedido */}
                         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                             <h3 className="text-sm font-bold text-gray-800 mb-6 uppercase tracking-wider">Progresso Atual</h3>
-                            
                             <div className="relative">
-                                {/* Linhas conectando os pontos */}
                                 <div className="absolute left-6 top-6 bottom-6 w-0.5 bg-gray-100" />
-                                
                                 <div className="space-y-6 relative z-10">
                                     {ORDER_STATUS_FLOW.map((step, index) => {
                                         const currentIndex = ORDER_STATUS_FLOW.findIndex(s => s.key === activeOrder.status);
@@ -749,12 +868,9 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                             </div>
                         </div>
 
-                        {/* Área de Pagamento (PIX) - Estilo Recibo/Ticket */}
                         {activeOrder.status === 'pending_payment' && activeOrder.paymentMethod === 'pix' && trackingPixPayload && (
                             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden relative">
-                                {/* Detalhe serrilhado de recibo visual no topo */}
                                 <div className="h-2 w-full bg-teal-50 flex" style={{ backgroundImage: 'radial-gradient(circle, #fff 4px, transparent 5px)', backgroundSize: '12px 12px', backgroundPosition: 'top left', marginTop: '-4px' }}></div>
-                                
                                 <div className="bg-teal-50 p-5 border-b border-teal-100 text-center relative">
                                     <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center mx-auto mb-2 shadow-sm">
                                         <QrCode className="w-6 h-6 text-teal-600" />
@@ -762,12 +878,10 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                     <h3 className="font-bold text-teal-900 text-lg">Aguardando Pagamento</h3>
                                     <p className="text-sm text-teal-700 mt-1">Escaneie o QR Code ou copie o código Pix para iniciarmos o preparo.</p>
                                 </div>
-                                
                                 <div className="p-6 flex flex-col items-center">
                                     <div className="bg-white p-3 rounded-2xl border-2 border-dashed border-gray-200 mb-6 inline-block">
                                         <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(trackingPixPayload)}`} alt="PIX QR Code" className="w-44 h-44" />
                                     </div>
-                                    
                                     <div className="w-full mb-6">
                                         <p className="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wide">Pix Copia e Cola</p>
                                         <div className="flex bg-gray-50 border border-gray-200 rounded-xl p-1 overflow-hidden">
@@ -777,7 +891,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                             </button>
                                         </div>
                                     </div>
-
                                     <div className="w-full flex justify-between items-center border-t border-dashed border-gray-200 pt-5 mt-2">
                                         <span className="text-gray-500 font-medium">Valor Total</span>
                                         <span className="font-bold text-2xl text-gray-900">R$ {activeOrder.total.toFixed(2)}</span>
@@ -786,7 +899,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                             </div>
                         )}
 
-                        {/* Informação Dinheiro/Cartão */}
                         {activeOrder.status === 'pending_payment' && activeOrder.paymentMethod !== 'pix' && (
                             <div className="w-full bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center text-center">
                                 <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mb-4">
@@ -794,7 +906,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                 </div>
                                 <h3 className="font-bold text-gray-900 text-xl mb-2">Pedido Recebido!</h3>
                                 <p className="text-gray-500 mb-5">Seu pedido já foi enviado ao restaurante e o preparo será iniciado em breve.</p>
-                                
                                 <div className="w-full bg-gray-50 border border-gray-200 rounded-xl p-4 flex items-center gap-4 text-left">
                                     <div className="bg-white p-2 rounded-lg shadow-sm">
                                         {activeOrder.paymentMethod === 'card' ? <CreditCard className="w-6 h-6 text-blue-600" /> : <DollarSign className="w-6 h-6 text-green-600" />}
@@ -809,7 +920,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                             </div>
                         )}
 
-                        {/* Resumo dos Itens do Pedido */}
                         {activeOrder.items && activeOrder.items.length > 0 && (
                             <div className="w-full bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
                                 <h3 className="text-sm font-bold text-gray-800 mb-4 uppercase tracking-wider border-b border-gray-100 pb-3">Resumo da Compra</h3>
@@ -833,7 +943,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                             </div>
                         )}
 
-                        {/* Botões de Ação do Tracking Hub */}
                         <div className="w-full grid grid-cols-2 gap-3 mt-auto pt-2">
                             <button 
                                 onClick={() => window.location.reload()} 
@@ -854,7 +963,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                 </div>
             )}
 
-            {/* MODAL PLANO B: BUSCA POR WHATSAPP (Mantido inalterado) */}
+            {/* MODAL PLANO B: BUSCA POR WHATSAPP */}
             {isTrackModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in">
                     <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl p-6 relative">
