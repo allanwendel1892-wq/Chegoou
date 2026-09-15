@@ -1,4 +1,4 @@
-//Versão Atualizada com Gestão e Aplicação de Cupons
+//Versão Atualizada com Validação Ativa no Supabase e Campo Discreto
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { Company, Product, ProductOption, Coupon } from '../types';
@@ -126,11 +126,11 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
     const [changeAmount, setChangeAmount] = useState<string>('');
     const [isProcessing, setIsProcessing] = useState(false);
 
-    // --- ESTADOS DE CUPOM ---
-    const [availableCoupons, setAvailableCoupons] = useState<Coupon[]>([]);
+    // --- ESTADOS DE CUPOM DISCRETO & VALIDAÇÃO DB ---
     const [couponInput, setCouponInput] = useState('');
     const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
     const [couponMessage, setCouponMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+    const [isCheckingCoupon, setIsCheckingCoupon] = useState(false);
 
     const [activeOrder, setActiveOrder] = useState<ActiveOrder | null>(null);
     const [isTrackingViewOpen, setIsTrackingViewOpen] = useState(false);
@@ -139,26 +139,6 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
     const [isSearchingPhone, setIsSearchingPhone] = useState(false);
     const [trackModalError, setTrackModalError] = useState('');
     const [isRefreshingStatus, setIsRefreshingStatus] = useState(false);
-
-    // Busca cupons ativos do restaurante no Supabase
-    useEffect(() => {
-        const fetchActiveCoupons = async () => {
-            if (!company?.id) return;
-            try {
-                const { data, error } = await supabase
-                    .from('coupons')
-                    .select('*')
-                    .eq('companyId', company.id)
-                    .eq('isActive', true);
-                if (!error && data) {
-                    setAvailableCoupons(data);
-                }
-            } catch (err) {
-                console.error("Erro ao buscar cupons:", err);
-            }
-        };
-        fetchActiveCoupons();
-    }, [company?.id]);
 
     const handleRefreshStatus = async () => {
         if (!activeOrder || !onTrackOrderById) return;
@@ -218,7 +198,8 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
         return Math.max(0, total);
     }, [productTotal, activeDeliveryFee, discountAmount]);
 
-    const handleApplyCoupon = () => {
+    // --- VALIDAÇÃO E APLICAÇÃO DIRETA NO SUPABASE (isActive) ---
+    const handleApplyCoupon = async () => {
         setCouponMessage(null);
         const codeClean = couponInput.trim().toUpperCase();
         if (!codeClean) {
@@ -226,20 +207,41 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
             return;
         }
 
-        const found = availableCoupons.find(c => c.code === codeClean);
-        if (!found) {
-            setCouponMessage({ text: 'Cupom inválido ou inativo.', type: 'error' });
-            return;
-        }
+        setIsCheckingCoupon(true);
+        try {
+            // Verifica no banco se o cupom existe e se está ativo (isActive = true)
+            const { data: found, error } = await supabase
+                .from('coupons')
+                .select('*')
+                .eq('companyId', company.id)
+                .eq('code', codeClean)
+                .maybeSingle();
 
-        if (found.minOrderValue && productTotal < found.minOrderValue) {
-            setCouponMessage({ text: `Pedido mínimo para este cupom é de R$ ${found.minOrderValue.toFixed(2)}.`, type: 'error' });
-            return;
-        }
+            if (error || !found) {
+                setCouponMessage({ text: 'Cupom inválido ou não encontrado.', type: 'error' });
+                return;
+            }
 
-        setAppliedCoupon(found);
-        setCouponMessage({ text: `Cupom ${found.code} aplicado com sucesso!`, type: 'success' });
-        setCouponInput('');
+            // Validação estrita da coluna isActive
+            if (found.isActive !== true) {
+                setCouponMessage({ text: 'Este cupom encontra-se desativado no momento.', type: 'error' });
+                return;
+            }
+
+            if (found.minOrderValue && productTotal < found.minOrderValue) {
+                setCouponMessage({ text: `Valor mínimo para este cupom é R$ ${found.minOrderValue.toFixed(2)}.`, type: 'error' });
+                return;
+            }
+
+            setAppliedCoupon(found);
+            setCouponMessage({ text: `Cupom ${found.code} aplicado com sucesso!`, type: 'success' });
+            setCouponInput('');
+        } catch (err) {
+            console.error("Erro ao validar cupom:", err);
+            setCouponMessage({ text: 'Erro ao validar o cupom. Tente novamente.', type: 'error' });
+        } finally {
+            setIsCheckingCoupon(false);
+        }
     };
 
     const handleRemoveCoupon = () => {
@@ -709,49 +711,50 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                 )}
                                 {checkoutStep === 4 && (
                                     <div className="space-y-4">
-                                        {/* SEÇÃO DE CUPOM DE DESCONTO */}
-                                        <div className="bg-white p-4 rounded-xl border border-gray-100">
-                                            <label className="text-xs font-bold text-gray-700 uppercase flex items-center gap-1.5 mb-2">
-                                                <Ticket className="w-4 h-4 text-red-600" /> Cupom de Desconto
-                                            </label>
-                                            
+                                        {/* SEÇÃO DE CUPOM DE DESCONTO DISCRETA */}
+                                        <div className="bg-white px-4 py-3 rounded-xl border border-gray-100">
                                             {appliedCoupon ? (
-                                                <div className="flex items-center justify-between bg-green-50 border border-green-200 p-3 rounded-lg">
-                                                    <div className="flex items-center gap-2">
-                                                        <CheckCircle className="w-5 h-5 text-green-600 shrink-0" />
+                                                <div className="flex items-center justify-between bg-green-50/70 border border-green-200 px-3 py-2 rounded-lg text-xs">
+                                                    <div className="flex items-center gap-2 text-green-900">
+                                                        <CheckCircle className="w-4 h-4 text-green-600 shrink-0" />
                                                         <div>
-                                                            <p className="font-bold text-green-900 text-sm font-mono">{appliedCoupon.code}</p>
-                                                            <p className="text-xs text-green-700">
-                                                                {appliedCoupon.discountType === 'fixed' 
-                                                                    ? `Desconto de R$ ${appliedCoupon.discountValue.toFixed(2)}` 
-                                                                    : `Desconto de ${appliedCoupon.discountValue}%`}
-                                                            </p>
+                                                            <span className="font-bold font-mono uppercase">{appliedCoupon.code}</span>
+                                                            <span className="text-green-700 ml-1">
+                                                                ({appliedCoupon.discountType === 'fixed' ? `R$ ${appliedCoupon.discountValue.toFixed(2)}` : `${appliedCoupon.discountValue}%`})
+                                                            </span>
                                                         </div>
                                                     </div>
-                                                    <button onClick={handleRemoveCoupon} className="text-xs font-bold text-red-600 bg-white border border-red-200 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors">
+                                                    <button onClick={handleRemoveCoupon} className="text-xs font-bold text-red-600 hover:underline">
                                                         Remover
                                                     </button>
                                                 </div>
                                             ) : (
-                                                <div className="flex gap-2">
-                                                    <input 
-                                                        type="text" 
-                                                        placeholder="Digite o código (Ex: PROMO10)" 
-                                                        value={couponInput} 
-                                                        onChange={e => setCouponInput(e.target.value.toUpperCase())} 
-                                                        className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5 text-sm uppercase font-mono outline-none focus:border-red-400" 
-                                                    />
+                                                <div className="flex items-center gap-2">
+                                                    <div className="relative flex-1">
+                                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                                                            <Ticket className="w-3.5 h-3.5" />
+                                                        </div>
+                                                        <input 
+                                                            type="text" 
+                                                            placeholder="Possui cupom de desconto?" 
+                                                            value={couponInput} 
+                                                            onChange={e => setCouponInput(e.target.value.toUpperCase())} 
+                                                            className="w-full bg-gray-50 border border-gray-200 rounded-lg pl-8 pr-3 py-2 text-xs uppercase font-mono outline-none focus:border-red-400" 
+                                                        />
+                                                    </div>
                                                     <button 
                                                         onClick={handleApplyCoupon} 
-                                                        className="bg-gray-900 hover:bg-black text-white px-5 py-2.5 rounded-lg font-bold text-sm transition-colors shadow-sm"
+                                                        disabled={isCheckingCoupon || !couponInput.trim()}
+                                                        className="bg-gray-900 hover:bg-black disabled:opacity-50 text-white px-4 py-2 rounded-lg font-bold text-xs transition-colors shrink-0 flex items-center gap-1"
                                                     >
+                                                        {isCheckingCoupon && <Loader2 className="w-3 h-3 animate-spin" />}
                                                         Aplicar
                                                     </button>
                                                 </div>
                                             )}
 
                                             {couponMessage && (
-                                                <p className={`text-xs font-bold mt-2 ${couponMessage.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                                                <p className={`text-[11px] font-medium mt-1.5 pl-1 ${couponMessage.type === 'success' ? 'text-green-600' : 'text-red-500'}`}>
                                                     {couponMessage.text}
                                                 </p>
                                             )}
