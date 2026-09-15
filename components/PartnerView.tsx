@@ -998,45 +998,49 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const handleLinkCourier = async () => {
       let digits = courierSearchPhone.replace(/\D/g, '');
       
-      // 1. Verifica se tem 55. Se tiver, retira temporariamente para isolar DDD e Número
+      // 1. Se começar com 55, removemos temporariamente para isolar DDD e Número
       if (digits.startsWith('55')) {
           digits = digits.slice(2);
       }
       
-      // 2. Se o tamanho total for 8 ou 9, significa que está sem DDD. Assume 81.
-      if (digits.length <= 9) {
-          digits = '81' + digits;
+      let ddd = '';
+      let number = '';
+
+      // 2. Se o tamanho for 8 ou 9, significa que está sem DDD. Assume 81.
+      if (digits.length === 8 || digits.length === 9) {
+          ddd = '81';
+          number = digits;
+      } else if (digits.length >= 10) {
+          ddd = digits.slice(0, 2);
+          number = digits.slice(2);
+      } else {
+          ddd = '81';
+          number = digits;
       }
       
-      const ddd = digits.slice(0, 2);
-      let number = digits.slice(2);
-      
-      // 3. Verifica se tem o 9 na frente (ficando com 9 dígitos). Se tiver, remove.
+      // 3. Verifica se o número tem o 9 na frente (ficando com 9 dígitos). Se tiver, apaga e deixa só os 8 dígitos.
       if (number.length === 9 && number.startsWith('9')) {
           number = number.slice(1);
       }
       
-      // Monta o telefone no padrão exato para salvar ou buscar (ex: 558300000000)
+      // Monta o telefone no padrão exato (ex: 558300000000)
       const finalPhone = `55${ddd}${number}`;
       
       setIsLinkingCourier(true);
       setCourierLinkError('');
       
       try {
-          // Localiza o usuário pelo telefone.
-          // Removida a trava .eq('role', 'courier') para achar clientes normais.
-          // O ilike com `%` garante que ele ache o usuário no banco independente se 
-          // no registro original ele salvou com ou sem o 9 extra.
+          // Busca estritamente na tabela users pelo telefone normalizado na coluna phone
           const { data: found, error: findError } = await supabase
               .from('users')
               .select('id, name, phone, role, companyId')
-              .ilike('phone', `%${ddd}%${number}%`)
+              .eq('phone', finalPhone)
               .limit(1);
 
           if (findError) throw findError;
 
           if (!found || found.length === 0) {
-              setCourierLinkError('Nenhum usuário cadastrado com esse telefone.');
+              setCourierLinkError(`Nenhum usuário cadastrado com o número ${finalPhone}.`);
               return;
           }
 
@@ -1048,7 +1052,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
               return;
           }
 
-          // Atualiza o perfil: Vincula a loja E promove a entregador
+          // Atualiza o perfil existente: Vincula o companyId e promove a role para courier
           const { error: updateError } = await supabase
               .from('users')
               .update({ 
@@ -1062,7 +1066,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           setCourierSearchPhone('');
           await fetchCouriers();
           
-          // Opcional: Feedback visual de sucesso
           alert(`Usuário ${courierFound.name} foi promovido a entregador e vinculado com sucesso!`);
           
       } catch (e: any) {
