@@ -1852,17 +1852,17 @@ const PartnerView: React.FC<PartnerViewProps> = ({
               : 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c';
 
           const productData: Product = {
-              id: editingProductId || Date.now().toString(),
-              companyId: company.id,
-              name: newProduct.name!,
-              description: newProduct.description || '',
-              category: newProduct.category!,
-              price: Number(newProduct.price),
-              image: imageUrl,
-              isAvailable: true,
-              pricingMode: newProduct.pricingMode || 'default',
-              groups: newProduct.groups || []
-          };
+    id: editingProductId || Date.now().toString(),
+    companyId: company.id,
+    name: newProduct.name!,
+    description: newProduct.description || '',
+    category: newProduct.category!,
+    price: Number(newProduct.price),
+    image: imageUrl,
+    isAvailable: newProduct.isAvailable !== undefined ? newProduct.isAvailable : true,
+    pricingMode: newProduct.pricingMode || 'default',
+    groups: newProduct.groups || []
+};
           if (editingProductId) {
               onUpdateProduct(productData);
               alert("Produto updated!");
@@ -2726,7 +2726,18 @@ delete updated.mapLink;
                                          placeholder="Ingredientes e detalhes..." 
                                     />
                                  </div>
-                                
+
+                                <div className="col-span-2 mt-2">
+    <label className="flex items-center gap-2 cursor-pointer bg-gray-50 px-3 py-3 rounded-lg border border-gray-200 hover:border-red-300 transition-colors">
+        <input
+            type="checkbox"
+            checked={newProduct.isAvailable !== false}
+            onChange={e => setNewProduct({...newProduct, isAvailable: e.target.checked})}
+            className="w-5 h-5 text-red-600 rounded focus:ring-red-500 cursor-pointer"
+        />
+        <span className="text-sm font-bold text-gray-700">Produto disponível para venda (Ativo)</span>
+    </label>
+</div>
                                 <div className="col-span-2">
                                     <label className="text-xs font-bold text-gray-500 uppercase ml-1">Modo de Venda (Cálculo)</label>
                                     <div className="flex gap-4 mt-2">
@@ -2911,22 +2922,28 @@ delete updated.mapLink;
                                             <p className="text-xs text-gray-500 mt-1 line-clamp-2">{product.description}</p>
                                          </div>
                                         <div className="flex justify-between items-end mt-2">
-                                             <span className="font-bold text-lg text-gray-900">R$ {product.price.toFixed(2)}</span>
-                                            <div className="flex gap-2">
-                                                <button 
-                                                    onClick={() => handleEditProduct(product)}
-                                                    className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                                >
-                                                     <Edit className="w-4 h-4"/>
-                                                </button>
-                                                 <button 
-                                                    onClick={() => handleRequestDeleteProduct(product.id)}
-                                                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                                >
-                                                     <Trash2 className="w-4 h-4"/>
-                                                </button>
-                                             </div>
-                                        </div>
+     <span className="font-bold text-lg text-gray-900">R$ {product.price.toFixed(2)}</span>
+    <div className="flex gap-2 items-center">
+        <button 
+            onClick={() => onUpdateProduct({ ...product, isAvailable: !product.isAvailable })}
+            className={`text-[10px] font-bold px-2 py-1 rounded uppercase transition-colors ${product.isAvailable ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'}`}
+        >
+            {product.isAvailable ? 'Disponível' : 'Esgotado'}
+        </button>
+        <button 
+            onClick={() => handleEditProduct(product)}
+            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+        >
+             <Edit className="w-4 h-4"/>
+        </button>
+         <button 
+            onClick={() => handleRequestDeleteProduct(product.id)}
+            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+        >
+             <Trash2 className="w-4 h-4"/>
+        </button>
+     </div>
+</div>
                                     </div>
                                  </div>
                             ))}
