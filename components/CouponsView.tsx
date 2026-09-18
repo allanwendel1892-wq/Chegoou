@@ -23,7 +23,7 @@ const CouponModal: React.FC<{ coupon: Partial<Coupon>, onSave: (coupon: Coupon) 
     onSave({
         id: formData.id || crypto.randomUUID(),
         companyId: companyId,
-        code: formData.code.toUpperCase(),
+        code: formData.code.trim().toUpperCase(),
         discountType: formData.discountType,
         discountValue: Number(formData.discountValue),
         minOrderValue: Number(formData.minOrderValue) || 0,
