@@ -2914,37 +2914,47 @@ delete updated.mapLink;
                                 <div key={product.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex gap-4 hover:shadow-md transition-shadow">
                                     <img src={product.image} className="w-24 h-24 rounded-lg object-cover bg-gray-100 flex-shrink-0" />
                                     <div className="flex-1 flex flex-col justify-between">
-                                         <div>
-                                            <div className="flex justify-between items-start">
-                                                 <h4 className="font-bold text-gray-900 line-clamp-1">{product.name}</h4>
-                                                <span className="text-xs font-bold bg-gray-100 text-gray-600 px-2 py-0.5 rounded uppercase">{product.category}</span>
-                                             </div>
-                                            <p className="text-xs text-gray-500 mt-1 line-clamp-2">{product.description}</p>
-                                         </div>
-                                        <div className="flex justify-between items-end mt-2">
-     <span className="font-bold text-lg text-gray-900">R$ {product.price.toFixed(2)}</span>
-    <div className="flex gap-2 items-center">
-        <button 
-            onClick={() => onUpdateProduct({ ...product, isAvailable: !product.isAvailable })}
-            className={`text-[10px] font-bold px-2 py-1 rounded uppercase transition-colors ${product.isAvailable ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'}`}
-        >
-            {product.isAvailable ? 'Inativo' : 'Ativo'}
-        </button>
-        <button 
-            onClick={() => handleEditProduct(product)}
-            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-        >
-             <Edit className="w-4 h-4"/>
-        </button>
-         <button 
-            onClick={() => handleRequestDeleteProduct(product.id)}
-            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-        >
-             <Trash2 className="w-4 h-4"/>
-        </button>
-     </div>
+    <div>
+        <div className="flex justify-between items-start mb-1">
+            <h4 className="font-bold text-gray-900 line-clamp-2 pr-2">{product.name}</h4>
+            
+            <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1" title={product.isAvailable !== false ? "Desativar Produto" : "Ativar Produto"}>
+                <input 
+                    type="checkbox" 
+                    className="sr-only peer"
+                    checked={product.isAvailable !== false}
+                    onChange={() => onUpdateProduct({ ...product, isAvailable: !product.isAvailable })}
+                />
+                <div className="w-9 h-5 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-500"></div>
+            </label>
+        </div>
+        <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{product.description}</p>
+    </div>
+    
+    <div className="flex justify-between items-end mt-2">
+        <div className="flex flex-col gap-1">
+            <span className="text-[10px] font-bold bg-gray-100 text-gray-600 px-2 py-0.5 rounded uppercase w-fit">{product.category}</span>
+            <span className="font-bold text-base text-gray-900 whitespace-nowrap">R$ {product.price.toFixed(2)}</span>
+        </div>
+        
+        <div className="flex gap-2 items-center">
+            <button 
+                onClick={() => handleEditProduct(product)}
+                className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                title="Editar"
+            >
+                 <Edit className="w-4 h-4"/>
+            </button>
+             <button 
+                onClick={() => handleRequestDeleteProduct(product.id)}
+                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                title="Excluir"
+            >
+                 <Trash2 className="w-4 h-4"/>
+            </button>
+         </div>
+    </div>
 </div>
-                                    </div>
                                  </div>
                             ))}
                         </div>
