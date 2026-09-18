@@ -1392,19 +1392,19 @@ const PartnerView: React.FC<PartnerViewProps> = ({
     }
   }, [view, company.id]);
   
-  (() => {
-    const fetchCoupons = async () => {
-      const { data, error } = await supabase
-        .from('coupons')
-        .select('*')
-        .eq('companyId', company.id)
-        .order('createdAt', { ascending: false });
-      if (data) setCoupons(data);
-    };
-    if (view === ViewState.COUPONS) {
-      fetchCoupons();
-    }
-  }, [view, company.id]);
+  useEffect(() => {
+  const fetchCoupons = async () => {
+    const { data, error } = await supabase
+      .from('coupons')
+      .select('*')
+      .eq('companyId', company.id)
+      .order('createdAt', { ascending: false });
+    if (data) setCoupons(data);
+  };
+  if (view === ViewState.COUPONS) {
+    fetchCoupons();
+  }
+}, [view, company.id]);
   
   const handleSaveCoupon = async (coupon: Coupon) => {
     const { data, error } = await supabase.from('coupons').upsert(coupon).select();
