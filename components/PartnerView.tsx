@@ -2928,7 +2928,7 @@ delete updated.mapLink;
             onClick={() => onUpdateProduct({ ...product, isAvailable: !product.isAvailable })}
             className={`text-[10px] font-bold px-2 py-1 rounded uppercase transition-colors ${product.isAvailable ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'}`}
         >
-            {product.isAvailable ? 'Disponível' : 'Esgotado'}
+            {product.isAvailable ? 'Inativo' : 'Ativo'}
         </button>
         <button 
             onClick={() => handleEditProduct(product)}
