@@ -76,6 +76,7 @@ const COMPANY_CATEGORIES = [
     "Doces & Bolos", "Saudável", "Italiana", "Bebidas", "Padaria", 
     "Sorvetes", "Carnes", "Mercado", "Asiática","Combos",
 ];
+//BLOQUEIE OS MODULOS AQUI, PARA ACESSO RESTRITO
 const PROTECTED_VIEWS = [
     ViewState.DASHBOARD, 
     ViewState.FINANCE, 
@@ -83,7 +84,8 @@ const PROTECTED_VIEWS = [
     ViewState.MENU, 
     ViewState.COUPONS, 
     ViewState.WHATSAPP,
-    ViewState.HISTORY
+    ViewState.HISTORY,
+    ViewState.INVENTORY,
 ];
 interface OrderCardProps {
   order: Order;
@@ -2220,12 +2222,12 @@ delete updated.mapLink;
                         className="flex items-center gap-2 text-sm text-red-600 font-bold bg-red-50 px-3 py-1.5 rounded-lg border border-red-100 hover:bg-red-100 transition-colors animate-fade-in"
                         title="Bloquear módulos administrativos"
                      >
-                        <Unlock className="w-4 h-4"/> Modo Gerente Ativo (Bloquear)
+                        <Unlock className="w-4 h-4"/> Acesso Gestor (Clique aqui para Bloquear)
                      </button>
                  )}
                  {localCompany.adminPin && !isUnlocked && (
                      <span className="flex items-center gap-1.5 text-xs text-gray-500 font-bold bg-gray-100 px-3 py-1.5 rounded-lg border border-gray-200">
-                         <Lock className="w-3.5 h-3.5"/> Modo Caixa
+                         <Lock className="w-3.5 h-3.5"/> Acesso Operacional
                      </span>
                  )}
                  <div className="w-8 h-8 bg-gray-900 text-white rounded-full flex items-center justify-center font-bold text-sm shadow-sm">
