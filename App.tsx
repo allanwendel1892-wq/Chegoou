@@ -736,6 +736,31 @@ if (!shouldFetch) return;
       return () => clearInterval(interval);
   }, [currentUser]); 
 
+   useEffect(() => {
+      // Só escuta se tiver usuário logado (evita conexões na tela de login)
+      if (!currentUser) return;
+
+      console.log("Iniciando inscrição no Supabase Realtime para 'orders'...");
+
+      const ordersChannel = supabase
+          .channel('public:orders')
+          .on(
+              'postgres_changes',
+              { event: '*', schema: 'public', table: 'orders' },
+              (payload) => {
+                  console.log('⚡ EVENTO REALTIME RECEBIDO!', payload);
+                  // Aqui no futuro vamos atualizar o estado setOrders
+              }
+          )
+          .subscribe((status) => {
+              console.log('Status da conexão Realtime:', status);
+          });
+
+      // Limpeza do canal quando o componente desmontar ou usuário deslogar
+      return () => {
+          supabase.removeChannel(ordersChannel);
+      };
+  }, [currentUser]);   
   // ---------------------------------------------------------------------------
   // MANIPULADORES DE DADOS (HANDLERS)
   // ---------------------------------------------------------------------------
