@@ -736,8 +736,8 @@ if (!shouldFetch) return;
       return () => clearInterval(interval);
   }, [currentUser]); 
 
-   useEffect(() => {
-      // Só escuta se tiver usuário logado (evita conexões na tela de login)
+   // --- SUPABASE REALTIME: PEDIDOS ---
+  useEffect(() => {
       if (!currentUser) return;
 
       console.log("Iniciando inscrição no Supabase Realtime para 'orders'...");
@@ -748,19 +748,72 @@ if (!shouldFetch) return;
               'postgres_changes',
               { event: '*', schema: 'public', table: 'orders' },
               (payload) => {
-                  console.log('⚡ EVENTO REALTIME RECEBIDO!', payload);
-                  // Aqui no futuro vamos atualizar o estado setOrders
+                  console.log('⚡ EVENTO REALTIME PROCESSADO:', payload.eventType);
+                  
+                  // Se for exclusão física (DELETE), apenas tira da lista
+                  if (payload.eventType === 'DELETE') {
+                      setOrders(prev => prev.filter(o => o.id !== payload.old.id));
+                      return;
+                  }
+
+                  // Formata o novo pedido
+                  const incomingOrder = {
+                      ...payload.new,
+                      timestamp: new Date(payload.new.timestamp)
+                  } as Order;
+
+                  // MUTEX: Se o pedido estiver travado (sendo atualizado localmente pelo usuário), ignora o evento para não dar efeito "bate e volta"
+                  if (lockedOrders.current.has(incomingOrder.id)) return;
+
+                  // FILTRO DE SEGURANÇA (RLS no Frontend): Garante que a pessoa só receba o que lhe pertence
+                  let shouldProcess = false;
+                  if (currentUser.role === 'admin') shouldProcess = true;
+                  else if (currentUser.role === 'partner' && incomingOrder.companyId === currentUser.id) shouldProcess = true;
+                  else if (currentUser.role === 'client' && incomingOrder.customerId === currentUser.id) shouldProcess = true;
+                  else if (currentUser.role === 'courier' && incomingOrder.companyId === (currentUser as any).companyId) shouldProcess = true;
+
+                  if (!shouldProcess) return;
+
+                  // ATUALIZA A INTERFACE E TOCA SONS
+                  setOrders((prevOrders) => {
+                      const existing = prevOrders.find(o => o.id === incomingOrder.id);
+
+                      // CENÁRIO 1: NOVO PEDIDO (INSERT)
+                      if (payload.eventType === 'INSERT' || !existing) {
+                          if (currentUser.role === 'partner') {
+                              new Audio(somPedido).play().catch(() => {});
+                              showInAppNotification("Novo Pedido!", `Você recebeu um pedido de ${incomingOrder.customerName}`, "🔔");
+                          }
+                          return [incomingOrder, ...prevOrders].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+                      } 
+                      
+                      // CENÁRIO 2: ATUALIZAÇÃO DE STATUS (UPDATE)
+                      if (payload.eventType === 'UPDATE') {
+                          if (existing.status !== incomingOrder.status || existing.paymentStatus !== incomingOrder.paymentStatus) {
+                              if (currentUser.role === 'client') {
+                                  if (incomingOrder.deliveryMethod === 'delivery' && existing.status !== 'delivering' && incomingOrder.status === 'delivering') {
+                                      new Audio(somEntrega).play().catch(() => {});
+                                      showInAppNotification('Chegoou! 🛵', `Seu pedido de ${incomingOrder.companyName} saiu para entrega!`, '🛵');
+                                  } else if (incomingOrder.deliveryMethod === 'pickup' && existing.status !== 'ready' && incomingOrder.status === 'ready') {
+                                      new Audio(somEntrega).play().catch(() => {});
+                                      showInAppNotification('Tá na mão! 🛍️', `Seu pedido de ${incomingOrder.companyName} está pronto no balcão!`, '🛍️');
+                                  }
+                              }
+                          }
+                          return prevOrders.map(o => o.id === incomingOrder.id ? incomingOrder : o).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+                      }
+
+                      return prevOrders;
+                  });
               }
           )
-          .subscribe((status) => {
-              console.log('Status da conexão Realtime:', status);
-          });
+          .subscribe();
 
-      // Limpeza do canal quando o componente desmontar ou usuário deslogar
       return () => {
           supabase.removeChannel(ordersChannel);
       };
-  }, [currentUser]);   
+  }, [currentUser]);
+  // -------------------------------
   // ---------------------------------------------------------------------------
   // MANIPULADORES DE DADOS (HANDLERS)
   // ---------------------------------------------------------------------------
