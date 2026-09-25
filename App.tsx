@@ -551,268 +551,112 @@ const App: React.FC = () => {
     }
   }, []);
 
-  /**
-   * POLLING UNIFICADO (substitui os antigos canais Realtime de
-   * "orders", "messages" e "withdrawal_requests").
-   *
-   * A cada 5 segundos, busca o que há de novo em Pedidos, Mensagens de
-   * Chat e Solicitações de Saque, comparando com o estado atual em tela
-   * para disparar os mesmos sons/notificações que o Realtime disparava,
-   * mas sem depender de WebSocket.
-   */
+    // --- SUPABASE REALTIME: PEDIDOS, CHAT E SAQUES ---
   useEffect(() => {
       if (!currentUser) return;
 
-      const fetchOrdersUpdate = async () => {
-          // Só busca pedidos se houver pedidos ativos ou se for parceiro
-          const activeOrders = ordersRef.current.filter(o => 
-              ['waiting_payment', 'pending', 'preparing', 'ready', 'delivering'].includes(o.status)
-          );
-          const shouldFetch = currentUser.role === 'partner' || currentUser.role === 'courier' || activeOrders.length > 0;
-if (!shouldFetch) return;
+      console.log("Iniciando canais do Supabase Realtime...");
 
-          let query = supabase.from('orders').select('*');
-
-          if (currentUser.role === 'client') {
-    query = query.eq('customerId', currentUser.id)
-                 .in('status', ['waiting_payment', 'pending', 'preparing', 'ready', 'delivering', 'cancelled']);
-} else if (currentUser.role === 'partner') {
-    query = query.eq('companyId', currentUser.id)
-                 .in('status', ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering', 'delivered', 'cancelled', 'waiting_payment']);
-} else if (currentUser.role === 'courier') {
-    // Entregador só pode puxar pedidos do restaurante ao qual está vinculado
-    // (users.companyId). Sem vínculo, não busca nada.
-    const courierCompanyId = (currentUser as any).companyId;
-    if (!courierCompanyId) return;
-    query = query.eq('companyId', courierCompanyId)
-                 .in('status', ['ready', 'waiting_courier', 'delivering']);
-} else {
-    return;
-}
-
-          query = query.order('timestamp', { ascending: false }).limit(50);
-
-          const { data, error } = await query;
-          if (error || !data) return;
-
-          setOrders((prevOrders) => {
-              const newOrdersMap = new Map<string, Order>(prevOrders.map(o => [o.id, o]));
-              let hasChanges = false;
-
-              (data as any[]).forEach((freshOrder: any) => {
-                  // MUTEX/LOCK: Ignora pedidos que estão com uma atualização otimista
-                  // em andamento (ainda sendo persistida no Supabase), para não
-                  // sobrescrever a UI com o dado antigo vindo do polling.
-                  if (lockedOrders.current.has(freshOrder.id)) return;
-
-                  const existing = newOrdersMap.get(freshOrder.id);
-                  const formattedFreshOrder: Order = {
-                      ...freshOrder,
-                      timestamp: new Date(freshOrder.timestamp)
-                  };
-
-                  if (!existing) {
-                      newOrdersMap.set(freshOrder.id, formattedFreshOrder);
-                      hasChanges = true;
-
-                      if (currentUser.role === 'partner') {
-                          new Audio(somPedido).play().catch(() => {});
-                          showInAppNotification("Novo Pedido!", `Você recebeu um novo pedido de ${formattedFreshOrder.customerName}`, "🔔");
-                      }
-
-                  } else if (existing.status !== freshOrder.status || existing.paymentStatus !== freshOrder.paymentStatus) {
-                      newOrdersMap.set(freshOrder.id, formattedFreshOrder);
-                      hasChanges = true;
-
-                      if (currentUser.role === 'client') {
-                          // Notificação de Entrega
-                          if (freshOrder.deliveryMethod === 'delivery' && existing.status !== 'delivering' && freshOrder.status === 'delivering') {
-                              new Audio(somEntrega).play().catch(() => {});
-                              showInAppNotification(
-                                 'Chegoou! 🛵', 
-                                 `Oba! Seu pedido de ${freshOrder.companyName} saiu para entrega!`,
-                                 '🛵'
-                              );
-                          }
-                          // Notificação de Retirada
-                          else if (freshOrder.deliveryMethod === 'pickup' && existing.status !== 'ready' && freshOrder.status === 'ready') {
-                              new Audio(somEntrega).play().catch(() => {});
-                              showInAppNotification(
-                                 'Tá na mão! 🛍️', 
-                                 `Seu pedido de ${freshOrder.companyName} está pronto no balcão!`,
-                                 '🛍️'
-                              );
-                          }
-                      }
-                  }
-              });
-
-              if (hasChanges) {
-                  return Array.from(newOrdersMap.values()).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-              }
-              return prevOrders;
-          });
-      };
-
-      const fetchMessagesUpdate = async () => {
-          // FILTRO CRÍTICO: só busca mensagens dos pedidos que ainda estão
-          // em andamento, para não varrer a tabela inteira a cada 5s.
-          const activeOrderIds = ordersRef.current
-              .filter(o => ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering'].includes(o.status))
-              .map(o => o.id);
-
-          if (activeOrderIds.length === 0) return;
-
-          const { data, error } = await supabase
-              .from('messages')
-              .select('*')
-              .in('orderId', activeOrderIds)
-              .order('timestamp', { ascending: true });
-
-          if (error || !data) return;
-
-          setChats(prev => {
-              let hasChanges = false;
-              const next: Record<string, ChatMessage[]> = { ...prev };
-
-              (data as any[]).forEach((msg: any) => {
-                  const formattedMsg: ChatMessage = {
-                      ...msg,
-                      timestamp: new Date(msg.timestamp)
-                  };
-
-                  const currentList = next[formattedMsg.orderId] || [];
-                  if (currentList.some(m => m.id === formattedMsg.id)) return;
-
-                  if (currentUserRef.current && formattedMsg.senderRole !== currentUserRef.current.role) {
-                      new Audio(somMensagem).play().catch(() => {});
-                      showInAppNotification(`Nova mensagem`, formattedMsg.text, '💬');
-                  }
-
-                  next[formattedMsg.orderId] = [...currentList, formattedMsg];
-                  hasChanges = true;
-              });
-
-              return hasChanges ? next : prev;
-          });
-      };
-
-      const fetchWithdrawalsUpdate = async () => {
-          let query = supabase.from('withdrawal_requests').select('*');
-          
-          // Otimiza o Polling igual otimizamos o initial fetch
-          if (currentUser.role === 'partner') {
-              query = query.or(`userId.eq.${currentUser.id},companyId.eq.${currentUser.id}`);
-          } else if (currentUser.role === 'courier') {
-              query = query.eq('userId', currentUser.id);
-          }
-
-          const { data, error } = await query;
-          if (error || !data) return;
-
-          setWithdrawals(prev => {
-              const prevMap = new Map(prev.map(w => [w.id, w]));
-              let hasChanges = false;
-
-              (data as WithdrawalRequest[]).forEach(fresh => {
-                  const existing = prevMap.get(fresh.id);
-                  if (!existing || JSON.stringify(existing) !== JSON.stringify(fresh)) {
-                      prevMap.set(fresh.id, fresh);
-                      hasChanges = true;
-                  }
-              });
-
-              return hasChanges ? Array.from(prevMap.values()) : prev;
-          });
-      };
-
-      const runPolling = () => {
-          fetchOrdersUpdate();
-          fetchMessagesUpdate();
-          fetchWithdrawalsUpdate();
-      };
-
-      const interval = setInterval(runPolling, 5000);
-      return () => clearInterval(interval);
-  }, [currentUser]); 
-
-   // --- SUPABASE REALTIME: PEDIDOS ---
-  useEffect(() => {
-      if (!currentUser) return;
-
-      console.log("Iniciando inscrição no Supabase Realtime para 'orders'...");
-
+      // 1. CANAL DE PEDIDOS
       const ordersChannel = supabase
           .channel('public:orders')
-          .on(
-              'postgres_changes',
-              { event: '*', schema: 'public', table: 'orders' },
-              (payload) => {
-                  console.log('⚡ EVENTO REALTIME PROCESSADO:', payload.eventType);
-                  
-                  // Se for exclusão física (DELETE), apenas tira da lista
-                  if (payload.eventType === 'DELETE') {
-                      setOrders(prev => prev.filter(o => o.id !== payload.old.id));
-                      return;
-                  }
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload) => {
+              if (payload.eventType === 'DELETE') {
+                  setOrders(prev => prev.filter(o => o.id !== payload.old.id));
+                  return;
+              }
 
-                  // Formata o novo pedido
-                  const incomingOrder = {
-                      ...payload.new,
-                      timestamp: new Date(payload.new.timestamp)
-                  } as Order;
+              const incomingOrder = { ...payload.new, timestamp: new Date(payload.new.timestamp) } as Order;
+              if (lockedOrders.current.has(incomingOrder.id)) return;
 
-                  // MUTEX: Se o pedido estiver travado (sendo atualizado localmente pelo usuário), ignora o evento para não dar efeito "bate e volta"
-                  if (lockedOrders.current.has(incomingOrder.id)) return;
+              let shouldProcess = false;
+              if (currentUser.role === 'admin') shouldProcess = true;
+              else if (currentUser.role === 'partner' && incomingOrder.companyId === currentUser.id) shouldProcess = true;
+              else if (currentUser.role === 'client' && incomingOrder.customerId === currentUser.id) shouldProcess = true;
+              else if (currentUser.role === 'courier' && incomingOrder.companyId === (currentUser as any).companyId) shouldProcess = true;
 
-                  // FILTRO DE SEGURANÇA (RLS no Frontend): Garante que a pessoa só receba o que lhe pertence
-                  let shouldProcess = false;
-                  if (currentUser.role === 'admin') shouldProcess = true;
-                  else if (currentUser.role === 'partner' && incomingOrder.companyId === currentUser.id) shouldProcess = true;
-                  else if (currentUser.role === 'client' && incomingOrder.customerId === currentUser.id) shouldProcess = true;
-                  else if (currentUser.role === 'courier' && incomingOrder.companyId === (currentUser as any).companyId) shouldProcess = true;
+              if (!shouldProcess) return;
 
-                  if (!shouldProcess) return;
-
-                  // ATUALIZA A INTERFACE E TOCA SONS
-                  setOrders((prevOrders) => {
-                      const existing = prevOrders.find(o => o.id === incomingOrder.id);
-
-                      // CENÁRIO 1: NOVO PEDIDO (INSERT)
-                      if (payload.eventType === 'INSERT' || !existing) {
-                          if (currentUser.role === 'partner') {
-                              new Audio(somPedido).play().catch(() => {});
-                              showInAppNotification("Novo Pedido!", `Você recebeu um pedido de ${incomingOrder.customerName}`, "🔔");
-                          }
-                          return [incomingOrder, ...prevOrders].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-                      } 
-                      
-                      // CENÁRIO 2: ATUALIZAÇÃO DE STATUS (UPDATE)
-                      if (payload.eventType === 'UPDATE') {
-                          if (existing.status !== incomingOrder.status || existing.paymentStatus !== incomingOrder.paymentStatus) {
-                              if (currentUser.role === 'client') {
-                                  if (incomingOrder.deliveryMethod === 'delivery' && existing.status !== 'delivering' && incomingOrder.status === 'delivering') {
-                                      new Audio(somEntrega).play().catch(() => {});
-                                      showInAppNotification('Chegoou! 🛵', `Seu pedido de ${incomingOrder.companyName} saiu para entrega!`, '🛵');
-                                  } else if (incomingOrder.deliveryMethod === 'pickup' && existing.status !== 'ready' && incomingOrder.status === 'ready') {
-                                      new Audio(somEntrega).play().catch(() => {});
-                                      showInAppNotification('Tá na mão! 🛍️', `Seu pedido de ${incomingOrder.companyName} está pronto no balcão!`, '🛍️');
-                                  }
+              setOrders((prevOrders) => {
+                  const existing = prevOrders.find(o => o.id === incomingOrder.id);
+                  if (payload.eventType === 'INSERT' || !existing) {
+                      if (currentUser.role === 'partner') {
+                          new Audio(somPedido).play().catch(() => {});
+                          showInAppNotification("Novo Pedido!", `Você recebeu um pedido de ${incomingOrder.customerName}`, "🔔");
+                      }
+                      return [incomingOrder, ...prevOrders].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+                  } 
+                  if (payload.eventType === 'UPDATE') {
+                      if (existing.status !== incomingOrder.status || existing.paymentStatus !== incomingOrder.paymentStatus) {
+                          if (currentUser.role === 'client') {
+                              if (incomingOrder.deliveryMethod === 'delivery' && existing.status !== 'delivering' && incomingOrder.status === 'delivering') {
+                                  new Audio(somEntrega).play().catch(() => {});
+                                  showInAppNotification('Chegoou! 🛵', `Seu pedido de ${incomingOrder.companyName} saiu para entrega!`, '🛵');
+                              } else if (incomingOrder.deliveryMethod === 'pickup' && existing.status !== 'ready' && incomingOrder.status === 'ready') {
+                                  new Audio(somEntrega).play().catch(() => {});
+                                  showInAppNotification('Tá na mão! 🛍️', `Seu pedido de ${incomingOrder.companyName} está pronto no balcão!`, '🛍️');
                               }
                           }
-                          return prevOrders.map(o => o.id === incomingOrder.id ? incomingOrder : o).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
                       }
+                      return prevOrders.map(o => o.id === incomingOrder.id ? incomingOrder : o).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+                  }
+                  return prevOrders;
+              });
+          }).subscribe();
 
-                      return prevOrders;
-                  });
+      // 2. CANAL DE MENSAGENS (CHAT)
+      const messagesChannel = supabase
+          .channel('public:messages')
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+              const newMsg = { ...payload.new, timestamp: new Date(payload.new.timestamp) } as ChatMessage;
+
+              setChats(prev => {
+                  const currentList = prev[newMsg.orderId] || [];
+                  if (currentList.some(m => m.id === newMsg.id)) return prev; // Evita duplicidade
+
+                  // Toca o som apenas se a mensagem não foi enviada pelo próprio usuário logado
+                  if (currentUser.role !== newMsg.senderRole) {
+                      new Audio(somMensagem).play().catch(() => {});
+                      showInAppNotification("Nova mensagem", newMsg.text, '💬');
+                  }
+
+                  return { ...prev, [newMsg.orderId]: [...currentList, newMsg] };
+              });
+          }).subscribe();
+
+      // 3. CANAL DE CARTEIRA / SAQUES
+      const withdrawalsChannel = supabase
+          .channel('public:withdrawals')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'withdrawal_requests' }, (payload) => {
+              if (payload.eventType === 'DELETE') {
+                  setWithdrawals(prev => prev.filter(w => w.id !== payload.old.id));
+                  return;
               }
-          )
-          .subscribe();
 
+              const incoming = payload.new as WithdrawalRequest;
+
+              let shouldProcess = false;
+              if (currentUser.role === 'admin') shouldProcess = true;
+              else if (currentUser.role === 'partner' && (incoming.companyId === currentUser.id || incoming.userId === currentUser.id)) shouldProcess = true;
+              else if (currentUser.role === 'courier' && incoming.userId === currentUser.id) shouldProcess = true;
+
+              if (!shouldProcess) return;
+
+              setWithdrawals(prev => {
+                  const existing = prev.find(w => w.id === incoming.id);
+                  if (!existing) return [incoming, ...prev];
+                  return prev.map(w => w.id === incoming.id ? incoming : w);
+              });
+          }).subscribe();
+
+      // LIMPEZA DOS CANAIS AO DESLOGAR
       return () => {
           supabase.removeChannel(ordersChannel);
+          supabase.removeChannel(messagesChannel);
+          supabase.removeChannel(withdrawalsChannel);
       };
   }, [currentUser]);
+  // ---------------------------------------------------------
   // -------------------------------
   // ---------------------------------------------------------------------------
   // MANIPULADORES DE DADOS (HANDLERS)
