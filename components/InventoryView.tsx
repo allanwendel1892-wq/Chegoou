@@ -226,7 +226,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyI
                         ${itemsToPrint.map((item: any) => `
                             <tr>
                                 <td class="name-col">[ ] ${item.name}</td>
-                                <td class="qty-col">${item.amount \vert{}\vert{} '_____'}${item.unit}</td>
+                                <td class="qty-col">${item.amount ? item.amount : '_____'} ${item.unit}</td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -379,6 +379,8 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyI
                                                         <div key={idx} className="bg-gray-50 p-3 rounded-xl flex justify-between items-center border border-gray-100">
                                                             <span className="font-bold text-gray-800 text-sm">{item.name}</span>
                                                             <span className="font-black text-gray-900 bg-white px-2 py-1 rounded-lg border border-gray-200 text-sm">
+    {item.amount ? item.amount : '___'} {item.unit}
+</span>
                                                                 {item.amount || '___'} {item.unit}
                                                             </span>
                                                         </div>
