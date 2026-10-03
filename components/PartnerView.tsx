@@ -1166,15 +1166,22 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                   const divideThisGroup = snapshotDivide || originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
               
                   if (divideThisGroup) {
-                      const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
-                      return opts.map(o => `<div style="margin-bottom: 3px;"><b>+ ${fraction}${o}</b></div>`).join('');
-                  } else {
-                      if (gName) {
-                          return `<div style="margin-bottom: 3px;"><b>${gName.toUpperCase()}:</b> <b>${opts.join(', ')}</b></div>`;
-                      } else {
-                          return opts.map(o => `<div style="margin-bottom: 3px;"><b>+ ${o}</b></div>`).join('');
-                      }
-                  }
+    const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
+    return opts.map(o => `<div style="margin-bottom: 3px;"><b>+ ${fraction}${o}</b></div>`).join('');
+} else {
+    if (gName) {
+        // Nova formatação: Quebra de linha, margem superior e tudo em negrito
+        return `
+        <div style="margin-top: 8px; margin-bottom: 2px;">
+            <b>${gName.toUpperCase()}:</b>
+        </div>
+        <div style="margin-bottom: 6px; margin-left: 5px;">
+            ${opts.map(o => `<div style="margin-bottom: 2px;"><b>+ ${o}</b></div>`).join('')}
+        </div>`;
+    } else {
+        return opts.map(o => `<div style="margin-bottom: 3px;"><b>+ ${o}</b></div>`).join('');
+    }
+}
               }).join('')}
               </div>`;
           }
