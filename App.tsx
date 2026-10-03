@@ -578,14 +578,15 @@ const App: React.FC = () => {
               if (!shouldProcess) return;
 
               setOrders((prevOrders) => {
-                  const existing = prevOrders.find(o => o.id === incomingOrder.id);
-                  if (payload.eventType === 'INSERT' || !existing) {
-                      if (currentUser.role === 'partner') {
-                          new Audio(somPedido).play().catch(() => {});
-                          showInAppNotification("Novo Pedido!", `Você recebeu um pedido de ${incomingOrder.customerName}`, "🔔");
-                      }
-                      return [incomingOrder, ...prevOrders].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-                  } 
+    const existing = prevOrders.find(o => o.id === incomingOrder.id);
+    if (payload.eventType === 'INSERT' || !existing) {
+        // CORREÇÃO: Só emite alerta sonoro se for de fato um INSERT (pedido inédito)
+        if (currentUser.role === 'partner' && payload.eventType === 'INSERT') {
+            new Audio(somPedido).play().catch(() => {});
+            showInAppNotification("Novo Pedido!", `Você recebeu um pedido de ${incomingOrder.customerName}`, "🔔");
+        }
+        return [incomingOrder, ...prevOrders].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+    } 
                   if (payload.eventType === 'UPDATE') {
                       if (existing.status !== incomingOrder.status || existing.paymentStatus !== incomingOrder.paymentStatus) {
                           if (currentUser.role === 'client') {
