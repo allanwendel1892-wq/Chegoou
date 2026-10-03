@@ -1159,7 +1159,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                   groups[g].push(opt.optionName || opt.name);
               });
               
-              // AQUI MUDAMOS O ESTILO DOS SUBGRUPOS (FONTE MAIOR, MAIS ESPAÇO, MAIÚSCULAS)
                optionsHtml = `<div style="font-size: 16px; margin-left: 5px; margin-top: 8px; margin-bottom: 15px; padding-left: 10px; border-left: 2px solid #000;">
               ${Object.entries(groups).map(([gName, opts]) => {
                   const snapshotDivide = item.selectedOptions.some(opt => (opt as any).groupName === gName && (opt as any).dividePrice === true);
@@ -1180,7 +1179,6 @@ const PartnerView: React.FC<PartnerViewProps> = ({
               </div>`;
           }
 
-          // AQUI MUDAMOS O ESTILO DO NOME DO PRODUTO (FONTE MAIOR E MAIÚSCULA)
           return `
               <div style="display:flex; justify-content:space-between; margin-top: 10px; margin-bottom: 5px; align-items: flex-start;">
                   <span style="font-weight:900; font-size: 18px;">${item.quantity}x</span>
@@ -1200,11 +1198,21 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           <p style="font-size: 14px;">${order.deliveryAddress?.neighborhood} - ${order.deliveryAddress?.city}</p>
           ${order.deliveryAddress?.zipCode ? `<p>CEP: ${order.deliveryAddress.zipCode}</p>` : ''}
         `;
+        
       const paymentInfo = order.paymentMethod === 'cash' 
         ? `DINHEIRO ${order.changeFor ? `(Troco p/ R$ ${order.changeFor.toFixed(2)})` : ''}`
         : order.paymentMethod.toUpperCase();
+        
+      // AQUI CRIAMOS O BLOCO CONDICIONAL DAS OBSERVAÇÕES
+      const observacoesHtml = order.observacoes 
+        ? `
+          <div style="margin: 15px 0; border: 2px dashed #000; padding: 10px;">
+             <span class="bold" style="font-size: 14px;">OBSERVAÇÕES DO PEDIDO:</span><br/>
+             <span style="font-weight: 900; font-size: 18px; display: block; margin-top: 5px;">${order.observacoes.toUpperCase()}</span>
+          </div>
+        ` 
+        : '';
       
-      // AQUI AJUSTAMOS O CSS GERAL DA PÁGINA DE IMPRESSÃO
       const htmlContent = `
           <html>
               <head>
@@ -1240,6 +1248,9 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                       <span class="bold">Cliente:</span> <span style="font-weight: bold; font-size: 16px;">${order.customerName.toUpperCase()}</span><br/>
                       <span class="bold">Tel:</span> ${order.customerPhone}
                   </div>
+                  
+                  ${observacoesHtml}
+                  
                   <div class="line"></div>
                   
                   ${itemsHtml}
