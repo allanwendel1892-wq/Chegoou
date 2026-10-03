@@ -1159,54 +1159,52 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                   groups[g].push(opt.optionName || opt.name);
               });
               
-               optionsHtml = `<div style="font-size: 11px; margin-left: 10px; margin-bottom: 5px;">
+              // AQUI MUDAMOS O ESTILO DOS SUBGRUPOS (FONTE MAIOR, MAIS ESPAÇO, MAIÚSCULAS)
+               optionsHtml = `<div style="font-size: 16px; margin-left: 5px; margin-top: 8px; margin-bottom: 15px; padding-left: 10px; border-left: 2px solid #000;">
               ${Object.entries(groups).map(([gName, opts]) => {
                   const snapshotDivide = item.selectedOptions.some(opt => (opt as any).groupName === gName && (opt as any).dividePrice === true);
                   const originalGroup = originalProduct?.groups?.find(g => g.name === gName || g.name.toUpperCase() === gName);
                   const divideThisGroup = snapshotDivide || originalGroup?.dividePrice || (isPizza && gName.toLowerCase().includes('sabor'));
               
                   if (divideThisGroup) {
-    const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
-    return opts.map(o => `<div style="margin-bottom: 3px;"><b>+ ${fraction}${o}</b></div>`).join('');
-} else {
-    if (gName) {
-        // Nova formatação: Quebra de linha, margem superior e tudo em negrito
-        return `
-        <div style="margin-top: 8px; margin-bottom: 2px;">
-            <b>${gName.toUpperCase()}:</b>
-        </div>
-        <div style="margin-bottom: 6px; margin-left: 5px;">
-            ${opts.map(o => `<div style="margin-bottom: 2px;"><b>+ ${o}</b></div>`).join('')}
-        </div>`;
-    } else {
-        return opts.map(o => `<div style="margin-bottom: 3px;"><b>+ ${o}</b></div>`).join('');
-    }
-}
+                      const fraction = opts.length > 1 ? `1/${opts.length} ` : '';
+                      return opts.map(o => `<div style="margin-bottom: 8px;"><b style="font-size: 16px;">+ ${fraction}${o.toUpperCase()}</b></div>`).join('');
+                  } else {
+                      if (gName) {
+                          return `<div style="margin-bottom: 8px;"><b style="font-size: 14px;">${gName.toUpperCase()}:</b> <br/><b style="font-size: 16px; display: block; margin-top: 4px;">${opts.join(', ').toUpperCase()}</b></div>`;
+                      } else {
+                          return opts.map(o => `<div style="margin-bottom: 8px;"><b style="font-size: 16px;">+ ${o.toUpperCase()}</b></div>`).join('');
+                      }
+                  }
               }).join('')}
               </div>`;
           }
 
+          // AQUI MUDAMOS O ESTILO DO NOME DO PRODUTO (FONTE MAIOR E MAIÚSCULA)
           return `
-              <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
-                  <span style="font-weight:bold;">${item.quantity}x</span>
-                  <span style="flex:1; margin-left: 5px; font-weight:bold;">${item.productName}</span>
-                  <span style="font-weight:bold;">R$ ${(item.price * item.quantity).toFixed(2)}</span>
+              <div style="display:flex; justify-content:space-between; margin-top: 10px; margin-bottom: 5px; align-items: flex-start;">
+                  <span style="font-weight:900; font-size: 18px;">${item.quantity}x</span>
+                  <span style="flex:1; margin-left: 8px; font-weight:900; font-size: 18px;">${item.productName.toUpperCase()}</span>
+                  <span style="font-weight:bold; font-size: 14px; margin-top: 3px;">R$ ${(item.price * item.quantity).toFixed(2)}</span>
               </div>
               ${optionsHtml}
+              <div style="border-bottom: 1px dotted #999; margin: 15px 0;"></div>
           `;
       }).join('') : `<p>${order.raw_description || 'Itens não estruturados'}</p>`;
 
-          const addressHtml = order.deliveryMethod === 'pickup'
-      ? '<p style="text-align:center; font-weight:bold; font-size:14px; margin: 10px 0;">RETIRADA NO BALCÃO</p>'
+      const addressHtml = order.deliveryMethod === 'pickup'
+      ? '<p style="text-align:center; font-weight:bold; font-size:16px; margin: 10px 0;">RETIRADA NO BALCÃO</p>'
       : `
-          <p style="font-weight:bold;">ENTREGA</p>
-          <p>${order.deliveryAddress?.street}, ${order.deliveryAddress?.number}</p>
-          <p>${order.deliveryAddress?.neighborhood} - ${order.deliveryAddress?.city}</p>
+          <p style="font-weight:bold; font-size: 14px;">ENTREGA</p>
+          <p style="font-size: 14px; font-weight: bold;">${order.deliveryAddress?.street}, ${order.deliveryAddress?.number}</p>
+          <p style="font-size: 14px;">${order.deliveryAddress?.neighborhood} - ${order.deliveryAddress?.city}</p>
           ${order.deliveryAddress?.zipCode ? `<p>CEP: ${order.deliveryAddress.zipCode}</p>` : ''}
         `;
       const paymentInfo = order.paymentMethod === 'cash' 
         ? `DINHEIRO ${order.changeFor ? `(Troco p/ R$ ${order.changeFor.toFixed(2)})` : ''}`
         : order.paymentMethod.toUpperCase();
+      
+      // AQUI AJUSTAMOS O CSS GERAL DA PÁGINA DE IMPRESSÃO
       const htmlContent = `
           <html>
               <head>
@@ -1217,11 +1215,11 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                           width: 80mm;
                           margin: 0; 
                           padding: 10px; 
-                          font-size: 12px; 
+                          font-size: 14px; 
                           color: #000000; 
                       }
                       .center { text-align: center; }
-                      .line { border-bottom: 1px dashed #000; margin: 10px 0; }
+                      .line { border-bottom: 1px dashed #000; margin: 15px 0; }
                       h2, h3 { margin: 5px 0; }
                       .bold { font-weight: bold; }
                       .flex { display: flex; justify-content: space-between; }
@@ -1235,30 +1233,31 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                   <div class="center">
                        <h3 class="bold">${company.name}</h3>
                       <p>${new Date(order.timestamp).toLocaleString()}</p>
-                      <h2 style="font-size: 24px; margin: 10px 0;">#${order.id.slice(-4)}</h2>
+                      <h2 style="font-size: 28px; font-weight: 900; margin: 10px 0;">#${order.id.slice(-4)}</h2>
                   </div>
                   <div class="line"></div>
-                   <div style="margin-bottom: 10px;">
-                      <span class="bold">Cliente:</span> ${order.customerName}<br/>
+                   <div style="margin-bottom: 10px; font-size: 14px;">
+                      <span class="bold">Cliente:</span> <span style="font-weight: bold; font-size: 16px;">${order.customerName.toUpperCase()}</span><br/>
                       <span class="bold">Tel:</span> ${order.customerPhone}
                   </div>
                   <div class="line"></div>
+                  
                   ${itemsHtml}
-                  <div class="line"></div>
-                  <div class="flex">
+                  
+                  <div class="flex" style="font-size: 14px;">
                       <span>Subtotal:</span>
                       <span>R$ ${order.subtotal.toFixed(2)}</span>
                   </div>
-                  <div class="flex">
+                  <div class="flex" style="font-size: 14px;">
                       <span>Entrega:</span>
                       <span>R$ ${order.deliveryFee.toFixed(2)}</span>
                   </div>
-                  <div class="flex" style="font-size: 16px; font-weight: bold; margin-top: 5px;">
+                  <div class="flex" style="font-size: 20px; font-weight: 900; margin-top: 10px;">
                       <span>TOTAL:</span>
                       <span>R$ ${order.total.toFixed(2)}</span>
                   </div>
                   <div class="line"></div>
-                  <p class="center bold">${paymentInfo}</p>
+                  <p class="center bold" style="font-size: 18px;">${paymentInfo}</p>
                   <div class="line"></div>
                   <div style="margin-top: 10px;">
                       ${addressHtml}
