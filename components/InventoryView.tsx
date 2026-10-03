@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Plus, Search, Edit, Trash2, AlertTriangle, ShoppingCart, Package, X, Save, Printer, BookOpen } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, AlertTriangle, ShoppingCart, Package, X, Save, Printer, BookOpen, ListChecks } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 
 const normalize = (str: any) => String(str || '').trim().toLowerCase();
@@ -25,12 +25,16 @@ export interface Composition {
 interface InventoryViewProps {
     items: InventoryItem[];
     setItems: (items: InventoryItem[] | ((prev: InventoryItem[]) => InventoryItem[])) => void;
-    companyId: string; // <-- OBRIGATÓRIO PARA ISOLAMENTO
+    companyId: string;
 }
 
 const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyId }) => {
-    const [activeTab, setActiveTab] = useState<'insumos' | 'receitas'>('insumos');
+    // Adicionado o 'checklist' às opções da aba
+    const [activeTab, setActiveTab] = useState<'insumos' | 'receitas' | 'checklist'>('insumos');
     const [searchTerm, setSearchTerm] = useState('');
+    
+    // Estado local para o Checklist (NÃO VAI PARA O BANCO)
+    const [checklistState, setChecklistState] = useState<Record<string, { selected: boolean, amount: string }>>({});
     
     const [isItemModalOpen, setIsItemModalOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
@@ -44,16 +48,13 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyI
     const [editingRecipeName, setEditingRecipeName] = useState('');
     const [recipeIngredients, setRecipeIngredients] = useState<{ invId: string, amount: number | string }[]>([]);
 
-    // Busca e Atualização em Tempo Real ISOLADAS POR EMPRESA
     useEffect(() => {
-        // Trava de segurança: se o ID não chegar, ele não tenta buscar (evita erros)
         if (!companyId) {
             console.warn("⚠️ companyId não foi recebido no InventoryView!");
             return;
         }
 
         const fetchData = async () => {
-            // 1. Busca apenas os Insumos desta loja
             const { data: invData } = await supabase
                 .from('inventory_items')
                 .select('*')
@@ -73,7 +74,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyI
                 setItems(mappedData);
             }
 
-            // 2. Busca apenas as Receitas desta loja
             const { data: compData } = await supabase
                 .from('compositions')
                 .select('*')
@@ -84,15 +84,12 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyI
             }
         };
 
-        fetchData(); // Roda a primeira vez imediatamente
-        const interval = setInterval(fetchData, 5000); // Fica checando atualizações
+        fetchData();
+        const interval = setInterval(fetchData, 5000);
         
         return () => clearInterval(interval);
     }, [companyId, setItems]);
 
-    // ============================================================================
-    // MOTOR AUTÔNOMO DE BAIXA DE ESTOQUE (RADAR) - AGORA ISOLADO E INTERNO
-    // ============================================================================
     useEffect(() => {
         if (!companyId) return;
         let isPollingActive = true;
@@ -102,7 +99,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyI
                 const { data: dbCompositions, error: compError } = await supabase
                     .from('compositions')
                     .select('*')
-                    .eq('company_id', companyId); // <-- Isolamento
+                    .eq('company_id', companyId);
 
                 if (compError || !dbCompositions || dbCompositions.length === 0) return;
 
@@ -169,7 +166,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyI
                 const { data: pendingStockOrders, error } = await supabase
                     .from('orders')
                     .select('id, items, status')
-                    .eq('companyId', companyId) // <-- ISOLAMENTO DE PEDIDOS DA EMPRESA
+                    .eq('companyId', companyId)
                     .in('status', ['delivered', 'completed', 'concluido', 'entregue', 'Concluído', 'Entregue', 'concluído', 'Delivered'])
                     .eq('stock_processed', false)
                     .limit(10);
@@ -203,10 +200,96 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyI
     const shoppingList = useMemo(() => items.filter(item => Number(item.currentStock) <= Number(item.minStock)), [items]);
     const filteredItems = items.filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase()) || item.category.toLowerCase().includes(searchTerm.toLowerCase()));
 
+    // ==========================================
+    // FUNÇÕES DO NOVO CHECKLIST
+    // ==========================================
+    const toggleChecklistItem = (id: string) => {
+        setChecklistState(prev => ({
+            ...prev,
+            [id]: {
+                selected: !prev[id]?.selected,
+                amount: prev[id]?.amount || ''
+            }
+        }));
+    };
+
+    const updateChecklistAmount = (id: string, amount: string) => {
+        setChecklistState(prev => ({
+            ...prev,
+            [id]: {
+                ...prev[id],
+                selected: true,
+                amount
+            }
+        }));
+    };
+
+    const handlePrintChecklist = () => {
+        const itemsToPrint = items.filter(item => checklistState[item.id]?.selected);
+        if (itemsToPrint.length === 0) {
+            alert('Selecione pelo menos um item para imprimir na sua lista.');
+            return;
+        }
+
+        const printWindow = window.open('', '', 'width=400,height=600');
+        if (!printWindow) return;
+
+        // Estilização formatada para Impressora Térmica (Comandas - 58mm ou 80mm)
+        const htmlContent = `
+            <html>
+            <head>
+                <title>Checklist de Compras</title>
+                <style>
+                    body { font-family: 'Courier New', Courier, monospace; font-size: 14px; max-width: 300px; margin: 0 auto; padding: 10px; color: #000; }
+                    h2 { text-align: center; font-size: 16px; margin-bottom: 5px; border-bottom: 1px dashed #000; padding-bottom: 10px; }
+                    .date { text-align: center; font-size: 12px; margin-bottom: 15px; }
+                    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+                    th { border-bottom: 1px dashed #000; text-align: left; padding-bottom: 5px; font-size: 12px; }
+                    td { padding: 5px 0; font-size: 14px; vertical-align: top; }
+                    .name-col { width: 65%; word-wrap: break-word; font-weight: bold; }
+                    .qty-col { width: 35%; text-align: right; }
+                    .footer { text-align: center; margin-top: 20px; font-size: 12px; border-top: 1px dashed #000; padding-top: 10px; }
+                    @media print {
+                        body { width: 100%; max-width: 100%; margin: 0; padding: 0; }
+                        @page { margin: 0; }
+                    }
+                </style>
+            </head>
+            <body>
+                <h2>LISTA DE COMPRAS</h2>
+                <div class="date">${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Insumo</th>
+                            <th style="text-align: right;">Qtd.</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${itemsToPrint.map(item => `
+                            <tr>
+                                <td class="name-col">[ ] ${item.name}</td>
+                                <td class="qty-col">${checklistState[item.id].amount || '_____'} ${item.unit}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                <div class="footer">--- Fim da Lista ---</div>
+                <script>
+                    window.onload = () => { window.print(); window.close(); };
+                </script>
+            </body>
+            </html>
+        `;
+        printWindow.document.write(htmlContent);
+        printWindow.document.close();
+    };
+    // ==========================================
+
     const handlePrintList = () => {
         const printWindow = window.open('', '', 'width=800,height=600');
         if (!printWindow) return;
-        const htmlContent = `<html><head><title>Lista de Compras</title><style>body { font-family: Arial, sans-serif; padding: 20px; color: #333; }h1 { color: #dc2626; border-bottom: 2px solid #dc2626; padding-bottom: 10px; }table { width: 100%; border-collapse: collapse; margin-top: 20px; }th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }th { background-color: #f8f9fa; font-weight: bold; }.urgent { color: #dc2626; font-weight: bold; }</style></head><body><h1>Lista de Compras</h1><p>Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}</p><table><thead><tr><th>Insumo</th><th>Estoque Atual</th><th>Mínimo Exigido</th><th>Comprar Aprox.</th></tr></thead><tbody>${shoppingList.map(item => {const toBuy = Math.max(0, item.minStock - item.currentStock);return `<tr><td><strong>${item.name}</strong></td><td>${item.currentStock} ${item.unit}</td><td>${item.minStock} ${item.unit}</td><td class="urgent">${toBuy} ${item.unit}</td></tr>`;}).join('')}</tbody></table><script>window.onload = () => { window.print(); window.close(); };</script></body></html>`;
+        const htmlContent = `<html><head><title>Lista de Compras (Alerta)</title><style>body { font-family: Arial, sans-serif; padding: 20px; color: #333; }h1 { color: #dc2626; border-bottom: 2px solid #dc2626; padding-bottom: 10px; }table { width: 100%; border-collapse: collapse; margin-top: 20px; }th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }th { background-color: #f8f9fa; font-weight: bold; }.urgent { color: #dc2626; font-weight: bold; }</style></head><body><h1>Lista de Compras</h1><p>Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}</p><table><thead><tr><th>Insumo</th><th>Estoque Atual</th><th>Mínimo Exigido</th><th>Comprar Aprox.</th></tr></thead><tbody>${shoppingList.map(item => {const toBuy = Math.max(0, item.minStock - item.currentStock);return `<tr><td><strong>${item.name}</strong></td><td>${item.currentStock} ${item.unit}</td><td>${item.minStock} ${item.unit}</td><td class="urgent">${toBuy} ${item.unit}</td></tr>`;}).join('')}</tbody></table><script>window.onload = () => { window.print(); window.close(); };</script></body></html>`;
         printWindow.document.write(htmlContent);
         printWindow.document.close();
     };
@@ -221,7 +304,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyI
 
         const dbItem = {
             id: editingItem ? editingItem.id : self.crypto.randomUUID(),
-            company_id: companyId, // <-- ISOLAMENTO DE INSUMO
+            company_id: companyId,
             name: itemFormData.name,
             category: itemFormData.category || 'Ingredientes',
             unit: itemFormData.unit || 'KG',
@@ -238,7 +321,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyI
             setItemFormData({ name: '', category: 'Ingredientes', unit: 'KG', currentStock: 0, minStock: 0, costPrice: 0 });
             setStockEntry('');
             
-            // Atualiza localmente a lista de itens
             setItems(prev => {
                 const filtered = prev.filter(i => i.id !== dbItem.id);
                 return [...filtered, {
@@ -275,7 +357,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyI
         if (!recipeName) { alert('O Nome da Receita (Ex: Calabresa) é obrigatório!'); return; }
         
         try {
-            // Conversão de qualquer string restante para float seguro
             const normalizedIngredients = recipeIngredients.map(r => ({
                 invId: r.invId,
                 amount: typeof r.amount === 'string' ? parseFloat(r.amount.replace(',', '.')) : r.amount
@@ -288,7 +369,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyI
                 return;
             }
 
-            // Exclui receita antiga apenas DESTA empresa
             const { error: deleteError } = await supabase
                 .from('compositions')
                 .delete()
@@ -301,7 +381,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyI
                 reference_id: recipeName,
                 inventory_item_id: r.invId,
                 amount_needed: r.amount,
-                company_id: companyId // <-- ISOLAMENTO DE RECEITA
+                company_id: companyId
             }));
             
             const { error: insertError } = await supabase.from('compositions').insert(newComps);
@@ -351,18 +431,25 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyI
                     <p className="text-gray-500 font-medium">Gerencie insumos e fichas técnicas da sua loja</p>
                 </div>
                 
-                <div className="flex bg-gray-100 p-1 rounded-xl">
+                {/* NOVO MENU DE NAVEGAÇÃO COM 3 ABAS */}
+                <div className="flex bg-gray-100 p-1 rounded-xl w-full md:w-auto overflow-x-auto whitespace-nowrap hide-scrollbar">
                     <button 
                         onClick={() => setActiveTab('insumos')}
-                        className={`px-6 py-2.5 rounded-lg font-bold transition-all flex items-center gap-2 ${activeTab === 'insumos' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                        className={`px-4 py-2.5 rounded-lg font-bold transition-all flex items-center gap-2 ${activeTab === 'insumos' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                     >
                         <Package className="w-5 h-5"/> Insumos
                     </button>
                     <button 
                         onClick={() => setActiveTab('receitas')}
-                        className={`px-6 py-2.5 rounded-lg font-bold transition-all flex items-center gap-2 ${activeTab === 'receitas' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                        className={`px-4 py-2.5 rounded-lg font-bold transition-all flex items-center gap-2 ${activeTab === 'receitas' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                     >
                         <BookOpen className="w-5 h-5"/> Fichas Técnicas
+                    </button>
+                    <button 
+                        onClick={() => setActiveTab('checklist')}
+                        className={`px-4 py-2.5 rounded-lg font-bold transition-all flex items-center gap-2 ${activeTab === 'checklist' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                        <ListChecks className="w-5 h-5"/> Checklist
                     </button>
                 </div>
             </div>
@@ -383,7 +470,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyI
                         <div className="mb-8 bg-white border-2 border-red-100 rounded-2xl overflow-hidden shadow-sm">
                             <div className="bg-red-50 px-6 py-4 border-b border-red-100 flex items-center justify-between">
                                 <h2 className="text-red-800 font-black flex items-center gap-2"><ShoppingCart className="w-5 h-5" /> LISTA DE COMPRAS SUGERIDA</h2>
-                                <button onClick={handlePrintList} className="bg-white border border-red-200 text-red-700 px-4 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-red-100 transition-colors shadow-sm"><Printer className="w-4 h-4" /> Imprimir / PDF</button>
+                                <button onClick={handlePrintList} className="bg-white border border-red-200 text-red-700 px-4 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-red-100 transition-colors shadow-sm"><Printer className="w-4 h-4" /> Imprimir A4 / PDF</button>
                             </div>
                             <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
                                 {shoppingList.map(item => (
@@ -458,6 +545,75 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyI
                 </div>
             )}
 
+            {/* ABA CHECKLIST MANUAL (NOVA) */}
+            {activeTab === 'checklist' && (
+                <div className="space-y-6">
+                    <div className="flex flex-col md:flex-row justify-between gap-4 bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                        <div className="relative flex-1">
+                            <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input
+                                type="text"
+                                placeholder="Buscar insumos para adicionar na lista..."
+                                className="w-full pl-10 pr-4 py-3 bg-gray-50 rounded-xl border-none focus:ring-2 focus:ring-red-500"
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                            />
+                        </div>
+                        <button
+                            onClick={handlePrintChecklist}
+                            className="bg-gray-900 text-white px-6 py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-black transition-colors shadow-lg"
+                        >
+                            <Printer className="w-5 h-5" /> Imprimir Comanda
+                        </button>
+                    </div>
+
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden p-2">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 p-2">
+                            {filteredItems.map(item => {
+                                const isSelected = checklistState[item.id]?.selected || false;
+                                const amount = checklistState[item.id]?.amount || '';
+
+                                return (
+                                    <div
+                                        key={item.id}
+                                        className={`p-4 rounded-xl border-2 transition-all flex items-center justify-between gap-3 ${
+                                            isSelected ? 'border-red-500 bg-red-50' : 'border-gray-100 bg-gray-50'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-3 flex-1 cursor-pointer" onClick={() => toggleChecklistItem(item.id)}>
+                                            <input
+                                                type="checkbox"
+                                                checked={isSelected}
+                                                readOnly
+                                                className="w-5 h-5 text-red-600 rounded focus:ring-red-500 accent-red-600 pointer-events-none"
+                                            />
+                                            <div>
+                                                <p className="font-bold text-gray-900 leading-tight">{item.name}</p>
+                                                <p className="text-xs text-gray-500 mt-1">
+                                                    No Estoque: {item.currentStock} {item.unit}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        
+                                        {isSelected && (
+                                            <div className="w-24 shrink-0">
+                                                <input
+                                                    type="text"
+                                                    placeholder={`Qtd. ${item.unit}`}
+                                                    value={amount}
+                                                    onChange={(e) => updateChecklistAmount(item.id, e.target.value)}
+                                                    className="w-full px-2 py-2 rounded-lg border border-red-200 bg-white text-center font-bold text-sm outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500"
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* MODAL DE INSUMO */}
             {isItemModalOpen && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -523,7 +679,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ items, setItems, companyI
                                             value={ing.amount} 
                                             onChange={e => {
                                                 const newIng = [...recipeIngredients];
-                                                // Permite digitar com vírgula de forma amigável
                                                 newIng[idx].amount = e.target.value;
                                                 setRecipeIngredients(newIng);
                                             }}
