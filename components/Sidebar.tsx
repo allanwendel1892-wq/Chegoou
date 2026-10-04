@@ -196,7 +196,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         {/* Footer: Central de Controle Compacta */}
         <div className="p-4 border-t border-gray-100 bg-white shrink-0">
             <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 shadow-sm mb-3">
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 px-1">Operação Rápida</p>
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 px-1">Operacional</p>
                 
                 <div className="space-y-3 px-1">
                     {/* Status da Loja */}
@@ -214,12 +214,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                     {/* Link Ativo */}
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                            <Globe className={`w-4 h-4 ${acceptOrders ? 'text-red-500' : 'text-gray-400'}`} />
+                            <Globe className={`w-4 h-4 ${acceptOrders ? 'text-green-500' : 'text-gray-400'}`} />
                             <span className="text-xs font-semibold text-gray-700">Receber Pedidos</span>
                         </div>
                         <label className={`relative inline-flex items-center cursor-pointer ${isUpdatingSettings ? 'opacity-50' : ''}`}>
                             <input type="checkbox" className="sr-only peer" checked={acceptOrders} onChange={handleToggleAcceptOrders} disabled={isUpdatingSettings} />
-                            <div className="w-8 h-4 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-red-500"></div>
+                            <div className="w-8 h-4 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-green-500"></div>
                         </label>
                     </div>
 
@@ -232,7 +232,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     >
                         <option value="both">Entregas e Retiradas</option>
                         <option value="delivery">Apenas Entregas</option>
-                        <option value="pickup">Apenas Retiradas no Local</option>
+                        <option value="pickup">Apenas Retiradas</option>
                     </select>
 
                     <div className="h-px bg-gray-200 w-full"></div>
@@ -241,7 +241,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                             <Bot className={`w-4 h-4 ${botActive ? 'text-blue-500' : 'text-gray-400'}`} />
-                            <span className="text-xs font-semibold text-gray-700">Robô Ativo</span>
+                            <span className="text-xs font-semibold text-gray-700">Bot Chegoou</span>
                         </div>
                         <div className="flex items-center gap-3">
                             <button onClick={() => { setShowWaModal(true); handleFetchQr(); }} title="Reconectar QR Code" className="text-gray-400 hover:text-blue-600 transition-colors">
