@@ -31,6 +31,51 @@ const Sidebar: React.FC<SidebarProps> = ({
   
   const [botActive, setBotActive] = useState(company?.chatbot !== 'disconnected');
   const [isUpdatingBot, setIsUpdatingBot] = useState(false);
+
+  // Controle do link do cardápio e modo de entrega
+  const [acceptOrders, setAcceptOrders] = useState((company as any)?.accept_orders !== false);
+  const [currentDeliveryMode, setCurrentDeliveryMode] = useState<string>((company as any)?.delivery_mode || 'both');
+  const [isUpdatingSettings, setIsUpdatingSettings] = useState(false);
+
+  // Bloquear/desbloquear o link
+  const handleToggleAcceptOrders = async () => {
+      if (!company?.id) return;
+      setIsUpdatingSettings(true);
+      const newValue = !acceptOrders;
+      try {
+          const { error } = await supabase
+              .from('companies')
+              .update({ accept_orders: newValue })
+              .eq('id', company.id);
+          if (error) throw error;
+          setAcceptOrders(newValue);
+      } catch (error) {
+          console.error('Erro ao alternar status do link:', error);
+          alert('Erro ao alterar status do link. Tente novamente.');
+      } finally {
+          setIsUpdatingSettings(false);
+      }
+  };
+
+  // Alterar o modo de entrega
+  const handleChangeDeliveryMode = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+      if (!company?.id) return;
+      setIsUpdatingSettings(true);
+      const newMode = e.target.value;
+      try {
+          const { error } = await supabase
+              .from('companies')
+              .update({ delivery_mode: newMode })
+              .eq('id', company.id);
+          if (error) throw error;
+          setCurrentDeliveryMode(newMode);
+      } catch (error) {
+          console.error('Erro ao mudar o modo de entrega:', error);
+          alert('Erro ao atualizar modo de entrega.');
+      } finally {
+          setIsUpdatingSettings(false);
+      }
+  };
   
   // Estados para o Modal do QR Code
   const [showWaModal, setShowWaModal] = useState(false);
@@ -231,6 +276,39 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </div>
                  <p className="text-[10px] text-gray-400 mt-1">Clique para alterar</p>
             </button>
+
+            {/* Controle de Pedidos e Entregas */}
+            <div className="bg-gray-50 border border-gray-100 rounded-2xl p-3 mb-3 transition-colors hover:bg-gray-100">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Tráfego e Entregas</p>
+                
+                <div className="flex justify-between items-center mb-3">
+                    <span className="text-[11px] font-bold text-gray-700">Link Ativo (Recebendo)</span>
+                    <label className={`relative inline-flex items-center cursor-pointer ${isUpdatingSettings ? 'opacity-50 pointer-events-none' : ''}`}>
+                        <input 
+                            type="checkbox" 
+                            className="sr-only peer"
+                            checked={acceptOrders}
+                            onChange={handleToggleAcceptOrders}
+                            disabled={isUpdatingSettings}
+                        />
+                        <div className="w-9 h-5 bg-red-400 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-500"></div>
+                    </label>
+                </div>
+
+                <div className="flex flex-col gap-1 border-t border-gray-200 pt-3">
+                    <span className="text-[11px] font-bold text-gray-700">Modos de Atendimento</span>
+                    <select 
+                        value={currentDeliveryMode}
+                        onChange={handleChangeDeliveryMode}
+                        disabled={isUpdatingSettings}
+                        className="w-full bg-white border border-gray-200 text-gray-600 text-xs font-medium rounded-lg px-2 py-1.5 mt-1 outline-none focus:border-red-400 cursor-pointer"
+                    >
+                        <option value="both">Entregas e Retiradas</option>
+                        <option value="delivery">Apenas Entregas</option>
+                        <option value="pickup">Apenas Retiradas no Local</option>
+                    </select>
+                </div>
+            </div>
 
             {/* Módulo Robô WhatsApp */}
             <div className="bg-gray-50 border border-gray-100 rounded-2xl p-3 mb-4 transition-colors hover:bg-gray-100">
