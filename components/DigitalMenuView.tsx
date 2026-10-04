@@ -116,7 +116,16 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
 
     const [customerName, setCustomerName] = useState('');
     const [customerPhone, setCustomerPhone] = useState('');
-    const [deliveryMethod, setDeliveryMethod] = useState<'delivery' | 'pickup'>('delivery');
+    const [deliveryMethod, setDeliveryMethod] = useState<'delivery' | 'pickup'>(
+        (company as any).delivery_mode === 'pickup' ? 'pickup' : 'delivery'
+    );
+
+    // Mantém o método coerente se o modo de atendimento da loja mudar/carregar depois
+    useEffect(() => {
+        const mode = (company as any).delivery_mode;
+        if (mode === 'pickup') setDeliveryMethod('pickup');
+        else if (mode === 'delivery') setDeliveryMethod('delivery');
+    }, [(company as any).delivery_mode]);
     const [street, setStreet] = useState('');
     const [number, setNumber] = useState('');
     const [complement, setComplement] = useState('');
@@ -441,6 +450,29 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
         }
     };
 
+    // Bloqueia o link caso o restaurante tenha pausado o recebimento de pedidos
+    if ((company as any).accept_orders === false) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 font-sans">
+                <div className="bg-white p-8 rounded-3xl shadow-lg max-w-md w-full text-center border border-gray-100">
+                    <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <AlertTriangle className="w-10 h-10 text-red-600" />
+                    </div>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-2">Pedidos Pausados</h2>
+                    <p className="text-gray-500 text-sm mb-6">
+                        Devido ao alto volume de pedidos, pausamos temporariamente nosso cardápio digital para garantir a qualidade e o tempo de entrega. Voltaremos em breve!
+                    </p>
+                    <button 
+                        onClick={() => window.location.reload()}
+                        className="w-full bg-red-600 text-white font-bold py-3.5 rounded-xl hover:bg-red-700 transition-colors shadow-lg shadow-red-200"
+                    >
+                        Tentar Novamente
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="pb-32 bg-gray-50 min-h-screen font-sans relative">
             
@@ -684,8 +716,22 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                 {checkoutStep === 3 && (
                                     <div className="bg-white p-4 rounded-xl border border-gray-100">
                                         <div className="flex bg-gray-100 p-1 rounded-lg mb-4">
-                                            <button onClick={() => setDeliveryMethod('delivery')} className={`flex-1 py-2 rounded-md text-sm font-bold transition-all ${deliveryMethod === 'delivery' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Entregar</button>
-                                            <button onClick={() => setDeliveryMethod('pickup')} className={`flex-1 py-2 rounded-md text-sm font-bold transition-all ${deliveryMethod === 'pickup' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>Vou Retirar</button>
+                                            {(!(company as any).delivery_mode || (company as any).delivery_mode === 'both' || (company as any).delivery_mode === 'delivery') && (
+                                                <button 
+                                                    onClick={() => setDeliveryMethod('delivery')} 
+                                                    className={`flex-1 py-2 rounded-md text-sm font-bold transition-all ${deliveryMethod === 'delivery' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+                                                >
+                                                    Entregar
+                                                </button>
+                                            )}
+                                            {(!(company as any).delivery_mode || (company as any).delivery_mode === 'both' || (company as any).delivery_mode === 'pickup') && (
+                                                <button 
+                                                    onClick={() => setDeliveryMethod('pickup')} 
+                                                    className={`flex-1 py-2 rounded-md text-sm font-bold transition-all ${deliveryMethod === 'pickup' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+                                                >
+                                                    Vou Retirar
+                                                </button>
+                                            )}
                                         </div>
                                         {deliveryMethod === 'delivery' ? (
                                             <div className="space-y-3 animate-fade-in">
