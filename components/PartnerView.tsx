@@ -3050,9 +3050,6 @@ delete updated.mapLink;
                             <h3 className="font-bold text-white mb-2 flex items-center gap-2">
                                 <Link2 className="w-5 h-5" /> Link do Cardápio Digital
                             </h3>
-                            <p className="text-sm text-gray-300 mb-4 leading-relaxed">
-                                Compartilhe este link com seus clientes (redes sociais, WhatsApp, etc). Ele abre seu cardápio direto, sem exigir login.
-                            </p>
                             <div className="flex gap-2">
                                 <input
                                     readOnly
@@ -3075,7 +3072,7 @@ delete updated.mapLink;
                                  <Lock className="w-5 h-5" /> Controle de Acesso (Modo Caixa)
                             </h3>
                             <p className="text-sm text-red-800 mb-4 leading-relaxed">
-                                Crie uma senha numérica. Se preenchida, o sistema iniciará travado no Frente de Caixa (PDV) e Kanban. Para acessar o Financeiro, Dashboard ou Cardápio, será exigida a senha.
+                                Crie aqui sua senha numérica para bloquear acesso aos módulos gerenciais.
                             </p>
                             <div>
                                 <input 
