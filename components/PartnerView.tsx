@@ -46,14 +46,51 @@ interface PartnerViewProps {
 // URL do Webhook do n8n (fluxo Evolution API / WhatsApp)
 const N8N_NOTIFY_WEBHOOK_URL = 'https://n8n-webhook.znzrqn.easypanel.host/webhook/6403e26a-5410-4756-a4db-7f3c3d2edeb0';
 
+// Eventos de notificação ao cliente
+type NotifyEvent = 'preparing' | 'ready_pickup' | 'delivering';
+
+// Controle anti-duplicidade: guarda "pedido:evento" já notificados (memória + localStorage,
+// para sobreviver a F5 e a múltiplos cliques/drops no mesmo card).
+const NOTIFIED_STORAGE_KEY = 'partner_notified_order_events_v1';
+const NOTIFIED_MAX_ENTRIES = 500;
+
+const readNotifiedFromStorage = (): string[] => {
+    try {
+        const raw = localStorage.getItem(NOTIFIED_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+};
+
+const notifiedEvents = new Set<string>(readNotifiedFromStorage());
+
+const persistNotified = () => {
+    try {
+        const list = Array.from(notifiedEvents).slice(-NOTIFIED_MAX_ENTRIES);
+        localStorage.setItem(NOTIFIED_STORAGE_KEY, JSON.stringify(list));
+    } catch { /* storage indisponível: segue só com a memória */ }
+};
+
 // Dispara a notificação de WhatsApp via n8n. Não bloqueia a UI e não quebra o fluxo se falhar.
-const notifyCustomerWhatsApp = (order: Order, event: 'preparing' | 'delivering', companyName: string) => {
+// Cada combinação pedido+evento é enviada no máximo uma vez.
+const notifyCustomerWhatsApp = (order: Order, event: NotifyEvent, companyName: string) => {
     if (!order.customerPhone) return;
 
+    const dedupKey = `${order.id}:${event}`;
+    if (notifiedEvents.has(dedupKey)) return;
+    // Marca ANTES do fetch para bloquear cliques/drops repetidos enquanto a requisição está em andamento
+    notifiedEvents.add(dedupKey);
+    persistNotified();
+
     const shortId = order.id.slice(-4);
-    const message = event === 'preparing'
-        ? `Oi, ${order.customerName}! Seu pedido #${shortId} em ${companyName} acabou de entrar em preparo. 👨‍🍳🍽️`
-        : `Oi, ${order.customerName}! Seu pedido #${shortId} de ${companyName} saiu para entrega. 🛵💨`;
+    const messages: Record<NotifyEvent, string> = {
+        preparing: `Oi, ${order.customerName}! Seu pedido #${shortId} em ${companyName} acabou de entrar em preparo. 👨‍🍳🍽️`,
+        ready_pickup: `Oi, ${order.customerName}! Seu pedido #${shortId} em ${companyName} está pronto para retirada. 🛍️✅`,
+        delivering: `Oi, ${order.customerName}! Seu pedido #${shortId} de ${companyName} saiu para entrega. 🛵💨`,
+    };
+    const message = messages[event];
 
     fetch(N8N_NOTIFY_WEBHOOK_URL, {
         method: 'POST',
@@ -66,8 +103,15 @@ const notifyCustomerWhatsApp = (order: Order, event: 'preparing' | 'delivering',
             companyName,
             message,
         }),
-    }).catch(err => {
+    })
+    .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    })
+    .catch(err => {
         console.error('Falha ao notificar cliente via WhatsApp (n8n):', err);
+        // Libera para uma nova tentativa, já que a mensagem não foi entregue ao n8n
+        notifiedEvents.delete(dedupKey);
+        persistNotified();
     });
 };
 
@@ -1777,8 +1821,14 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       }
       updateOrderStatus(orderId, status);
 
-      if (status === 'preparing' && order) {
+      // Só notifica quando o status realmente mudou (evita reenvio ao soltar o card na mesma coluna)
+      if (!order || order.status === status) return;
+
+      if (status === 'preparing') {
           notifyCustomerWhatsApp(order, 'preparing', company.name);
+      } else if (status === 'ready' && !isDelivery) {
+          // Pedido de retirada pronto no balcão
+          notifyCustomerWhatsApp(order, 'ready_pickup', company.name);
       }
   }, [updateOrderStatus, company.name]);
 
@@ -2062,7 +2112,7 @@ delete updated.mapLink;
         onUpdateFullOrder(updated);
         setDispatchingOrder(null);
 
-        if (novoStatus === 'delivering') {
+        if (novoStatus === 'delivering' && dispatchingOrder.status !== 'delivering') {
             notifyCustomerWhatsApp(dispatchingOrder, 'delivering', company.name);
         }
 
