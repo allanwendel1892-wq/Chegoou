@@ -75,7 +75,7 @@ const persistNotified = () => {
 
 // Dispara a notificação de WhatsApp via n8n. Não bloqueia a UI e não quebra o fluxo se falhar.
 // Cada combinação pedido+evento é enviada no máximo uma vez.
-const notifyCustomerWhatsApp = (order: Order, event: NotifyEvent, companyName: string) => {
+const notifyCustomerWhatsApp = (order: Order, event: NotifyEvent, companyId: string, companyName: string) => {
     if (!order.customerPhone) return;
 
     const dedupKey = `${order.id}:${event}`;
@@ -100,6 +100,7 @@ const notifyCustomerWhatsApp = (order: Order, event: NotifyEvent, companyName: s
             orderId: order.id,
             customerName: order.customerName,
             customerPhone: order.customerPhone,
+            companyId,
             companyName,
             message,
         }),
@@ -1825,12 +1826,12 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       if (!order || order.status === status) return;
 
       if (status === 'preparing') {
-          notifyCustomerWhatsApp(order, 'preparing', company.name);
+          notifyCustomerWhatsApp(order, 'preparing', company.id, company.name);
       } else if (status === 'ready' && !isDelivery) {
           // Pedido de retirada pronto no balcão
-          notifyCustomerWhatsApp(order, 'ready_pickup', company.name);
+          notifyCustomerWhatsApp(order, 'ready_pickup', company.id, company.name);
       }
-  }, [updateOrderStatus, company.name]);
+  }, [updateOrderStatus, company.id, company.name]);
 
   // Handler estável (useCallback) para alternar entre entrega/retirada direto no card do Kanban,
   // evitando recriar uma função inline por coluna a cada render do PartnerView.
@@ -2113,7 +2114,7 @@ delete updated.mapLink;
         setDispatchingOrder(null);
 
         if (novoStatus === 'delivering' && dispatchingOrder.status !== 'delivering') {
-            notifyCustomerWhatsApp(dispatchingOrder, 'delivering', company.name);
+            notifyCustomerWhatsApp(dispatchingOrder, 'delivering', company.id, company.name);
         }
 
         alert(selectedCourierId 
