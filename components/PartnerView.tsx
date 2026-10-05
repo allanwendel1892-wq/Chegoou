@@ -47,31 +47,24 @@ interface PartnerViewProps {
 const N8N_NOTIFY_WEBHOOK_URL = 'https://n8n-webhook.znzrqn.easypanel.host/webhook/6403e26a-5410-4756-a4db-7f3c3d2edeb0';
 
 // Dispara a notificação de WhatsApp via n8n. Não bloqueia a UI e não quebra o fluxo se falhar.
-const notifyCustomerWhatsApp = (order: Order, event: 'preparing' | 'delivering' | 'ready', companyName: string) => {
+const notifyCustomerWhatsApp = (order: Order, event: 'preparing' | 'delivering', companyName: string) => {
     if (!order.customerPhone) return;
 
     const shortId = order.id.slice(-4);
-    let message = '';
-    
-    // Mantemos as mensagens antigas caso você ainda as use aqui, 
-    // mas se já migrou tudo pro n8n, pode até remover esses ifs no futuro.
-    if (event === 'preparing') {
-        message = `Oi, ${order.customerName}! Seu pedido #${shortId} em ${companyName} acabou de entrar em preparo. 👨‍🍳🍽️`;
-    } else if (event === 'delivering') {
-        message = `Oi, ${order.customerName}! Seu pedido #${shortId} de ${companyName} saiu para entrega. 🛵💨`;
-    }
-    // Não criamos mensagem para 'ready', deixando a cargo do n8n
+    const message = event === 'preparing'
+        ? `Oi, ${order.customerName}! Seu pedido #${shortId} em ${companyName} acabou de entrar em preparo. 👨‍🍳🍽️`
+        : `Oi, ${order.customerName}! Seu pedido #${shortId} de ${companyName} saiu para entrega. 🛵💨`;
 
     fetch(N8N_NOTIFY_WEBHOOK_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            event, // Enviará 'ready' para o webhook identificar o gatilho
+            event,
             orderId: order.id,
             customerName: order.customerName,
             customerPhone: order.customerPhone,
             companyName,
-            message, // Vai vazio quando for 'ready'
+            message,
         }),
     }).catch(err => {
         console.error('Falha ao notificar cliente via WhatsApp (n8n):', err);
@@ -1771,31 +1764,23 @@ const PartnerView: React.FC<PartnerViewProps> = ({
 
   // Lógica Modificada de Drag & Drop para Interceptação de Entregadores
   const handleDragDropOrder = useCallback((orderId: string, status: Order['status']) => {
-    const order = ordersRef.current.find(o => o.id === orderId);
-    
-    // Variáveis para identificar o tipo de entrega
-    const isPickup = order?.deliveryMethod?.toLowerCase().includes('pickup') || order?.deliveryMethod?.toLowerCase().includes('retirada');
-    const isDelivery = order && !isPickup;
-    
-    if (status === 'delivering' && isDelivery) {
-        setDispatchingOrder(order);
-        setSelectedCourierId(order.courierId || '');
-        setDeliveryAddressStr(order.deliveryAddress ? `${order.deliveryAddress.street}, ${order.deliveryAddress.number || ''} - ${order.deliveryAddress.neighborhood || ''}`.trim() : '');
-        setMapLink((order.deliveryAddress as any)?.mapLink || '');
-        setDeliveryFee(order.deliveryFee || 0);
-        return;
-    }
-    updateOrderStatus(orderId, status);
+      const order = ordersRef.current.find(o => o.id === orderId);
+      const isDelivery = order && !(order.deliveryMethod?.toLowerCase().includes('pickup') || order.deliveryMethod?.toLowerCase().includes('retirada'));
+      
+      if (status === 'delivering' && isDelivery) {
+          setDispatchingOrder(order);
+          setSelectedCourierId(order.courierId || '');
+          setDeliveryAddressStr(order.deliveryAddress ? `${order.deliveryAddress.street}, ${order.deliveryAddress.number || ''} - ${order.deliveryAddress.neighborhood || ''}`.trim() : '');
+          setMapLink((order.deliveryAddress as any)?.mapLink || '');
+          setDeliveryFee(order.deliveryFee || 0);
+          return;
+      }
+      updateOrderStatus(orderId, status);
 
-    if (status === 'preparing' && order) {
-        notifyCustomerWhatsApp(order, 'preparing', company.name);
-    }
-    
-    // NOVO: Dispara apenas o gatilho de webhook informando que o pedido de retirada está pronto
-    if (status === 'ready' && order && isPickup) {
-        notifyCustomerWhatsApp(order, 'ready', company.name);
-    }
-}, [updateOrderStatus, company.name]);
+      if (status === 'preparing' && order) {
+          notifyCustomerWhatsApp(order, 'preparing', company.name);
+      }
+  }, [updateOrderStatus, company.name]);
 
   // Handler estável (useCallback) para alternar entre entrega/retirada direto no card do Kanban,
   // evitando recriar uma função inline por coluna a cada render do PartnerView.
