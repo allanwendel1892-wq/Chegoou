@@ -341,15 +341,22 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
     };
 
     const validateStep = (step: number): string | null => {
-        if (step === 1 && cart.length === 0) return "Sua sacola está vazia.";
-        if (step === 2) {
-            if (!customerName.trim()) return "Informe seu nome completo.";
-            if (!customerPhone.trim()) return "Informe seu WhatsApp.";
+    if (step === 1 && cart.length === 0) return "Sua sacola está vazia.";
+    if (step === 2) {
+        if (!customerName.trim()) return "Informe seu nome completo.";
+        if (!customerPhone.trim()) return "Informe seu WhatsApp.";
+    }
+    if (step === 3 && deliveryMethod === 'delivery') {
+        const minOrder = (company as any).min_order_value || 0;
+        
+        // Trava do pedido mínimo considerando apenas os produtos (antes da taxa de entrega)
+        if (minOrder > 0 && productTotal < minOrder) {
+            return `O pedido mínimo para entrega é R$ ${minOrder.toFixed(2)}. Faltam R$ ${(minOrder - productTotal).toFixed(2)}.`;
         }
-        if (step === 3 && deliveryMethod === 'delivery') {
-            if (!neighborhood.trim()) return "Selecione o bairro para entrega.";
-            if (!street.trim() || !number.trim()) return "Preencha a rua e o número para entrega.";
-        }
+
+        if (!neighborhood.trim()) return "Selecione o bairro para entrega.";
+        if (!street.trim() || !number.trim()) return "Preencha a rua e o número para entrega.";
+    }
         if (step === 4 && paymentMethod === 'cash' && changeAmount) {
             const changeForValue = parseFloat(changeAmount.replace(',', '.'));
             if (changeForValue < finalTotal) return "O valor do troco deve ser maior que o total do pedido.";
