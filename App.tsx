@@ -659,6 +659,35 @@ const App: React.FC = () => {
   }, [currentUser]);
   // ---------------------------------------------------------
   // -------------------------------
+
+
+  // ===========================================================================
+  // COLE O NOVO CÓDIGO EXATAMENTE AQUI, NESTE ESPAÇO:
+  // ===========================================================================
+  // CORREÇÃO: SINCRONIZAÇÃO APÓS HIBERNAÇÃO DO CELULAR (MOBILE SLEEP)
+  useEffect(() => {
+      const handleAppWakeUp = () => {
+          // Se o documento voltou a ficar visível e existe um usuário logado
+          if (document.visibilityState === 'visible' && currentUserRef.current) {
+              console.log("App acordou do segundo plano: Buscando dados perdidos...");
+              // Puxa os dados atualizados silenciosamente (sem dar refresh na página inteira)
+              fetchEssentialData().catch(e => console.error("Erro no sync de retorno:", e));
+          }
+      };
+
+      // Listener para quando o usuário alterna abas ou liga/desliga a tela
+      document.addEventListener('visibilitychange', handleAppWakeUp);
+      // Listener para quando o navegador ganha o foco do sistema operacional
+      window.addEventListener('focus', handleAppWakeUp);
+
+      return () => {
+          document.removeEventListener('visibilitychange', handleAppWakeUp);
+          window.removeEventListener('focus', handleAppWakeUp);
+      };
+  }, []); 
+  // ===========================================================================
+
+
   // ---------------------------------------------------------------------------
   // MANIPULADORES DE DADOS (HANDLERS)
   // ---------------------------------------------------------------------------
