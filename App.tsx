@@ -347,6 +347,21 @@ const App: React.FC = () => {
       }
   });
   const currentUserRef = useRef<User | null>(null);
+  useEffect(() => {
+      // Se não houver usuário logado, não faz nada
+      if (!currentUserRef.current) return;
+
+      // Cria um relógio que roda a cada 15 segundos (15000 milissegundos)
+      const pollingInterval = setInterval(() => {
+          // Só busca se o app estiver aberto e visível na tela do celular
+          if (document.visibilityState === 'visible') {
+              fetchEssentialData().catch(e => console.error("Erro no polling de segurança:", e));
+          }
+      }, 15000);
+
+      // Limpa o relógio se o componente for desmontado
+      return () => clearInterval(pollingInterval);
+  }, []);
   
   useEffect(() => { 
     currentUserRef.current = currentUser; 
@@ -588,6 +603,17 @@ const App: React.FC = () => {
         return [incomingOrder, ...prevOrders].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
     } 
                   if (payload.eventType === 'UPDATE') {
+    
+    // --- COLE ESTE BLOCO AQUI ---
+    // ALERTA SONORO PARA O MOTOBOY QUANDO CAIR CORRIDA
+    if (currentUser.role === 'courier' && existing.status !== 'waiting_courier' && incomingOrder.status === 'waiting_courier') {
+        new Audio(somPedido).play().catch(() => {});
+        showInAppNotification(
+            'Nova Corrida! 🛵', 
+            `Corrida liberada para ${incomingOrder.deliveryAddress?.neighborhood || 'sua região'}!`, 
+            '🛵'
+        );
+    }
                       if (existing.status !== incomingOrder.status || existing.paymentStatus !== incomingOrder.paymentStatus) {
                           if (currentUser.role === 'client') {
                               if (incomingOrder.deliveryMethod === 'delivery' && existing.status !== 'delivering' && incomingOrder.status === 'delivering') {
