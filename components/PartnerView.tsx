@@ -3288,41 +3288,21 @@ delete updated.mapLink;
                         </div>
 
                         <div className="border-t border-gray-100 pt-6">
-    <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-        <Truck className="w-5 h-5 text-gray-500" /> Logística e Taxas
-    </h3>
-    
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div>
-            <label className="text-sm font-bold text-gray-700">Pedido Mínimo (R$)</label>
-            <input 
-                type="number"
-                value={(localCompany as any).min_order_value || 0} 
-                onChange={e => setLocalCompany({...localCompany, min_order_value: parseFloat(e.target.value) || 0})}
-                className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" 
-                placeholder="Ex: 20.00"
-            />
-        </div>
-        <div>
-            <label className="text-sm font-bold text-gray-700">Raio de Entrega (km)</label>
-            <input 
-                type="number"
-                value={localCompany.deliveryRadiusKm || ''} 
-                onChange={e => setLocalCompany({...localCompany, deliveryRadiusKm: parseFloat(e.target.value)})}
-                className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" 
-            />
-        </div>
-        <div>
-            <label className="text-sm font-bold text-gray-700">Taxa Própria Padrão (R$)</label>
-            <input 
-                type="number"
-                value={localCompany.ownDeliveryFee || 0} 
-                onChange={e => setLocalCompany({...localCompany, ownDeliveryFee: parseFloat(e.target.value)})}
-                className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" 
-                placeholder="Ex: 5.00"
-            />
-        </div>
-    </div>
+                            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                                <Truck className="w-5 h-5 text-gray-500" /> Logística e Taxas
+                            </h3>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                                <div>
+                                    <label className="text-sm font-bold text-gray-700">Pedido Mínimo (R$)</label>
+                                    <input 
+                                        type="number"
+                                        value={(localCompany as any).min_order_value || 0} 
+                                        onChange={e => setLocalCompany({...localCompany, min_order_value: parseFloat(e.target.value) || 0})}
+                                        className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5" 
+                                        placeholder="Ex: 20.00"
+                                    />
+                                </div>
                                 <div>
                                     <label className="text-sm font-bold text-gray-700">Raio de Entrega (km)</label>
                                     <input 
