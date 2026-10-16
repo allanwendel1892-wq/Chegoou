@@ -897,20 +897,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
     company, orders, products, updateOrderStatus, updateCompany, onAddProduct, onUpdateProduct, onDeleteProduct, onLogout,
     chats, onSendMessage, onUpdateFullOrder, onDeleteOrder, onTogglePayment
 }) => {
-  const [view, setView] = useState<ViewState>(() => {
-    const savedView = localStorage.getItem('partner_last_view') as ViewState | null;
-    
-    // Se a loja tem PIN, sempre força a volta para o PDV por segurança ao recarregar
-    if (company.adminPin) return ViewState.POS; 
-    
-    return savedView || ViewState.DASHBOARD;
-});
-
-useEffect(() => {
-    if (view) {
-        localStorage.setItem('partner_last_view', view);
-    }
-}, [view]);
+  const [view, setView] = useState<ViewState>(company.adminPin ? ViewState.POS : ViewState.DASHBOARD);
   const [isUnlocked, setIsUnlocked] = useState(!company.adminPin);
   const [pinModalOpen, setPinModalOpen] = useState(false);
   const [pendingView, setPendingView] = useState<ViewState | null>(null);
