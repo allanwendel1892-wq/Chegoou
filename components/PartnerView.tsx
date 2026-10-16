@@ -357,7 +357,7 @@ const OrderCard = React.memo(function OrderCard({ order, status, orderChats, pro
                   </div>
               ) : pMethod.includes('pix') ? (
                   <div className="bg-teal-100 text-teal-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-teal-200 w-fit">
-                      <svg className="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-4.33-6.027l2.997 2.998 2.062-2.064-2.997-2.997 2.997-2.998-2.063-2.063-2.996 2.997-2.998-2.997-2.063 2.063 2.997 2.998-2.997 2.063 2.064 2.998-2.998z"/></svg>
+                      <svg className="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-4.33-6.027 l 2.997 2.998 2.062 -2.064 -2.997 -2.997 2.997 -2.998 -2.063 -2.063 -2.996 2.997 -2.998 -2.997 -2.063 2.063 2.997 2.998 -2.997 2.063 2.064 2.998 -2.998 z"/></svg>
                       Pix
                   </div>
               ) : pMethod.includes('card') || pMethod.includes('cartao') || pMethod.includes('cartão') ? (
