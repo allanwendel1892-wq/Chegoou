@@ -364,7 +364,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ companyId }) => {
         if (isNaN(d.getTime())) return null;
         const lp = localParts(d);
         const items = parseJson(o.items);
-        const addr = parseJson(o.pickupAddress) || {};
+        const addr = parseJson(o.deliveryAddress) || {};
         const neighRaw = String(addr.neighborhood ?? '').trim();
         const m = String(o.deliveryMethod ?? '').toLowerCase();
         const method: POrder['method'] =
