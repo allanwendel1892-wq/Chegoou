@@ -1,38 +1,24 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   ArrowUpRight, ArrowDownRight, DollarSign, ShoppingBag, 
-  Sparkles, Activity, Calendar, Package, ShoppingCart, Calculator, Loader2
+  Activity, Calendar, MapPin, Clock, Users, TrendingUp, TrendingDown, Minus
 } from 'lucide-react';
-import { SalesHistoryItem, Order } from '../types';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, 
+  LineChart, Line, PieChart, Pie, Cell 
+} from 'recharts';
 import { supabase } from '../services/supabaseClient';
-
-export interface Composition {
-  id: string;
-  reference_id: string; 
-  inventory_item_id: string;
-  amount_needed: number;
-  companyId?: string;
-}
-
-export interface InventoryItem {
-  id: string;
-  name: string;
-  category: string;
-  unit: string;
-  current_stock: number;
-  min_stock: number;
-  cost_price: number;
-  companyId?: string;
-}
 
 interface DashboardViewProps {
   companyId: string;
 }
 
-const MARGEM_SEGURANCA = 1.20; // 20% de margem
+const COLORS = ['#4f46e5', '#ec4899', '#f59e0b', '#10b981', '#6366f1', '#f43f5e', '#8b5cf6', '#14b8a6'];
 
 const StatCard = ({ title, value, icon: Icon, trend, trendValue, trendDesc, colorClass }: any) => {
   const isPositive = trend === 'up';
+  const isNeutral = trend === 'neutral';
+  
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 transition-all hover:shadow-md">
       <div className="flex justify-between items-start">
@@ -45,8 +31,8 @@ const StatCard = ({ title, value, icon: Icon, trend, trendValue, trendDesc, colo
         </div>
       </div>
       {trendValue && (
-        <div className={`flex items-center mt-4 text-sm font-medium ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
-          {isPositive ? <ArrowUpRight className="w-4 h-4 mr-1" /> : <ArrowDownRight className="w-4 h-4 mr-1" />}
+        <div className={`flex items-center mt-4 text-sm font-medium ${isPositive ? 'text-green-600' : isNeutral ? 'text-gray-500' : 'text-red-600'}`}>
+          {isPositive ? <ArrowUpRight className="w-4 h-4 mr-1" /> : isNeutral ? <Minus className="w-4 h-4 mr-1" /> : <ArrowDownRight className="w-4 h-4 mr-1" />}
           <span>{trendValue}</span>
           <span className="text-gray-400 ml-1 font-normal">{trendDesc}</span>
         </div>
@@ -56,42 +42,31 @@ const StatCard = ({ title, value, icon: Icon, trend, trendValue, trendDesc, colo
 };
 
 const DashboardView: React.FC<DashboardViewProps> = ({ companyId }) => {
-  const [timeRange, setTimeRange] = useState('7days');
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [compositions, setCompositions] = useState<Composition[]>([]);
-  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [timeRange, setTimeRange] = useState('30days');
+  const [orders, setOrders] = useState<any[]>([]);
+  const [totalUsersCount, setTotalUsersCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
-  // Busca autônoma e segura de dados vinculada estritamente ao ID do restaurante
+  // Busca de Dados do Supabase
   useEffect(() => {
     if (!companyId) return;
 
     const fetchDashboardData = async () => {
       setLoading(true);
       try {
-        const [ordersRes, compRes, invRes] = await Promise.all([
+        const [ordersRes, usersRes] = await Promise.all([
           supabase.from('orders').select('*').eq('companyId', companyId),
-          supabase.from('compositions').select('*').eq('companyId', companyId),
-          supabase.from('inventory_items').select('*').eq('companyId', companyId)
+          supabase.from('users').select('phone').eq('companyId', companyId)
         ]);
 
         if (ordersRes.data) setOrders(ordersRes.data);
-        if (compRes.data) setCompositions(compRes.data);
-        if (invRes.data) {
-          const mappedInventory: InventoryItem[] = invRes.data.map((item: any) => ({
-            id: item.id,
-            name: item.name,
-            category: item.category,
-            unit: item.unit,
-            current_stock: item.current_stock ?? item.currentStock ?? 0,
-            min_stock: item.min_stock ?? item.minStock ?? 0,
-            cost_price: item.cost_price ?? item.costPrice ?? 0,
-            companyId: item.companyId
-          }));
-          setInventoryItems(mappedInventory);
+        if (usersRes.data) {
+          // Conta usuários únicos com base no telefone
+          const uniquePhones = new Set(usersRes.data.map(u => u.phone).filter(Boolean));
+          setTotalUsersCount(uniquePhones.size);
         }
       } catch (error) {
-        console.error("Erro ao carregar dados independentes do dashboard:", error);
+        console.error("Erro ao carregar dados do dashboard:", error);
       } finally {
         setLoading(false);
       }
@@ -100,271 +75,441 @@ const DashboardView: React.FC<DashboardViewProps> = ({ companyId }) => {
     fetchDashboardData();
   }, [companyId]);
 
-  // Cálculo dinâmico do histórico de vendas com base nos pedidos próprios da loja
-  const salesData: SalesHistoryItem[] = useMemo(() => {
-    const grouped: Record<string, { revenue: number, count: number }> = {};
-    orders.forEach(o => {
-      if (['delivered', 'delivering', 'ready', 'preparing', 'pending'].includes(o.status)) {
-        const dateObj = new Date(o.timestamp);
-        if (!isNaN(dateObj.getTime())) {
-          const dateKey = dateObj.toLocaleDateString('en-CA');
-          if (!grouped[dateKey]) grouped[dateKey] = { revenue: 0, count: 0 };
-          grouped[dateKey].revenue += o.total || 0;
-          grouped[dateKey].count += 1;
-        }
-      }
-    });
-    return Object.keys(grouped).map(date => ({
-      date,
-      revenue: grouped[date].revenue,
-      ordersCount: grouped[date].count
-    })).sort((a, b) => a.date.localeCompare(b.date));
-  }, [orders]);
-
-  // FILTRO CENTRAL E CONTAGEM DE DIAS PARA MÉDIA
-  const { filteredOrders, filteredSales, diasNoFiltro } = useMemo(() => {
+  // MOTOR DE CÁLCULOS E FILTROS (useMemo para performance)
+  const analytics = useMemo(() => {
     const now = new Date();
-    let dataLimite = new Date(0); 
-    let dias = 7;
-
+    let dataLimite = new Date(0);
+    
     if (timeRange === '7days') {
-      dataLimite = new Date();
-      dataLimite.setDate(now.getDate() - 7);
-      dataLimite.setHours(0, 0, 0, 0);
-      dias = 7;
+      dataLimite = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
     } else if (timeRange === '15days') {
-      dataLimite = new Date();
-      dataLimite.setDate(now.getDate() - 15);
-      dataLimite.setHours(0, 0, 0, 0);
-      dias = 15;
-    } else if (timeRange === 'month') {
-      dataLimite = new Date(now.getFullYear(), now.getMonth(), 1); 
-      dias = Math.max(1, Math.ceil((now.getTime() - dataLimite.getTime()) / (1000 * 60 * 60 * 24)));
-    } else if (timeRange === 'all') {
-      dataLimite = new Date(0);
-      dias = 30; 
+      dataLimite = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 15);
+    } else if (timeRange === '30days') {
+      dataLimite = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
     }
 
-    const getSafeDate = (item: any) => {
-      const rawDate = item.created_at || item.createdAt || item.date || item.timestamp;
-      if (rawDate) {
-        const parsed = new Date(rawDate);
-        if (!isNaN(parsed.getTime())) return parsed;
-      }
-      if (item.id && typeof item.id === 'string' && item.id.includes('-')) {
-        const tsMatch = item.id.match(/\d{13}/);
-        if (tsMatch) return new Date(parseInt(tsMatch[0]));
-      }
-      return new Date(0);
-    };
+    const filteredOrders = orders.filter(o => {
+      const orderDate = new Date(o.timestamp || o.created_at);
+      return orderDate >= dataLimite;
+    });
 
-    const filteredOrd = orders.filter(order => getSafeDate(order) >= dataLimite);
-    const filteredSD = salesData.filter(sale => getSafeDate(sale) >= dataLimite);
+    // 1. Visão Geral (Financeiro)
+    let totalRevenue = 0;
+    const validOrders = filteredOrders.filter(o => !['cancelled', 'rejected'].includes(o.status));
+    
+    validOrders.forEach(o => {
+      totalRevenue += Number(o.total || 0);
+    });
+    const avgTicket = validOrders.length > 0 ? totalRevenue / validOrders.length : 0;
 
-    if (timeRange === 'all' && filteredOrd.length > 0) {
-      const oldestDate = Math.min(...filteredOrd.map(o => getSafeDate(o).getTime()));
-      dias = Math.max(1, Math.ceil((now.getTime() - oldestDate) / (1000 * 60 * 60 * 24)));
+    // 2. Análise de Tendência Diária (Faturamento) e Regressão Linear
+    const dailySalesMap: Record<string, number> = {};
+    validOrders.forEach(o => {
+      const dateStr = new Date(o.timestamp || o.created_at).toLocaleDateString('pt-BR');
+      dailySalesMap[dateStr] = (dailySalesMap[dateStr] || 0) + Number(o.total || 0);
+    });
+
+    const dailySalesChart = Object.entries(dailySalesMap)
+      .map(([date, revenue]) => ({ date, revenue }))
+      .reverse(); // Garante ordem cronológica dependendo de como veio do banco
+
+    // Regressão Linear Simples para Tendência
+    let trendStatus = 'Estacionado';
+    let slope = 0;
+    if (dailySalesChart.length > 1) {
+      let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+      const n = dailySalesChart.length;
+      dailySalesChart.forEach((d, i) => {
+        sumX += i;
+        sumY += d.revenue;
+        sumXY += i * d.revenue;
+        sumX2 += i * i;
+      });
+      slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+      if (slope > 15) trendStatus = 'Alta';
+      else if (slope < -15) trendStatus = 'Baixa';
     }
 
-    return { filteredOrders: filteredOrd, filteredSales: filteredSD, diasNoFiltro: dias };
-  }, [orders, salesData, timeRange]);
+    // 3. Funil de Clientes
+    const activeCustomersMap: Record<string, { name: string, spent: number, orders: number }> = {};
+    let deliveryCount = 0;
+    let pickupCount = 0;
 
-  // 1. Cálculos de Visão Geral
-  const stats = useMemo(() => {
-    const totalRevenue = filteredSales.reduce((acc, curr) => acc + curr.revenue, 0);
-    const totalOrders = filteredSales.reduce((acc, curr) => acc + curr.ordersCount, 0);
-    const aiSalesCount = filteredOrders.filter(o => o.id && o.id.startsWith('ord-ia')).length;
-    const manualSalesCount = filteredOrders.length - aiSalesCount;
-    const avgTicket = totalOrders > 0 ? (totalRevenue / totalOrders) : 0;
+    validOrders.forEach(o => {
+      // Clientes
+      const phone = o.customerPhone || 'Desconhecido';
+      if (!activeCustomersMap[phone]) {
+        activeCustomersMap[phone] = { name: o.customerName || 'Cliente Sem Nome', spent: 0, orders: 0 };
+      }
+      activeCustomersMap[phone].spent += Number(o.total || 0);
+      activeCustomersMap[phone].orders += 1;
 
-    return { totalRevenue, totalOrders, aiSalesCount, manualSalesCount, avgTicket };
-  }, [filteredSales, filteredOrders]);
+      // Delivery vs Retirada
+      if (o.deliveryMethod === 'delivery') deliveryCount++;
+      else pickupCount++;
+    });
 
-  // 2. MOTOR DINÂMICO DE ESTOQUE
-  const previsaoInsumos = useMemo(() => {
-    const demandaSabores: Record<string, number> = {};
+    const uniqueCustomersPeriod = Object.keys(activeCustomersMap).filter(k => k !== 'Desconhecido').length;
+    const allTimeUniqueOrderingCustomers = new Set(orders.map(o => o.customerPhone).filter(Boolean)).size;
+    const globalConversionRate = totalUsersCount > 0 ? (allTimeUniqueOrderingCustomers / totalUsersCount) * 100 : 0;
 
-    filteredOrders.forEach(pedido => {
-      const items = typeof pedido.items === 'string' ? JSON.parse(pedido.items) : pedido.items;
-      if (!items) return;
+    const topCustomers = Object.values(activeCustomersMap)
+      .sort((a, b) => b.spent - a.spent)
+      .slice(0, 5);
 
-      items.forEach((item: any) => {
-        if (!item.options) return;
-        item.options.forEach((opt: any) => {
-          if (opt.groupName === 'PIZZA' || opt.groupName === 'Sabor' || opt.groupName === 'Borda') {
-            const referenciaSabor = opt.optionName; 
-            const fracao = opt.name.includes('1/2') ? 0.5 : 1.0;
-            demandaSabores[referenciaSabor] = (demandaSabores[referenciaSabor] || 0) + (item.quantity * fracao);
-          }
-        });
+    // 4. Ranking de Produtos e Sabores (JSONB Parse)
+    const productMap: Record<string, { qtd: number, revenue: number }> = {};
+    const flavorMap: Record<string, number> = {};
+
+    validOrders.forEach(o => {
+      const items = typeof o.items === 'string' ? JSON.parse(o.items) : o.items;
+      if (!items || !Array.isArray(items)) return;
+
+      items.forEach(item => {
+        const pName = item.productName || 'Produto Desconhecido';
+        const pQtd = Number(item.quantity || 1);
+        const pPrice = Number(item.price || 0) * pQtd;
+
+        if (!productMap[pName]) productMap[pName] = { qtd: 0, revenue: 0 };
+        productMap[pName].qtd += pQtd;
+        productMap[pName].revenue += pPrice;
+
+        const options = typeof item.selectedOptions === 'string' ? JSON.parse(item.selectedOptions) : item.selectedOptions;
+        if (options && Array.isArray(options)) {
+          options.forEach(opt => {
+            const flavorName = opt.optionName;
+            if (flavorName) {
+              flavorMap[flavorName] = (flavorMap[flavorName] || 0) + pQtd;
+            }
+          });
+        }
       });
     });
 
-    const consumoInsumosBase: Record<string, number> = {};
+    const topProducts = Object.entries(productMap)
+      .map(([name, data]) => ({ name, ...data }))
+      .sort((a, b) => b.qtd - a.qtd)
+      .slice(0, 5);
 
-    Object.entries(demandaSabores).forEach(([saborId, qtdVendida]) => {
-      const receita = compositions.filter(c => c.reference_id === saborId);
+    const topFlavors = Object.entries(flavorMap)
+      .map(([name, qtd]) => ({ name, qtd }))
+      .sort((a, b) => b.qtd - a.qtd)
+      .slice(0, 6);
+
+    // 5. Horários de Pico (Ajuste de Fuso Horário de 3h)
+    const peakHoursMap: Record<string, number> = {};
+    validOrders.forEach(o => {
+      const dateObj = new Date(o.timestamp || o.created_at);
+      // Ajuste: 21h no banco = 18h real (subtrai 3 horas)
+      dateObj.setHours(dateObj.getHours() - 3); 
+      const hour = dateObj.getHours();
+      const hourStr = `${hour.toString().padStart(2, '0')}:00`;
+      peakHoursMap[hourStr] = (peakHoursMap[hourStr] || 0) + 1;
+    });
+
+    const peakHoursChart = Object.entries(peakHoursMap)
+      .map(([time, orders]) => ({ time, orders }))
+      .sort((a, b) => a.time.localeCompare(b.time));
+
+    // 6. Inteligência Geográfica (Bairros)
+    const neighborhoodMap: Record<string, { orders: number, revenue: number }> = {};
+    validOrders.forEach(o => {
+      let address = null;
+      if (o.pickupAddress) {
+        address = typeof o.pickupAddress === 'string' ? JSON.parse(o.pickupAddress) : o.pickupAddress;
+      }
       
-      receita.forEach(ingrediente => {
-        const totalGasto = ingrediente.amount_needed * qtdVendida;
-        consumoInsumosBase[ingrediente.inventory_item_id] = (consumoInsumosBase[ingrediente.inventory_item_id] || 0) + totalGasto;
-      });
+      const nbhd = (address && address.neighborhood) ? address.neighborhood : 'Balcão/Retirada';
+      if (!neighborhoodMap[nbhd]) neighborhoodMap[nbhd] = { orders: 0, revenue: 0 };
+      
+      neighborhoodMap[nbhd].orders += 1;
+      neighborhoodMap[nbhd].revenue += Number(o.total || 0);
     });
 
-    const listaFinal = [];
-    let custoTotalInvestimento = 0;
-
-    Object.entries(consumoInsumosBase).forEach(([inventoryId, consumoTotalNoFiltro]) => {
-      const itemEstoque = inventoryItems.find(i => i.id === inventoryId);
-      if (!itemEstoque) return; 
-
-      const consumoDiario = consumoTotalNoFiltro / diasNoFiltro;
-      const projecao7Dias = consumoDiario * 7;
-      const metaConsumoSemanal = projecao7Dias * MARGEM_SEGURANCA;
-      const faltaComprar = Math.max(0, metaConsumoSemanal - itemEstoque.current_stock);
-      const custoEstimado = faltaComprar * Number(itemEstoque.cost_price);
-
-      custoTotalInvestimento += custoEstimado;
-
-      listaFinal.push({
-        id: itemEstoque.id,
-        nome: itemEstoque.name,
-        unidade: itemEstoque.unit,
-        estoqueAtual: Number(itemEstoque.current_stock),
-        consumoDiario: consumoDiario,
-        metaConsumo: metaConsumoSemanal,
-        faltaComprar: faltaComprar,
-        custoEstimado: custoEstimado
-      });
-    });
+    const topNeighborhoods = Object.entries(neighborhoodMap)
+      .map(([neighborhood, data]) => ({
+        neighborhood,
+        orders: data.orders,
+        revenue: data.revenue,
+        avgTicket: data.orders > 0 ? data.revenue / data.orders : 0
+      }))
+      .sort((a, b) => b.orders - a.orders);
 
     return {
-      lista: listaFinal.sort((a, b) => b.custoEstimado - a.custoEstimado),
-      custoTotalInvestimento
+      totalRevenue,
+      totalOrders: validOrders.length,
+      avgTicket,
+      dailySalesChart,
+      trendStatus,
+      slope,
+      topProducts,
+      topFlavors,
+      peakHoursChart,
+      topNeighborhoods,
+      deliveryVsPickup: [
+        { name: 'Entrega (Delivery)', value: deliveryCount },
+        { name: 'Retirada Local', value: pickupCount }
+      ],
+      uniqueCustomersPeriod,
+      globalConversionRate,
+      topCustomers
     };
-
-  }, [filteredOrders, compositions, inventoryItems, diasNoFiltro]);
+  }, [orders, timeRange, totalUsersCount]);
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-8 h-8 animate-spin text-red-600" />
+      <div className="flex items-center justify-center h-64 text-indigo-600">
+        <Activity className="w-8 h-8 animate-spin" />
+        <span className="ml-3 font-medium text-lg">Analisando Inteligência de Negócio...</span>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
+    <div className="space-y-6 pb-12">
+      {/* Cabeçalho */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-red-50 rounded-lg">
-            <Activity className="w-6 h-6 text-red-600" />
+          <div className="p-2 bg-indigo-50 rounded-lg">
+            <Activity className="w-6 h-6 text-indigo-600" />
           </div>
-          <h2 className="text-2xl font-bold text-gray-800">Visão Geral</h2>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-800">Panorama do Negócio</h2>
+            <p className="text-sm text-gray-500">Métricas analíticas avançadas e comportamento de vendas.</p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Calendar className="w-4 h-4 text-gray-500" />
           <select 
             value={timeRange}
             onChange={(e) => setTimeRange(e.target.value)}
-            className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-sm text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-red-500 cursor-pointer"
+            className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-sm text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
           >
-            <option value="all">Geral</option>
-            <option value="month">Este Mês</option>
+            <option value="all">Todo o Período</option>
+            <option value="30days">Últimos 30 dias</option>
             <option value="15days">Últimos 15 dias</option>
             <option value="7days">Últimos 7 dias</option>
           </select>
         </div>
       </div>
 
-      {/* Stats Cards */}
+      {/* Cartões de KPI */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Receita Total" value={`R$ ${stats.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} icon={DollarSign} trend="up" trendValue="+12.5%" trendDesc="vs. anterior" colorClass="bg-green-50 text-green-600" />
-        <StatCard title="Pedidos Fechados" value={stats.totalOrders} icon={ShoppingBag} trend="up" trendValue="+8.2%" trendDesc="vs. anterior" colorClass="bg-blue-50 text-blue-600" />
-        <StatCard title="Ticket Médio" value={`R$ ${stats.avgTicket.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} icon={Activity} trend="down" trendValue="-2.1%" trendDesc="vs. anterior" colorClass="bg-purple-50 text-purple-600" />
-        <StatCard title="Vendas por IA" value={stats.aiSalesCount} icon={Sparkles} trend="up" trendValue={`${stats.totalOrders > 0 ? Math.round((stats.aiSalesCount / stats.totalOrders) * 100) : 0}%`} trendDesc="do total" colorClass="bg-indigo-50 text-indigo-600" />
+        <StatCard 
+          title="Faturamento Total" 
+          value={`R$ ${analytics.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} 
+          icon={DollarSign} 
+          trend={analytics.slope > 0 ? 'up' : analytics.slope < 0 ? 'down' : 'neutral'} 
+          trendValue={analytics.trendStatus} 
+          trendDesc="Tendência atual" 
+          colorClass="bg-green-50 text-green-600" 
+        />
+        <StatCard 
+          title="Pedidos Fechados" 
+          value={analytics.totalOrders} 
+          icon={ShoppingBag} 
+          trend="neutral" 
+          trendValue={analytics.uniqueCustomersPeriod} 
+          trendDesc="clientes ativos no filtro" 
+          colorClass="bg-blue-50 text-blue-600" 
+        />
+        <StatCard 
+          title="Ticket Médio" 
+          value={`R$ ${analytics.avgTicket.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} 
+          icon={Activity} 
+          colorClass="bg-purple-50 text-purple-600" 
+        />
+        <StatCard 
+          title="Conversão de Cadastros" 
+          value={`${analytics.globalConversionRate.toFixed(1)}%`} 
+          icon={Users} 
+          trend="neutral"
+          trendValue={totalUsersCount}
+          trendDesc="usuários totais cadastrados"
+          colorClass="bg-orange-50 text-orange-600" 
+        />
       </div>
 
-      {/* SEÇÃO: INTELIGÊNCIA DE ESTOQUE INTEGRADA AO BANCO */}
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-          <div>
-            <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-              <Package className="w-5 h-5 text-amber-500" />
-              Inteligência de Reposição
-            </h3>
-            <p className="text-sm text-gray-500 mt-1">
-              Meta baseada na média diária do período filtrado projetada para 1 semana (+20%).
-            </p>
-          </div>
-          
-          {/* Card de Custo Estimado */}
-          <div className="bg-red-50 border border-red-100 px-4 py-3 rounded-lg flex items-center gap-3">
-            <div className="bg-red-100 p-2 rounded-md">
-              <Calculator className="w-5 h-5 text-red-600" />
+      {/* Gráficos Principais */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Gráfico de Tendência (Ocupa 2 colunas) */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 lg:col-span-2">
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-lg font-bold text-gray-800">Curva de Faturamento Diário</h3>
+            <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${
+              analytics.trendStatus === 'Alta' ? 'bg-green-100 text-green-700' : 
+              analytics.trendStatus === 'Baixa' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'
+            }`}>
+              {analytics.trendStatus === 'Alta' ? <TrendingUp className="w-3 h-3"/> : 
+               analytics.trendStatus === 'Baixa' ? <TrendingDown className="w-3 h-3"/> : <Minus className="w-3 h-3"/>}
+              Tendência de {analytics.trendStatus}
             </div>
-            <div>
-              <p className="text-xs text-red-600 font-semibold uppercase tracking-wider">Investimento Necessário</p>
-              <p className="text-xl font-bold text-red-700">
-                R$ {previsaoInsumos.custoTotalInvestimento.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-              </p>
+          </div>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={analytics.dailySalesChart}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                <XAxis dataKey="date" tick={{fontSize: 12, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                <YAxis tick={{fontSize: 12, fill: '#6b7280'}} axisLine={false} tickLine={false} tickFormatter={(v) => `R$${v}`} />
+                <RechartsTooltip formatter={(value: number) => [`R$ ${value.toFixed(2)}`, 'Faturamento']} />
+                <Line type="monotone" dataKey="revenue" stroke="#4f46e5" strokeWidth={3} dot={{ r: 3, fill: '#4f46e5' }} activeDot={{ r: 6 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Gráfico Delivery vs Balcão */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <h3 className="text-lg font-bold text-gray-800 mb-6">Logística de Saída</h3>
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={analytics.deliveryVsPickup} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
+                  {analytics.deliveryVsPickup.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <RechartsTooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-4 flex flex-col gap-2">
+            {analytics.deliveryVsPickup.map((item, idx) => (
+              <div key={idx} className="flex items-center justify-between text-sm">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
+                  <span className="text-gray-600">{item.name}</span>
+                </div>
+                <span className="font-bold text-gray-800">{item.value} pedidos</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Blocos de Dados Inferiores */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+        {/* Produtos e Sabores Mais Vendidos */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-6">
+          <div>
+            <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2 mb-4">
+              <ShoppingBag className="w-5 h-5 text-indigo-500" />
+              Top Produtos Mais Vendidos
+            </h3>
+            <div className="space-y-3">
+              {analytics.topProducts.map((p, i) => (
+                <div key={i} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
+                  <span className="font-medium text-gray-700">{i + 1}. {p.name}</span>
+                  <div className="text-right">
+                    <span className="block font-bold text-indigo-600">{p.qtd} un.</span>
+                    <span className="text-xs text-gray-500">R$ {p.revenue.toFixed(2)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-lg font-bold text-gray-800 mb-4">Top Sabores / Adicionais</h3>
+            <div className="flex flex-wrap gap-2">
+              {analytics.topFlavors.map((f, i) => (
+                <div key={i} className="bg-orange-50 border border-orange-100 text-orange-700 px-3 py-1.5 rounded-full text-sm font-medium flex items-center gap-2">
+                  <span>{f.name}</span>
+                  <span className="bg-white text-orange-600 px-1.5 py-0.5 rounded-full text-xs font-bold">{f.qtd}</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
 
-        <div className="overflow-x-auto border border-gray-200 rounded-lg">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="py-3 px-4 text-sm font-semibold text-gray-600">Insumo</th>
-                <th className="py-3 px-4 text-sm font-semibold text-gray-600">Estoque Atual</th>
-                <th className="py-3 px-4 text-sm font-semibold text-gray-600">Meta (7 Dias+20%)</th>
-                <th className="py-3 px-4 text-sm font-semibold text-red-600 bg-red-50/50">Falta Comprar</th>
-                <th className="py-3 px-4 text-sm font-semibold text-gray-600">Custo (R$)</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {previsaoInsumos.lista.length > 0 ? previsaoInsumos.lista.map((item, idx) => (
-                <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                  <td className="py-3 px-4 text-sm font-medium text-gray-800">
-                    {item.nome}
-                    <div className="text-xs text-gray-400 font-normal mt-0.5">Média/dia: {item.consumoDiario.toFixed(2)} {item.unidade}</div>
-                  </td>
-                  <td className={`py-3 px-4 text-sm font-medium ${item.estoqueAtual <= 0 ? 'text-red-600' : 'text-gray-600'}`}>
-                    {item.estoqueAtual.toFixed(2)} <span className="text-gray-400 text-xs">{item.unidade}</span>
-                  </td>
-                  <td className="py-3 px-4 text-sm text-gray-600">
-                    {item.metaConsumo.toFixed(2)} <span className="text-gray-400 text-xs">{item.unidade}</span>
-                  </td>
-                  <td className="py-3 px-4 text-sm font-bold text-red-600 bg-red-50/30">
-                    {item.faltaComprar > 0 ? (
-                      `${item.faltaComprar.toFixed(2)} ${item.unidade}`
-                    ) : (
-                      <span className="text-green-500 text-xs uppercase bg-green-50 px-2 py-1 rounded">OK</span>
-                    )}
-                  </td>
-                  <td className="py-3 px-4 text-sm font-medium text-gray-700">
-                    {item.custoEstimado > 0 ? `R$ ${item.custoEstimado.toFixed(2)}` : '-'}
-                  </td>
-                </tr>
-              )) : (
-                <tr>
-                  <td colSpan={5} className="py-8 text-center text-gray-500 text-sm">
-                    Nenhuma movimentação de insumos no período selecionado.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        {/* Horários de Pico */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2 mb-6">
+            <Clock className="w-5 h-5 text-blue-500" />
+            Horários de Pico (Hora Local)
+          </h3>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={analytics.peakHoursChart}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                <XAxis dataKey="time" tick={{fontSize: 12, fill: '#6b7280'}} axisLine={false} tickLine={false} />
+                <YAxis tick={{fontSize: 12, fill: '#6b7280'}} axisLine={false} tickLine={false} allowDecimals={false} />
+                <RechartsTooltip cursor={{fill: '#f3f4f6'}} formatter={(value: number) => [value, 'Pedidos']} />
+                <Bar dataKey="orders" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
+
+      </div>
+
+      {/* Tabelas de Cruzamento (Bairros e Clientes) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
-        <div className="mt-4 flex justify-end">
-           <button className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-            <ShoppingCart className="w-4 h-4" />
-            Exportar Lista de Compras
-          </button>
+        {/* Inteligência de Bairros */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2 mb-4">
+            <MapPin className="w-5 h-5 text-red-500" />
+            Mapa de Calor: Bairros
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="py-3 px-4 text-sm font-semibold text-gray-600">Bairro</th>
+                  <th className="py-3 px-4 text-sm font-semibold text-gray-600">Pedidos</th>
+                  <th className="py-3 px-4 text-sm font-semibold text-gray-600">Ticket Médio</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {analytics.topNeighborhoods.slice(0, 7).map((nb, idx) => (
+                  <tr key={idx} className="hover:bg-gray-50">
+                    <td className="py-3 px-4 text-sm font-medium text-gray-800">{nb.neighborhood}</td>
+                    <td className="py-3 px-4 text-sm text-gray-600">{nb.orders}</td>
+                    <td className="py-3 px-4 text-sm font-medium text-green-600">R$ {nb.avgTicket.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
+
+        {/* Melhores Clientes */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2 mb-4">
+            <Users className="w-5 h-5 text-emerald-500" />
+            Ranking de Clientes (Top 5)
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="py-3 px-4 text-sm font-semibold text-gray-600">Cliente</th>
+                  <th className="py-3 px-4 text-sm font-semibold text-gray-600">Frequência</th>
+                  <th className="py-3 px-4 text-sm font-semibold text-gray-600">Gasto Total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {analytics.topCustomers.map((c, idx) => (
+                  <tr key={idx} className="hover:bg-gray-50">
+                    <td className="py-3 px-4 text-sm font-medium text-gray-800">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold">
+                          {idx + 1}
+                        </div>
+                        {c.name}
+                      </div>
+                    </td>
+                    <td className="py-3 px-4 text-sm text-gray-600">{c.orders} pedidos</td>
+                    <td className="py-3 px-4 text-sm font-bold text-emerald-600">R$ {c.spent.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
       </div>
     </div>
   );
