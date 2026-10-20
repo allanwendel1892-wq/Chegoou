@@ -196,20 +196,21 @@ const DashboardView: React.FC<DashboardViewProps> = ({ companyId }) => {
       .sort((a, b) => b.qtd - a.qtd)
       .slice(0, 6);
 
-    // 5. Horários de Pico (Ajuste de Fuso Horário de 3h)
-    const peakHoursMap: Record<string, number> = {};
-    validOrders.forEach(o => {
-      const dateObj = new Date(o.timestamp || o.created_at);
-      // Ajuste: 21h no banco = 18h real (subtrai 3 horas)
-      dateObj.setHours(dateObj.getHours() - 3); 
-      const hour = dateObj.getHours();
-      const hourStr = `${hour.toString().padStart(2, '0')}:00`;
-      peakHoursMap[hourStr] = (peakHoursMap[hourStr] || 0) + 1;
-    });
+    // 5. Horários de Pico (O navegador converte UTC para o fuso local automaticamente)
+const peakHoursMap: Record<string, number> = {};
+validOrders.forEach(o => {
+  if (!o.timestamp && !o.created_at) return;
+  
+  const dateObj = new Date(o.timestamp || o.created_at);
+  const hour = dateObj.getHours(); // Já pega a hora exata no seu fuso local
+  const hourStr = `${hour.toString().padStart(2, '0')}:00`;
+  
+  peakHoursMap[hourStr] = (peakHoursMap[hourStr] || 0) + 1;
+});
 
-    const peakHoursChart = Object.entries(peakHoursMap)
-      .map(([time, orders]) => ({ time, orders }))
-      .sort((a, b) => a.time.localeCompare(b.time));
+const peakHoursChart = Object.entries(peakHoursMap)
+  .map(([time, orders]) => ({ time, orders }))
+  .sort((a, b) => a.time.localeCompare(b.time));
 
     // 6. Inteligência Geográfica (Bairros)
     const neighborhoodMap: Record<string, { orders: number, revenue: number }> = {};
