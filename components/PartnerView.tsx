@@ -11,6 +11,15 @@ import { supabase } from '../services/supabaseClient';
 import POSView from './POSView';
 import HistoryView from './HistoryView';
 import InventoryView, { InventoryItem } from './InventoryView';
+import {
+    PrintConfig,
+    PrintTarget,
+    loadPrintConfig,
+    savePrintConfig,
+    listPrinters,
+    printToConfiguredPrinters,
+    hasAnyPrinterConfigured,
+} from '../services/printService';
 
 // Componente isolado para não quebrar o React
 const InventoryModule = ({ companyId }: { companyId: string }) => {
@@ -911,6 +920,32 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const [deliveryFee, setDeliveryFee] = useState<number>(0);
 
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(false);
+
+  // --- IMPRESSORAS (Cozinha / Caixa) via QZ Tray ---
+  const [printConfig, setPrintConfig] = useState<PrintConfig>(() => loadPrintConfig());
+  const [availablePrinters, setAvailablePrinters] = useState<string[]>([]);
+  const [loadingPrinters, setLoadingPrinters] = useState(false);
+  const [printerError, setPrinterError] = useState('');
+
+  const updatePrintRoute = (target: PrintTarget, patch: Partial<PrintConfig['cashier']>) => {
+      setPrintConfig(prev => {
+          const next = { ...prev, [target]: { ...prev[target], ...patch } };
+          savePrintConfig(next);
+          return next;
+      });
+  };
+
+  const handleDetectPrinters = async () => {
+      setLoadingPrinters(true);
+      setPrinterError('');
+      try {
+          setAvailablePrinters(await listPrinters());
+      } catch (e: any) {
+          setPrinterError('Não foi possível conectar ao QZ Tray. Verifique se ele está instalado e aberto neste computador.');
+      } finally {
+          setLoadingPrinters(false);
+      }
+  };
   // Agrupa os pedidos por status UMA ÚNICA VEZ por render de `orders`, em vez de rodar
   // `orders.filter(...)` inline em cada KanbanColumn (o que gerava uma nova referência de
   // array a cada render do PartnerView e quebrava a memoização das colunas).
@@ -1228,7 +1263,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
               <div style="display:flex; justify-content:space-between; margin-top: 10px; margin-bottom: 5px; align-items: flex-start;">
                   <span style="font-weight:900; font-size: 18px;">${item.quantity}x</span>
                   <span style="flex:1; margin-left: 8px; font-weight:900; font-size: 18px;">${item.productName.toUpperCase()}</span>
-                  <span style="font-weight:bold; font-size: 14px; margin-top: 3px;">R$ ${(item.price * item.quantity).toFixed(2)}</span>
+                  <span class="price" style="font-weight:bold; font-size: 14px; margin-top: 3px;">R$ ${(item.price * item.quantity).toFixed(2)}</span>
               </div>
               ${optionsHtml}
               <div style="border-bottom: 1px dotted #999; margin: 15px 0;"></div>
@@ -1300,20 +1335,20 @@ const PartnerView: React.FC<PartnerViewProps> = ({
                   
                   ${itemsHtml}
                   
-                  <div class="flex" style="font-size: 14px;">
+                  <div class="flex price" style="font-size: 14px;">
                       <span>Subtotal:</span>
                       <span>R$ ${order.subtotal.toFixed(2)}</span>
                   </div>
-                  <div class="flex" style="font-size: 14px;">
+                  <div class="flex price" style="font-size: 14px;">
                       <span>Entrega:</span>
                       <span>R$ ${order.deliveryFee.toFixed(2)}</span>
                   </div>
-                  <div class="flex" style="font-size: 20px; font-weight: 900; margin-top: 10px;">
+                  <div class="flex price" style="font-size: 20px; font-weight: 900; margin-top: 10px;">
                       <span>TOTAL:</span>
                       <span>R$ ${order.total.toFixed(2)}</span>
                   </div>
-                  <div class="line"></div>
-                  <p class="center bold" style="font-size: 18px;">${paymentInfo}</p>
+                  <div class="line price"></div>
+                  <p class="center bold price" style="font-size: 18px;">${paymentInfo}</p>
                   <div class="line"></div>
                   <div style="margin-top: 10px;">
                       ${addressHtml}
@@ -1326,23 +1361,54 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           </html>
        `;
 
-      const iframe = document.createElement('iframe');
-      iframe.style.display = 'none';
-      document.body.appendChild(iframe);
+      // Fallback: impressão pela janela do navegador (impressora padrão do PC)
+      const printViaBrowser = (html: string) => {
+          const iframe = document.createElement('iframe');
+          iframe.style.display = 'none';
+          document.body.appendChild(iframe);
 
-      const iframeDoc = iframe.contentWindow?.document;
-      if (iframeDoc) {
-          iframeDoc.write(htmlContent);
-          iframeDoc.close();
+          const iframeDoc = iframe.contentWindow?.document;
+          if (iframeDoc) {
+              iframeDoc.write(html);
+              iframeDoc.close();
 
-          setTimeout(() => {
-              iframe.contentWindow?.focus();
-              iframe.contentWindow?.print();
               setTimeout(() => {
-                  document.body.removeChild(iframe);
-              }, 2000);
-          }, 500);
+                  iframe.contentWindow?.focus();
+                  iframe.contentWindow?.print();
+                  setTimeout(() => {
+                      document.body.removeChild(iframe);
+                  }, 2000);
+              }, 500);
+          }
+      };
+
+      // Via da COZINHA: mesmo pedido, sem valores (.price oculto) e com faixa de identificação
+      const kitchenHtml = htmlContent
+          .replace('</style>', '.price { display: none !important; }</style>')
+          .replace('<div class="center">', '<div class="center"><h2 style="border: 3px solid #000; padding: 4px; margin: 0 0 8px 0;">*** COZINHA ***</h2>');
+
+      // Via do CAIXA: pedido completo, com valores
+      const cashierHtml = htmlContent.replace('<div class="center">', '<div class="center"><h3 style="margin: 0 0 6px 0;">VIA DO CAIXA</h3>');
+
+      const config = loadPrintConfig();
+
+      if (!hasAnyPrinterConfigured(config)) {
+          // Nenhuma impressora configurada: mantém o comportamento antigo
+          printViaBrowser(htmlContent);
+          return;
       }
+
+      // Envia para as impressoras configuradas ao mesmo tempo
+      printToConfiguredPrinters(config, [
+          { target: 'cashier', html: cashierHtml },
+          { target: 'kitchen', html: kitchenHtml },
+      ]).then(failures => {
+          if (failures.length > 0) {
+              const names = failures.map(f => (f.target === 'kitchen' ? 'Cozinha' : 'Caixa')).join(' e ');
+              console.error('Falha de impressão:', failures);
+              alert(`Não foi possível imprimir em: ${names}.\n\nVerifique se o QZ Tray está aberto e se a impressora está ligada.`);
+          }
+      });
   }, [products, company.name]);
 
   useEffect(() => {
@@ -3376,6 +3442,67 @@ delete updated.mapLink;
                                         ))}
                                     </div>
                                 )}
+                            </div>
+                        </div>
+
+                        <div className="border-t border-gray-100 pt-6">
+                            <h3 className="font-bold text-gray-800 mb-1 flex items-center gap-2">
+                                <Printer className="w-5 h-5 text-gray-500" /> Impressoras (Cozinha e Caixa)
+                            </h3>
+                            <p className="text-xs text-gray-500 mb-4 leading-relaxed">
+                                Configuração salva <strong>neste computador</strong>. Requer o app QZ Tray aberto (qz.io/download). A cozinha recebe a via sem valores; o caixa recebe a via completa. Sem nenhuma impressora ativa, o sistema usa a impressão normal do navegador.
+                            </p>
+
+                            <button
+                                onClick={handleDetectPrinters}
+                                disabled={loadingPrinters}
+                                className="mb-4 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-bold hover:bg-black disabled:opacity-50 flex items-center gap-2"
+                            >
+                                {loadingPrinters ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                                Detectar impressoras
+                            </button>
+                            {printerError && <p className="text-sm text-red-600 font-medium mb-3">{printerError}</p>}
+
+                            <div className="space-y-3">
+                                {([
+                                    { key: 'kitchen' as PrintTarget, label: 'Cozinha (sem valores)' },
+                                    { key: 'cashier' as PrintTarget, label: 'Caixa (via completa)' },
+                                ]).map(({ key, label }) => {
+                                    const route = printConfig[key];
+                                    const options = Array.from(new Set([...availablePrinters, ...(route.printerName ? [route.printerName] : [])]));
+                                    return (
+                                        <div key={key} className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+                                            <label className="flex items-center gap-2 cursor-pointer mb-3">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={route.enabled}
+                                                    onChange={e => updatePrintRoute(key, { enabled: e.target.checked })}
+                                                    className="w-4 h-4 text-red-600 rounded focus:ring-red-500"
+                                                />
+                                                <span className="text-sm font-bold text-gray-700">{label}</span>
+                                            </label>
+                                            <div className="grid grid-cols-[1fr_90px] gap-3">
+                                                <select
+                                                    value={route.printerName}
+                                                    onChange={e => updatePrintRoute(key, { printerName: e.target.value })}
+                                                    className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"
+                                                >
+                                                    <option value="">Selecione a impressora</option>
+                                                    {options.map(p => <option key={p} value={p}>{p}</option>)}
+                                                </select>
+                                                <input
+                                                    type="number"
+                                                    min={1}
+                                                    max={5}
+                                                    value={route.copies}
+                                                    onChange={e => updatePrintRoute(key, { copies: Math.max(1, parseInt(e.target.value) || 1) })}
+                                                    className="border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                                                    title="Número de cópias"
+                                                />
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
 
