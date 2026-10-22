@@ -17,7 +17,8 @@
     "@google/genai": "^1.35.0",
     "lucide-react": "^0.562.0",
     "recharts": "^3.6.0",
-    "@supabase/supabase-js": "^2.90.1"
+    "@supabase/supabase-js": "^2.90.1",
+    "qz-tray": "^2.2.4"
   },
   "devDependencies": {
     "vite": "^6.2.0",
