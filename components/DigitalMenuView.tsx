@@ -207,6 +207,16 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
         return Math.max(0, total);
     }, [productTotal, activeDeliveryFee, discountAmount]);
 
+    // --- PEDIDO MÍNIMO (apenas para entrega, valor específico de cada restaurante) ---
+    const minOrderValue = useMemo(() => {
+        const raw = (company as any).min_order_value ?? (company as any).minOrderValue;
+        const parsed = Number(raw);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    }, [company]);
+
+    const isBelowMinOrder = deliveryMethod === 'delivery' && minOrderValue > 0 && productTotal < minOrderValue;
+    const missingForMinOrder = isBelowMinOrder ? minOrderValue - productTotal : 0;
+
     // --- VALIDAÇÃO E APLICAÇÃO DIRETA NO SUPABASE (isActive) ---
     const handleApplyCoupon = async () => {
         setCouponMessage(null);
@@ -349,6 +359,9 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
         if (step === 3 && deliveryMethod === 'delivery') {
             if (!neighborhood.trim()) return "Selecione o bairro para entrega.";
             if (!street.trim() || !number.trim()) return "Preencha a rua e o número para entrega.";
+        }
+        if ((step === 3 || step === 4) && isBelowMinOrder) {
+            return `Pedido mínimo para entrega: R$ ${minOrderValue.toFixed(2)}. Adicione mais R$ ${missingForMinOrder.toFixed(2)} ou escolha "Vou Retirar".`;
         }
         if (step === 4 && paymentMethod === 'cash' && changeAmount) {
             const changeForValue = parseFloat(changeAmount.replace(',', '.'));
@@ -733,6 +746,14 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                                 </button>
                                             )}
                                         </div>
+                                        {deliveryMethod === 'delivery' && minOrderValue > 0 && (
+                                            <div className={`mb-4 text-xs font-bold rounded-lg px-3 py-2.5 flex items-center gap-2 border ${isBelowMinOrder ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
+                                                {isBelowMinOrder ? <AlertTriangle className="w-4 h-4 shrink-0" /> : <CheckCircle className="w-4 h-4 shrink-0" />}
+                                                {isBelowMinOrder
+                                                    ? `Pedido mínimo para entrega: R$ ${minOrderValue.toFixed(2)} (faltam R$ ${missingForMinOrder.toFixed(2)})`
+                                                    : `Pedido mínimo para entrega atingido (R$ ${minOrderValue.toFixed(2)})`}
+                                            </div>
+                                        )}
                                         {deliveryMethod === 'delivery' ? (
                                             <div className="space-y-3 animate-fade-in">
                                                 <select value={neighborhood} onChange={e => setNeighborhood(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-3 text-sm outline-none focus:border-red-400 text-gray-700">
