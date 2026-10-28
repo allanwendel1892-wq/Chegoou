@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Company, Product, Order, ViewState, Address, ProductGroup, ProductOption, ChatMessage, SalesHistoryItem, WithdrawalRequest, Coupon, User } from '../types';
 import { enhanceProductImage } from '../services/geminiService';
-import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle, ArrowRight, Lock, Unlock, Banknote, AlertCircle, Info, MessageSquare, CreditCard, Printer, TrendingUp, Copy, Link2, StickyNote } from 'lucide-react';
+import { Plus, Image as ImageIcon, Sparkles, Clock, MapPin, Truck, Check, X, GripVertical, Settings2, ChefHat, Utensils, DollarSign, Store, Calendar, Upload, Save, Disc, Trash2, LogOut, Layers, ChevronDown, ChevronUp, MessageCircle, Send, ArrowLeft, Edit, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, CheckCircle, Camera, AlertTriangle, Wand2, ShoppingBag, Bike, Wallet, XCircle, ArrowRight, Lock, Unlock, Banknote, AlertCircle, Info, MessageSquare, CreditCard, Printer, TrendingUp, Copy, Link2, StickyNote, QrCode } from 'lucide-react';
 import { uploadProductImage, uploadCompanyImage } from '../services/imageUpload';
 import DashboardView from './DashboardView';
 import WhatsAppBotView from './WhatsAppBotView';
@@ -366,7 +366,7 @@ const OrderCard = React.memo(function OrderCard({ order, status, orderChats, pro
                   </div>
               ) : pMethod.includes('pix') ? (
                   <div className="bg-teal-100 text-teal-800 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 border border-teal-200 w-fit">
-                      <svg className="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-4.33-6.027l2.997 2.998 2.062-2.064-2.997-2.997 2.997-2.998-2.063-2.063-2.996 2.997-2.998-2.997-2.063 2.063 2.997 2.998-2.997 2.063 2.064 2.998-2.998z"/></svg>
+                      <QrCode className="w-3 h-3 shrink-0" />
                       Pix
                   </div>
               ) : pMethod.includes('card') || pMethod.includes('cartao') || pMethod.includes('cartão') ? (
@@ -2034,12 +2034,15 @@ const PartnerView: React.FC<PartnerViewProps> = ({
         try {
             const { error } = await supabase
                 .from('companies') 
-                .update({ neighborhood_fees: (updatedCompany as any).neighborhoodFees })
+                .update({
+                    neighborhood_fees: (updatedCompany as any).neighborhoodFees,
+                    min_order_value: Number((updatedCompany as any).min_order_value) || 0
+                })
                 .eq('id', company.id);
             
             if (error) {
-                console.error("Erro do Supabase ao salvar bairros:", error);
-                alert("Erro ao salvar os bairros no banco de dados. Verifique a coluna 'neighborhood_fees'.");
+                console.error("Erro do Supabase ao salvar bairros/pedido mínimo:", error);
+                alert("Erro ao salvar bairros/pedido mínimo no banco de dados. Verifique as colunas 'neighborhood_fees' e 'min_order_value'.");
             }
         } catch (dbErr) {
             console.error("Erro de conexão ao salvar bairros:", dbErr);
@@ -3381,6 +3384,23 @@ delete updated.mapLink;
                                         placeholder="Ex: 5.00"
                                     />
                                 </div>
+                            </div>
+
+                            <div className="mb-6">
+                                <label className="text-sm font-bold text-gray-700">Pedido Mínimo para Entrega (R$)</label>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    step="0.01"
+                                    value={(localCompany as any).min_order_value ?? ''}
+                                    onChange={e => {
+                                        const v = e.target.value;
+                                        setLocalCompany({ ...localCompany, min_order_value: v === '' ? null : Math.max(0, parseFloat(v) || 0) } as any);
+                                    }}
+                                    className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2.5"
+                                    placeholder="Ex: 20.00 (vazio ou 0 = sem mínimo)"
+                                />
+                                <p className="text-xs text-gray-500 mt-1">Vale apenas para pedidos de entrega no cardápio digital. Retirada não tem mínimo.</p>
                             </div>
 
                             {/* GERENCIADOR DE TAXAS POR BAIRRO (JSONB) */}
