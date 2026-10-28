@@ -18,7 +18,7 @@ import {
     Crosshair,
     CreditCard,
     AlertTriangle,
-    Package // Ícone adicionado para o checklist
+    Package 
 } from 'lucide-react';
 
 interface CourierViewProps {
@@ -44,20 +44,86 @@ const CourierView: React.FC<CourierViewProps> = ({
   const [deliveryCode, setDeliveryCode] = useState('');
   const [requestingWithdrawal, setRequestingWithdrawal] = useState(false);
 
+  // Estados locais sincronizados para evitar perda de dados/flicker no saldo e nas ordens
+  const [localOrders, setLocalOrders] = useState<Order[]>(availableOrders || []);
+  const [localWithdrawals, setLocalWithdrawals] = useState<WithdrawalRequest[]>(withdrawals || []);
+
   const [customerCoords, setCustomerCoords] = useState<Record<string, { lat?: number; lng?: number }>>({});
   const fetchedPhonesRef = React.useRef<Set<string>>(new Set());
 
+  // Sincroniza com as props iniciais ou alterações do pai
+  useEffect(() => {
+      if (availableOrders) setLocalOrders(availableOrders);
+  }, [availableOrders]);
+
+  useEffect(() => {
+      if (withdrawals) setLocalWithdrawals(withdrawals);
+  }, [withdrawals]);
+
+  // CORREÇÃO CRÍTICA: Supabase Realtime para evitar demora/falha em pedidos despachados e saldo zerado
+  useEffect(() => {
+      if (!courier?.id) return;
+
+      const fetchLatestData = async () => {
+          try {
+              const { data: ordersData, error: ordersError } = await supabase
+                  .from('orders')
+                  .select('*');
+              if (!ordersError && ordersData) {
+                  setLocalOrders(ordersData as Order[]);
+              }
+
+              const { data: wData, error: wError } = await supabase
+                  .from('withdrawals')
+                  .select('*')
+                  .or(`courierId.eq.${courier.id},userId.eq.${courier.id}`);
+              if (!wError && wData) {
+                  setLocalWithdrawals(wData as WithdrawalRequest[]);
+              }
+          } catch (err) {
+              console.error('Erro ao sincronizar dados em tempo real:', err);
+          }
+      };
+
+      const ordersChannel = supabase
+          .channel('public:orders_courier')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+              fetchLatestData();
+          })
+          .subscribe();
+
+      const withdrawalsChannel = supabase
+          .channel('public:withdrawals_courier')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'withdrawals' }, () => {
+              fetchLatestData();
+          })
+          .subscribe();
+
+      return () => {
+          supabase.removeChannel(ordersChannel);
+          supabase.removeChannel(withdrawalsChannel);
+      };
+  }, [courier?.id]);
+
+  // Função para traduzir o método de pagamento do banco (cash -> Dinheiro, card -> Cartão, pix -> PIX)
+  const formatPaymentMethod = (method: string) => {
+      if (!method) return '—';
+      const m = method.toLowerCase().trim();
+      if (m === 'cash' || m === 'dinheiro') return 'Dinheiro';
+      if (m === 'card' || m === 'cartao' || m === 'cartão') return 'Cartão';
+      if (m === 'pix') return 'PIX';
+      return method.charAt(0).toUpperCase() + method.slice(1);
+  };
+
   // Pedidos atribuídos a ESTE motoboy que estão em andamento
   const myActiveOrders = useMemo(() => {
-    return (availableOrders || []).filter(o => 
+    return (localOrders || []).filter(o => 
         o.courierId === courier.id && 
         (o.status === 'delivering' || o.status === 'ready')
     );
-  }, [availableOrders, courier.id]);
+  }, [localOrders, courier.id]);
 
-  // Busca no Supabase (tabela `users`) a localização (lat/lng) dos clientes
-  // dos pedidos ativos, usando o telefone do pedido (customerPhone) para
-  // achar o usuário correspondente.
+  // Busca no Supabase a localização (lat/lng) dos clientes dos pedidos ativos
   useEffect(() => {
       const phones = Array.from(new Set(
           myActiveOrders
@@ -79,7 +145,7 @@ const CourierView: React.FC<CourierViewProps> = ({
           if (cancelled) return;
 
           if (error) {
-              console.error('Erro ao buscar localização dos clientes (tabela users):', error);
+              console.error('Erro ao buscar localização dos clientes:', error);
               return;
           }
 
@@ -87,7 +153,6 @@ const CourierView: React.FC<CourierViewProps> = ({
               const next = { ...prev };
               (data || []).forEach((row: any) => {
                   if (row.phone) {
-                      // latitude/longitude vêm como texto no banco; convertemos para número.
                       const lat = row.latitude !== null && row.latitude !== undefined && row.latitude !== ''
                           ? parseFloat(String(row.latitude).replace(',', '.'))
                           : undefined;
@@ -109,42 +174,35 @@ const CourierView: React.FC<CourierViewProps> = ({
 
   // Pedidos liberados para todos (limbo)
   const openPoolOrders = useMemo(() => {
-    return (availableOrders || []).filter(o => o.status === 'waiting_courier');
-  }, [availableOrders]);
+    return (localOrders || []).filter(o => o.status === 'waiting_courier');
+  }, [localOrders]);
 
-  // Pedidos concluídos por ESTE motoboy (Usado para o financeiro)
+  // Pedidos concluídos por ESTE motoboy (Para o financeiro)
   const myCompletedOrders = useMemo(() => {
-    return (availableOrders || []).filter(o => 
+    return (localOrders || []).filter(o => 
         o.courierId === courier.id && 
         o.status === 'delivered'
     );
-  }, [availableOrders, courier.id]);
+  }, [localOrders, courier.id]);
 
-  // Pedidos concluídos por ESTE motoboy HOJE (Usado apenas para visualização)
+  // Pedidos concluídos por ESTE motoboy HOJE
   const todaysCompletedOrders = useMemo(() => {
     const today = new Date().toDateString();
     
     return myCompletedOrders.filter(order => {
         const o = order as any;
-        // Busca os campos de data mais comuns do banco de dados (inclusive Firebase/Firestore)
         const rawDate = o.deliveredAt || o.updatedAt || o.createdAt || o.timestamp || o.date;
-        
-        // CORREÇÃO: Se não acharmos nenhuma data atrelada, NÃO exibimos na lista de "Hoje" para não vazar históricos antigos
         if (!rawDate) return false; 
 
         try {
             let parsedDate: Date;
-            
-            // Tratamento caso o banco retorne um Timestamp do Firestore (objeto com seconds)
             if (typeof rawDate === 'object' && rawDate.seconds) {
                 parsedDate = new Date(rawDate.seconds * 1000);
             } else {
                 parsedDate = new Date(rawDate);
             }
 
-            // Se a conversão gerar uma data inválida, ignoramos
             if (isNaN(parsedDate.getTime())) return false;
-
             return parsedDate.toDateString() === today;
         } catch (error) {
             return false;
@@ -152,46 +210,37 @@ const CourierView: React.FC<CourierViewProps> = ({
     });
   }, [myCompletedOrders]);
 
-  // CORREÇÃO CRÍTICA 1: O banco de dados usa "userId" para registrar o dono do saque. 
-  // Se o frontend tentar usar só courierId, ele não acha os saques antigos e o saldo fica infinito.
+  // Solicitações de saque de ESTE motoboy
   const myWithdrawals = useMemo(() => {
-    return (withdrawals || [])
+    return (localWithdrawals || [])
       .filter(w => w.courierId === courier.id || (w as any).userId === courier.id)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [withdrawals, courier.id]);
+  }, [localWithdrawals, courier.id]);
 
   const pendingWithdrawal = myWithdrawals.find(w => w.status === 'pending');
 
-  // Util para evitar erros de ponto flutuante (ex: 19.999999999998)
   const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-  // --- LÓGICA DA CARTEIRA FINANCEIRA (LIVRO-CAIXA) ---
-  
-  // 1. Soma TUDO que o entregador produziu (entregas concluídas)
+  // --- LÓGICA DA CARTEIRA FINANCEIRA ---
   const totalProduzido = round2(
     myCompletedOrders.reduce((acc, o) => acc + (Number(o.deliveryFee) || 0), 0)
   );
 
-  // 2. Soma TUDO que já foi PAGO (saques concluídos)
   const totalRecebido = round2(
     myWithdrawals
       .filter(w => w.status === 'paid')
       .reduce((acc, w) => acc + (Number(w.amount) || 0), 0)
   );
 
-  // 3. Soma TUDO que está em ANÁLISE (pendente)
   const totalEmAnalise = round2(
     myWithdrawals
       .filter(w => w.status === 'pending')
       .reduce((acc, w) => acc + (Number(w.amount) || 0), 0)
   );
 
-  // 4. Saldo Disponível para saque (Produzido - Recebido - Em análise)
   const availableBalance = Math.max(0, round2(totalProduzido - totalRecebido - totalEmAnalise));
   const walletBalance = availableBalance;
 
-  // CORREÇÃO CRÍTICA 2: Mapeamos exatamente QUAIS pedidos já foram sacados 
-  // para enviar ao backend. O banco usa "relatedOrderIds".
   const withdrawnOrderIds = useMemo(() => {
       const ids = new Set<string>();
       myWithdrawals.forEach(w => {
@@ -205,7 +254,6 @@ const CourierView: React.FC<CourierViewProps> = ({
       return ids;
   }, [myWithdrawals]);
 
-  // Lista de IDs apenas das corridas que ainda NÃO tiveram o dinheiro solicitado
   const availableOrderIdsToWithdraw = useMemo(() => {
       return myCompletedOrders
           .filter(o => !withdrawnOrderIds.has(o.id))
@@ -218,7 +266,6 @@ const CourierView: React.FC<CourierViewProps> = ({
       try {
           const targetCompanyId = myCompletedOrders.length > 0 ? myCompletedOrders[myCompletedOrders.length - 1].companyId : undefined;
           
-          // Enviamos os IDs novamente! Isso previne que a mesma corrida seja sacada 2x
           await onRequestWithdrawal(
               courier.id, 
               availableBalance, 
@@ -341,8 +388,6 @@ const CourierView: React.FC<CourierViewProps> = ({
                     const pMethod = (order.paymentMethod || '').toLowerCase();
                     const isCash = pMethod.includes('cash') || pMethod.includes('dinheiro');
                     const isSettled = !!order.pay;
-                    // TRAVA: pedido em dinheiro cujo caixa ainda não confirmou o acerto
-                    // não pode ser concluído pelo entregador (evita "sumiço" de troco/valor).
                     const blockedByCashSettlement = isCash && !isSettled;
 
                     const rawPhone = order.customerPhone ? String(order.customerPhone).replace(/\D/g, '') : '';
@@ -387,13 +432,13 @@ const CourierView: React.FC<CourierViewProps> = ({
                                 </div>
                             </div>
 
-                            {/* DETALHES DO PEDIDO: pagamento, valor total e troco */}
+                            {/* DETALHES DO PEDIDO COM PAGAMENTO TRADUZIDO */}
                             <div className="grid grid-cols-2 gap-2 bg-gray-50 rounded-xl p-3 border border-gray-100 text-sm">
                                 <div>
                                     <p className="text-[10px] text-gray-400 font-bold uppercase">Forma de Pagamento</p>
                                     <p className="font-bold text-gray-800 flex items-center gap-1">
                                         {isCash ? <DollarSign className="w-3.5 h-3.5 text-green-600" /> : <CreditCard className="w-3.5 h-3.5 text-blue-600" />}
-                                        {order.paymentMethod || '—'}
+                                        {formatPaymentMethod(order.paymentMethod)}
                                     </p>
                                 </div>
                                 <div>
@@ -414,7 +459,7 @@ const CourierView: React.FC<CourierViewProps> = ({
                                 )}
                             </div>
 
-                            {/* ITENS DO PEDIDO (Checklist de Conferência) */}
+                            {/* ITENS DO PEDIDO */}
                             {(order as any).items && (order as any).items.length > 0 && (
                                 <div className="bg-gray-50 rounded-xl p-3 border border-gray-100 flex flex-col gap-2 mt-2">
                                     <p className="text-[10px] text-gray-400 font-bold uppercase flex items-center gap-1">
@@ -455,7 +500,7 @@ const CourierView: React.FC<CourierViewProps> = ({
                                 </div>
                             )}
 
-                            {/* DUPLA OPÇÃO DE GPS */}
+                            {/* GPS */}
                             <div className="flex flex-col gap-2 mt-2">
                                 {hasExactCoords && (
                                     <a 
@@ -519,7 +564,6 @@ const CourierView: React.FC<CourierViewProps> = ({
         {/* ABA: CARTEIRA */}
         {activeTab === 'carteira' && (
           <div className="space-y-4">
-            {/* Resumo Financeiro */}
             <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
                 <DollarSign className="absolute -right-4 -top-4 w-32 h-32 text-white opacity-5" />
                 <p className="text-gray-400 font-medium text-sm">Saldo a Receber (Pendente)</p>
@@ -557,7 +601,6 @@ const CourierView: React.FC<CourierViewProps> = ({
                 </button>
             </div>
 
-            {/* Histórico de Solicitações de Saque */}
             <div className="mt-6">
                 <h3 className="font-bold text-gray-700 mb-3 flex items-center gap-2">
                     <Wallet className="w-4 h-4 text-gray-500" /> Minhas solicitações de saque
@@ -593,7 +636,6 @@ const CourierView: React.FC<CourierViewProps> = ({
                 )}
             </div>
 
-            {/* Lista das Últimas Corridas Concluídas */}
             <div className="mt-6">
                 <h3 className="font-bold text-gray-700 mb-3 flex items-center gap-2">
                     <CheckCircle className="w-4 h-4 text-green-500" /> Últimas corridas entregues
@@ -616,7 +658,6 @@ const CourierView: React.FC<CourierViewProps> = ({
                     </div>
                 )}
             </div>
-
           </div>
         )}
 
