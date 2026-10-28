@@ -599,11 +599,20 @@ const App: React.FC = () => {
                               }
                           }
                       }
-                      return prevOrders.map(o => o.id === incomingOrder.id ? incomingOrder : o).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+                      // Mescla com o pedido local: o Realtime pode omitir colunas grandes (jsonb/TOAST,
+                      // ex: items) em UPDATEs, o que apagaria os dados do card se substituíssemos tudo.
+                      return prevOrders.map(o => o.id === incomingOrder.id ? { ...o, ...incomingOrder } : o).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
                   }
                   return prevOrders;
               });
-          }).subscribe();
+          }).subscribe((status) => {
+              // Se o canal cair (rede instável, aba em segundo plano), ressincroniza assim que reconectar
+              if (status === 'SUBSCRIBED') {
+                  syncActiveOrders();
+              } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+                  console.warn("Canal de pedidos do Realtime instável:", status);
+              }
+          });
 
       // 2. CANAL DE MENSAGENS (CHAT)
       const messagesChannel = supabase
@@ -975,6 +984,83 @@ const App: React.FC = () => {
   };
 
   /**
+   * RESSINCRONIZAÇÃO DOS PEDIDOS ATIVOS (rede de segurança do Realtime)
+   * O WebSocket pode perder eventos (aba/celular em segundo plano, rede instável,
+   * alta demanda). Esta função busca o estado real dos pedidos ativos no banco e
+   * mescla no estado local, inclusive pedidos que saíram da lista de ativos
+   * (entregues/cancelados em outro dispositivo).
+   */
+  const syncActiveOrders = async () => {
+      const user = currentUserRef.current;
+      if (!user || publicMenuCompanyId) return;
+
+      const ACTIVE = ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering', 'waiting_payment'];
+
+      let query: any = supabase.from('orders').select('*').in('status', ACTIVE);
+      if (user.role === 'partner') query = query.eq('companyId', user.id);
+      else if (user.role === 'courier') {
+          const cId = (user as any).companyId;
+          if (!cId) return;
+          query = query.eq('companyId', cId);
+      } else if (user.role === 'client') query = query.eq('customerId', user.id);
+      else return; // admin: sem polling
+
+      try {
+          const { data, error } = await query;
+          if (error || !data) return;
+
+          const fetchedIds = new Set<string>(data.map((o: any) => o.id));
+          const staleIds = ordersRef.current
+              .filter(o => ACTIVE.includes(o.status) && !fetchedIds.has(o.id) && !lockedOrders.current.has(o.id))
+              .map(o => o.id);
+
+          let extra: any[] = [];
+          if (staleIds.length > 0) {
+              const res = await supabase.from('orders').select('*').in('id', staleIds);
+              if (!res.error && res.data) extra = res.data;
+          }
+
+          const fresh = [...data, ...extra].filter((o: any) => !lockedOrders.current.has(o.id));
+          if (fresh.length === 0) return;
+
+          setOrders(prev => {
+              const map = new Map<string, Order>(prev.map(o => [o.id, o]));
+              fresh.forEach((o: any) => {
+                  const incoming = { ...o, timestamp: new Date(o.timestamp) } as Order;
+                  const existing = map.get(o.id);
+                  map.set(o.id, existing ? { ...existing, ...incoming } : incoming);
+              });
+              return Array.from(map.values()).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+          });
+      } catch (e) {
+          console.warn("Falha na ressincronização de pedidos:", e);
+      }
+  };
+
+  // Polling leve + ressincronização ao voltar para a aba/rede (cobre eventos perdidos do Realtime)
+  useEffect(() => {
+      if (!currentUser || publicMenuCompanyId) return;
+
+      const onVisible = () => { if (document.visibilityState === 'visible') syncActiveOrders(); };
+      const onOnline = () => syncActiveOrders();
+
+      const interval = setInterval(() => {
+          if (document.visibilityState === 'visible') syncActiveOrders();
+      }, 15000);
+
+      document.addEventListener('visibilitychange', onVisible);
+      window.addEventListener('focus', onOnline);
+      window.addEventListener('online', onOnline);
+
+      return () => {
+          clearInterval(interval);
+          document.removeEventListener('visibilitychange', onVisible);
+          window.removeEventListener('focus', onOnline);
+          window.removeEventListener('online', onOnline);
+      };
+  }, [currentUser?.id, currentUser?.role]);
+
+  /**
    * Finaliza sessão do usuário
    */
   const handleLogout = () => {
@@ -1319,6 +1405,13 @@ const App: React.FC = () => {
         return null; 
     }
 
+    // Pedido mínimo (apenas entrega) — valor específico de cada restaurante
+    const companyMinOrder = Number((company as any).min_order_value) || 0;
+    if (deliveryMethod === 'delivery' && companyMinOrder > 0 && subtotal < companyMinOrder) {
+        alert(`Pedido mínimo para entrega: R$ ${companyMinOrder.toFixed(2)}.`);
+        return null;
+    }
+
     const FIXED_SERVICE_FEE = isGuestCheckout ? 0 : 0.49; 
     
     let repasseValue = 0;
@@ -1577,8 +1670,17 @@ const App: React.FC = () => {
           // >>> FIM DA BAIXA DE ESTOQUE AUTOMÁTICA <<<
       }
 
+      const previousOrder = ordersRef.current.find(o => o.id === orderId);
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updateData } : o));
-      await supabase.from('orders').update(updateData).eq('id', orderId);
+      const { error: updateError } = await supabase.from('orders').update(updateData).eq('id', orderId);
+      if (updateError) {
+          console.error("Falha ao salvar status do pedido:", updateError);
+          // Reverte a UI para não mostrar um status que não foi gravado (e que os outros aparelhos nunca verão)
+          if (previousOrder) {
+              setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: previousOrder.status } : o));
+          }
+          alert("Não foi possível salvar a mudança de status. Verifique a conexão e tente novamente.");
+      }
     } finally {
       // Libera o lock assim que a persistência (bem ou mal sucedida) terminar.
       lockedOrders.current.delete(orderId);
@@ -1634,7 +1736,12 @@ const App: React.FC = () => {
    */
   const handleUpdateFullOrder = async (updatedOrder: Order) => {
     setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-    await supabase.from('orders').update(updatedOrder).eq('id', updatedOrder.id);
+    const { error } = await supabase.from('orders').update(updatedOrder).eq('id', updatedOrder.id);
+    if (error) {
+        console.error("Falha ao salvar pedido:", error);
+        alert("Não foi possível salvar o pedido. Verifique a conexão e tente novamente.");
+        syncActiveOrders();
+    }
   };
 
   /**
