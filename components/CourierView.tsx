@@ -60,7 +60,7 @@ const CourierView: React.FC<CourierViewProps> = ({
       if (withdrawals) setLocalWithdrawals(withdrawals);
   }, [withdrawals]);
 
-  // CORREÇÃO CRÍTICA: Supabase Realtime para evitar demora/falha em pedidos despachados e saldo zerado
+  // Supabase Realtime para evitar demora/falha em pedidos despachados e saldo
   useEffect(() => {
       if (!courier?.id) return;
 
@@ -105,7 +105,7 @@ const CourierView: React.FC<CourierViewProps> = ({
       };
   }, [courier?.id]);
 
-  // Função para traduzir o método de pagamento do banco (cash -> Dinheiro, card -> Cartão, pix -> PIX)
+  // Tradução do método de pagamento
   const formatPaymentMethod = (method: string) => {
       if (!method) return '—';
       const m = method.toLowerCase().trim();
@@ -115,7 +115,7 @@ const CourierView: React.FC<CourierViewProps> = ({
       return method.charAt(0).toUpperCase() + method.slice(1);
   };
 
-  // Pedidos atribuídos a ESTE motoboy que estão em andamento
+  // Pedidos ativos de ESTE motoboy
   const myActiveOrders = useMemo(() => {
     return (localOrders || []).filter(o => 
         o.courierId === courier.id && 
@@ -123,11 +123,11 @@ const CourierView: React.FC<CourierViewProps> = ({
     );
   }, [localOrders, courier.id]);
 
-  // Busca no Supabase a localização (lat/lng) dos clientes dos pedidos ativos
+  // Busca segura de localização com telefones sanitizados
   useEffect(() => {
       const phones = Array.from(new Set(
           myActiveOrders
-              .map(o => o.customerPhone)
+              .map(o => o.customerPhone ? String(o.customerPhone).replace(/\D/g, '') : '')
               .filter((p): p is string => !!p && !fetchedPhonesRef.current.has(p))
       ));
 
@@ -153,13 +153,14 @@ const CourierView: React.FC<CourierViewProps> = ({
               const next = { ...prev };
               (data || []).forEach((row: any) => {
                   if (row.phone) {
+                      const cleanRowPhone = String(row.phone).replace(/\D/g, '');
                       const lat = row.latitude !== null && row.latitude !== undefined && row.latitude !== ''
                           ? parseFloat(String(row.latitude).replace(',', '.'))
                           : undefined;
                       const lng = row.longitude !== null && row.longitude !== undefined && row.longitude !== ''
                           ? parseFloat(String(row.longitude).replace(',', '.'))
                           : undefined;
-                      next[row.phone] = {
+                      next[cleanRowPhone] = {
                           lat: lat !== undefined && !isNaN(lat) ? lat : undefined,
                           lng: lng !== undefined && !isNaN(lng) ? lng : undefined,
                       };
@@ -172,12 +173,12 @@ const CourierView: React.FC<CourierViewProps> = ({
       return () => { cancelled = true; };
   }, [myActiveOrders]);
 
-  // Pedidos liberados para todos (limbo)
+  // Pedidos abertos no pool
   const openPoolOrders = useMemo(() => {
     return (localOrders || []).filter(o => o.status === 'waiting_courier');
   }, [localOrders]);
 
-  // Pedidos concluídos por ESTE motoboy (Para o financeiro)
+  // Pedidos concluídos por ESTE motoboy
   const myCompletedOrders = useMemo(() => {
     return (localOrders || []).filter(o => 
         o.courierId === courier.id && 
@@ -185,9 +186,9 @@ const CourierView: React.FC<CourierViewProps> = ({
     );
   }, [localOrders, courier.id]);
 
-  // Pedidos concluídos por ESTE motoboy HOJE
+  // Pedidos concluídos HOJE (com checagem segura de data local)
   const todaysCompletedOrders = useMemo(() => {
-    const today = new Date().toDateString();
+    const today = new Date();
     
     return myCompletedOrders.filter(order => {
         const o = order as any;
@@ -195,22 +196,19 @@ const CourierView: React.FC<CourierViewProps> = ({
         if (!rawDate) return false; 
 
         try {
-            let parsedDate: Date;
-            if (typeof rawDate === 'object' && rawDate.seconds) {
-                parsedDate = new Date(rawDate.seconds * 1000);
-            } else {
-                parsedDate = new Date(rawDate);
-            }
-
+            const parsedDate = new Date(typeof rawDate === 'object' && rawDate.seconds ? rawDate.seconds * 1000 : rawDate);
             if (isNaN(parsedDate.getTime())) return false;
-            return parsedDate.toDateString() === today;
+
+            return parsedDate.getDate() === today.getDate() &&
+                   parsedDate.getMonth() === today.getMonth() &&
+                   parsedDate.getFullYear() === today.getFullYear();
         } catch (error) {
             return false;
         }
     });
   }, [myCompletedOrders]);
 
-  // Solicitações de saque de ESTE motoboy
+  // Solicitações de saque do motoboy
   const myWithdrawals = useMemo(() => {
     return (localWithdrawals || [])
       .filter(w => w.courierId === courier.id || (w as any).userId === courier.id)
@@ -221,26 +219,7 @@ const CourierView: React.FC<CourierViewProps> = ({
 
   const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-  // --- LÓGICA DA CARTEIRA FINANCEIRA ---
-  const totalProduzido = round2(
-    myCompletedOrders.reduce((acc, o) => acc + (Number(o.deliveryFee) || 0), 0)
-  );
-
-  const totalRecebido = round2(
-    myWithdrawals
-      .filter(w => w.status === 'paid')
-      .reduce((acc, w) => acc + (Number(w.amount) || 0), 0)
-  );
-
-  const totalEmAnalise = round2(
-    myWithdrawals
-      .filter(w => w.status === 'pending')
-      .reduce((acc, w) => acc + (Number(w.amount) || 0), 0)
-  );
-
-  const availableBalance = Math.max(0, round2(totalProduzido - totalRecebido - totalEmAnalise));
-  const walletBalance = availableBalance;
-
+  // IDs de pedidos já vinculados a saques (pendentes ou pagos)
   const withdrawnOrderIds = useMemo(() => {
       const ids = new Set<string>();
       myWithdrawals.forEach(w => {
@@ -253,6 +232,22 @@ const CourierView: React.FC<CourierViewProps> = ({
       });
       return ids;
   }, [myWithdrawals]);
+
+  // Saldo Disponível corrigido (soma apenas entregas não vinculadas a saques ativos/pagos)
+  const availableBalance = useMemo(() => {
+      const unwithdrawnOrders = myCompletedOrders.filter(o => !withdrawnOrderIds.has(o.id));
+      return round2(
+          unwithdrawnOrders.reduce((acc, o) => acc + (Number(o.deliveryFee) || 0), 0)
+      );
+  }, [myCompletedOrders, withdrawnOrderIds]);
+
+  const walletBalance = availableBalance;
+
+  const totalRecebido = round2(
+    myWithdrawals
+      .filter(w => w.status === 'paid')
+      .reduce((acc, w) => acc + (Number(w.amount) || 0), 0)
+  );
 
   const availableOrderIdsToWithdraw = useMemo(() => {
       return myCompletedOrders
@@ -393,8 +388,9 @@ const CourierView: React.FC<CourierViewProps> = ({
                     const rawPhone = order.customerPhone ? String(order.customerPhone).replace(/\D/g, '') : '';
                     const whatsappLink = rawPhone ? `https://wa.me/${rawPhone}` : null;
 
-                    const lat = customerCoords[order.customerPhone]?.lat;
-                    const lng = customerCoords[order.customerPhone]?.lng;
+                    const cleanCustomerPhone = order.customerPhone ? String(order.customerPhone).replace(/\D/g, '') : '';
+                    const lat = customerCoords[cleanCustomerPhone]?.lat;
+                    const lng = customerCoords[cleanCustomerPhone]?.lng;
                     const hasExactCoords = !!lat && !!lng;
                     const addressSearchLink = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${order.deliveryAddress?.street || ''}, ${order.deliveryAddress?.number || ''}, ${order.deliveryAddress?.neighborhood || ''}, ${order.deliveryAddress?.city || ''}`)}`;
 
