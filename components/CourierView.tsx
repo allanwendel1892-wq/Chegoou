@@ -1,15 +1,15 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Order, User, WithdrawalRequest } from '../types';
 import { supabase } from '../services/supabaseClient';
-import { 
-    Navigation, 
-    Bike, 
-    CheckCircle, 
-    MapPin, 
-    DollarSign, 
-    LogOut, 
-    Wallet, 
-    Clock, 
+import {
+    Navigation,
+    Bike,
+    CheckCircle,
+    MapPin,
+    DollarSign,
+    LogOut,
+    Wallet,
+    Clock,
     Check,
     Send,
     XCircle,
@@ -18,7 +18,7 @@ import {
     Crosshair,
     CreditCard,
     AlertTriangle,
-    Package 
+    Package
 } from 'lucide-react';
 
 interface CourierViewProps {
@@ -31,246 +31,305 @@ interface CourierViewProps {
   onRequestWithdrawal: (courierId: string, amount: number, orderIds: string[], companyId?: string) => Promise<void> | void;
 }
 
-const CourierView: React.FC<CourierViewProps> = ({ 
-    courier, 
-    availableOrders, 
-    acceptOrder, 
-    confirmDelivery, 
+// ---------------------------------------------------------------------------
+// HELPERS (fora do componente: não são recriados a cada render)
+// ---------------------------------------------------------------------------
+
+const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+const onlyDigits = (v?: string | null): string => (v ? String(v).replace(/\D/g, '') : '');
+
+// Chave canônica de telefone: só dígitos e sem o DDI 55 (se houver),
+// para casar "(81) 99999-9999", "81999999999" e "5581999999999".
+const phoneKey = (v?: string | null): string => {
+  const d = onlyDigits(v);
+  return d.length > 11 && d.startsWith('55') ? d.slice(2) : d;
+};
+
+// Converte qualquer formato de data (Date, string, Timestamp do Firestore, número)
+// em Date. Strings ISO SEM fuso horário são tratadas como UTC (padrão de timestamp
+// do Postgres), evitando que entregas depois das 21h (UTC-3) caiam no dia seguinte.
+const parseDate = (raw: any): Date | null => {
+  if (raw === null || raw === undefined || raw === '') return null;
+  try {
+    if (raw instanceof Date) return isNaN(raw.getTime()) ? null : raw;
+    if (typeof raw === 'object' && typeof raw.seconds === 'number') {
+      return new Date(raw.seconds * 1000);
+    }
+    if (typeof raw === 'number') {
+      const d = new Date(raw);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    if (typeof raw === 'string') {
+      let s = raw.trim();
+      const semFuso = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s);
+      if (semFuso) s = s.replace(' ', 'T') + 'Z';
+      const d = new Date(s);
+      return isNaN(d.getTime()) ? null : d;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+};
+
+// Data em que a entrega foi concluída. NÃO cai em createdAt: um pedido criado
+// ontem e entregue hoje não pode ser tratado como "de ontem" nem vice-versa.
+const getDeliveredDate = (order: any): Date | null =>
+  parseDate(order.deliveredAt ?? order.delivered_at ?? order.updatedAt ?? order.updated_at ?? order.timestamp ?? order.date);
+
+const getWithdrawalDate = (w: any): Date | null =>
+  parseDate(w.date ?? w.createdAt ?? w.created_at);
+
+const formatPaymentMethod = (method?: string) => {
+  if (!method) return '—';
+  const m = method.toLowerCase().trim();
+  if (m === 'cash' || m === 'dinheiro') return 'Dinheiro';
+  if (m === 'card' || m === 'cartao' || m === 'cartão') return 'Cartão';
+  if (m === 'pix') return 'PIX';
+  return method.charAt(0).toUpperCase() + method.slice(1);
+};
+
+const sameDay = (a: Date, b: Date) =>
+  a.getDate() === b.getDate() && a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
+
+// ---------------------------------------------------------------------------
+// COMPONENTE
+// ---------------------------------------------------------------------------
+
+const CourierView: React.FC<CourierViewProps> = ({
+    courier,
+    availableOrders,
+    acceptOrder,
+    confirmDelivery,
     onLogout,
     withdrawals,
     onRequestWithdrawal
 }) => {
   const [activeTab, setActiveTab] = useState<'disponiveis' | 'rota' | 'carteira'>('rota');
-  const [deliveryCode, setDeliveryCode] = useState('');
+
+  // Código de entrega POR PEDIDO (antes era um único estado compartilhado por todos)
+  const [deliveryCodes, setDeliveryCodes] = useState<Record<string, string>>({});
+  // Checklist de conferência POR ITEM (controlado: não perde o estado em re-render)
+  const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
+
   const [requestingWithdrawal, setRequestingWithdrawal] = useState(false);
+  const [justRequested, setJustRequested] = useState(false); // trava até o saque pendente chegar nas props
+  const requestLockRef = useRef(false);                       // trava síncrona contra duplo clique
 
-  // Estados locais sincronizados para evitar perda de dados/flicker no saldo e nas ordens
-  const [localOrders, setLocalOrders] = useState<Order[]>(availableOrders || []);
-  const [localWithdrawals, setLocalWithdrawals] = useState<WithdrawalRequest[]>(withdrawals || []);
-
-  const [customerCoords, setCustomerCoords] = useState<Record<string, { lat?: number; lng?: number }>>({});
-  const fetchedPhonesRef = React.useRef<Set<string>>(new Set());
-
-  // Sincroniza com as props iniciais ou alterações do pai
+  // "Agora" atualizado a cada minuto: faz "entregas de hoje" virar na meia-noite
+  const [now, setNow] = useState<Date>(() => new Date());
   useEffect(() => {
-      if (availableOrders) setLocalOrders(availableOrders);
-  }, [availableOrders]);
+    const id = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
-  useEffect(() => {
-      if (withdrawals) setLocalWithdrawals(withdrawals);
-  }, [withdrawals]);
+  // -------------------------------------------------------------------------
+  // PEDIDOS (única fonte de verdade: props do componente pai)
+  // -------------------------------------------------------------------------
 
-  // Supabase Realtime para evitar demora/falha em pedidos despachados e saldo
-  useEffect(() => {
-      if (!courier?.id) return;
-
-      const fetchLatestData = async () => {
-          try {
-              const { data: ordersData, error: ordersError } = await supabase
-                  .from('orders')
-                  .select('*');
-              if (!ordersError && ordersData) {
-                  setLocalOrders(ordersData as Order[]);
-              }
-
-              const { data: wData, error: wError } = await supabase
-                  .from('withdrawals')
-                  .select('*')
-                  .or(`courierId.eq.${courier.id},userId.eq.${courier.id}`);
-              if (!wError && wData) {
-                  setLocalWithdrawals(wData as WithdrawalRequest[]);
-              }
-          } catch (err) {
-              console.error('Erro ao sincronizar dados em tempo real:', err);
-          }
-      };
-
-      const ordersChannel = supabase
-          .channel('public:orders_courier')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
-              fetchLatestData();
-          })
-          .subscribe();
-
-      const withdrawalsChannel = supabase
-          .channel('public:withdrawals_courier')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'withdrawals' }, () => {
-              fetchLatestData();
-          })
-          .subscribe();
-
-      return () => {
-          supabase.removeChannel(ordersChannel);
-          supabase.removeChannel(withdrawalsChannel);
-      };
-  }, [courier?.id]);
-
-  // Tradução do método de pagamento
-  const formatPaymentMethod = (method: string) => {
-      if (!method) return '—';
-      const m = method.toLowerCase().trim();
-      if (m === 'cash' || m === 'dinheiro') return 'Dinheiro';
-      if (m === 'card' || m === 'cartao' || m === 'cartão') return 'Cartão';
-      if (m === 'pix') return 'PIX';
-      return method.charAt(0).toUpperCase() + method.slice(1);
-  };
-
-  // Pedidos ativos de ESTE motoboy
   const myActiveOrders = useMemo(() => {
-    return (localOrders || []).filter(o => 
-        o.courierId === courier.id && 
+    return (availableOrders || []).filter(o =>
+        o.courierId === courier.id &&
         (o.status === 'delivering' || o.status === 'ready')
     );
-  }, [localOrders, courier.id]);
+  }, [availableOrders, courier.id]);
 
-  // Busca segura de localização com telefones sanitizados
-  useEffect(() => {
-      const phones = Array.from(new Set(
-          myActiveOrders
-              .map(o => o.customerPhone ? String(o.customerPhone).replace(/\D/g, '') : '')
-              .filter((p): p is string => !!p && !fetchedPhonesRef.current.has(p))
-      ));
-
-      if (phones.length === 0) return;
-      phones.forEach(p => fetchedPhonesRef.current.add(p));
-
-      let cancelled = false;
-
-      (async () => {
-          const { data, error } = await supabase
-              .from('users')
-              .select('phone, latitude, longitude')
-              .in('phone', phones);
-
-          if (cancelled) return;
-
-          if (error) {
-              console.error('Erro ao buscar localização dos clientes:', error);
-              return;
-          }
-
-          setCustomerCoords(prev => {
-              const next = { ...prev };
-              (data || []).forEach((row: any) => {
-                  if (row.phone) {
-                      const cleanRowPhone = String(row.phone).replace(/\D/g, '');
-                      const lat = row.latitude !== null && row.latitude !== undefined && row.latitude !== ''
-                          ? parseFloat(String(row.latitude).replace(',', '.'))
-                          : undefined;
-                      const lng = row.longitude !== null && row.longitude !== undefined && row.longitude !== ''
-                          ? parseFloat(String(row.longitude).replace(',', '.'))
-                          : undefined;
-                      next[cleanRowPhone] = {
-                          lat: lat !== undefined && !isNaN(lat) ? lat : undefined,
-                          lng: lng !== undefined && !isNaN(lng) ? lng : undefined,
-                      };
-                  }
-              });
-              return next;
-          });
-      })();
-
-      return () => { cancelled = true; };
-  }, [myActiveOrders]);
-
-  // Pedidos abertos no pool
   const openPoolOrders = useMemo(() => {
-    return (localOrders || []).filter(o => o.status === 'waiting_courier');
-  }, [localOrders]);
+    return (availableOrders || []).filter(o => o.status === 'waiting_courier');
+  }, [availableOrders]);
 
-  // Pedidos concluídos por ESTE motoboy
   const myCompletedOrders = useMemo(() => {
-    return (localOrders || []).filter(o => 
-        o.courierId === courier.id && 
+    return (availableOrders || []).filter(o =>
+        o.courierId === courier.id &&
         o.status === 'delivered'
     );
-  }, [localOrders, courier.id]);
+  }, [availableOrders, courier.id]);
 
-  // Pedidos concluídos HOJE (com checagem segura de data local)
   const todaysCompletedOrders = useMemo(() => {
-    const today = new Date();
-    
-    return myCompletedOrders.filter(order => {
-        const o = order as any;
-        const rawDate = o.deliveredAt || o.updatedAt || o.createdAt || o.timestamp || o.date;
-        if (!rawDate) return false; 
+    return myCompletedOrders
+      .map(order => ({ order, date: getDeliveredDate(order) }))
+      .filter((x): x is { order: Order; date: Date } => !!x.date && sameDay(x.date, now))
+      .sort((a, b) => b.date.getTime() - a.date.getTime())
+      .map(x => x.order);
+  }, [myCompletedOrders, now]);
 
-        try {
-            const parsedDate = new Date(typeof rawDate === 'object' && rawDate.seconds ? rawDate.seconds * 1000 : rawDate);
-            if (isNaN(parsedDate.getTime())) return false;
+  // -------------------------------------------------------------------------
+  // LOCALIZAÇÃO DOS CLIENTES
+  // -------------------------------------------------------------------------
 
-            return parsedDate.getDate() === today.getDate() &&
-                   parsedDate.getMonth() === today.getMonth() &&
-                   parsedDate.getFullYear() === today.getFullYear();
-        } catch (error) {
-            return false;
-        }
-    });
-  }, [myCompletedOrders]);
+  const [customerCoords, setCustomerCoords] = useState<Record<string, { lat?: number; lng?: number }>>({});
+  const fetchedPhonesRef = useRef<Set<string>>(new Set());   // já buscados COM SUCESSO
+  const inFlightPhonesRef = useRef<Set<string>>(new Set());  // buscas em andamento
 
-  // Solicitações de saque do motoboy
+  // Chave estável: o effect só roda quando o CONJUNTO de telefones muda,
+  // e não a cada atualização do array de pedidos.
+  const activePhonesKey = useMemo(() => {
+    const keys = Array.from(new Set(
+      myActiveOrders.map(o => phoneKey(o.customerPhone)).filter(Boolean)
+    )).sort();
+    return keys.join('|');
+  }, [myActiveOrders]);
+
+  const fetchCustomerCoords = useCallback(async (keys: string[]) => {
+    const pending = keys.filter(k => !fetchedPhonesRef.current.has(k) && !inFlightPhonesRef.current.has(k));
+    if (pending.length === 0) return;
+    pending.forEach(k => inFlightPhonesRef.current.add(k));
+
+    // Consulta em vários formatos possíveis salvos na tabela users
+    const variants = Array.from(new Set(pending.flatMap(k => [k, `55${k}`])));
+
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('phone, latitude, longitude')
+        .in('phone', variants);
+
+      if (error) {
+        // Não marca como buscado: tentará de novo na próxima mudança
+        console.error('Erro ao buscar localização dos clientes:', error);
+        return;
+      }
+
+      setCustomerCoords(prev => {
+        const next = { ...prev };
+        (data || []).forEach((row: any) => {
+          const key = phoneKey(row.phone);
+          if (!key) return;
+          const lat = parseFloat(String(row.latitude ?? '').replace(',', '.'));
+          const lng = parseFloat(String(row.longitude ?? '').replace(',', '.'));
+          next[key] = {
+            lat: isNaN(lat) ? undefined : lat,
+            lng: isNaN(lng) ? undefined : lng,
+          };
+        });
+        return next;
+      });
+
+      // Só marca como buscado depois do sucesso
+      pending.forEach(k => fetchedPhonesRef.current.add(k));
+    } catch (err) {
+      console.error('Falha de rede ao buscar localização dos clientes:', err);
+    } finally {
+      pending.forEach(k => inFlightPhonesRef.current.delete(k));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!activePhonesKey) return;
+    fetchCustomerCoords(activePhonesKey.split('|'));
+  }, [activePhonesKey, fetchCustomerCoords]);
+
+  // -------------------------------------------------------------------------
+  // CARTEIRA
+  // -------------------------------------------------------------------------
+
   const myWithdrawals = useMemo(() => {
-    return (localWithdrawals || [])
+    return (withdrawals || [])
       .filter(w => w.courierId === courier.id || (w as any).userId === courier.id)
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [localWithdrawals, courier.id]);
+      .sort((a, b) => (getWithdrawalDate(b)?.getTime() || 0) - (getWithdrawalDate(a)?.getTime() || 0));
+  }, [withdrawals, courier.id]);
 
   const pendingWithdrawal = myWithdrawals.find(w => w.status === 'pending');
 
-  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
-
-  // IDs de pedidos já vinculados a saques (pendentes ou pagos)
+  // IDs de corridas já vinculadas a saques ativos (pendentes ou pagos)
   const withdrawnOrderIds = useMemo(() => {
-      const ids = new Set<string>();
-      myWithdrawals.forEach(w => {
-          if (w.status === 'pending' || w.status === 'paid') {
-              const relatedIds = (w as any).relatedOrderIds;
-              if (Array.isArray(relatedIds)) {
-                  relatedIds.forEach(id => ids.add(id));
-              }
-          }
-      });
-      return ids;
+    const ids = new Set<string>();
+    myWithdrawals.forEach(w => {
+      if (w.status === 'pending' || w.status === 'paid') {
+        const related = (w as any).relatedOrderIds;
+        if (Array.isArray(related)) related.forEach((id: string) => ids.add(id));
+      }
+    });
+    return ids;
   }, [myWithdrawals]);
 
-  // Saldo Disponível corrigido (soma apenas entregas não vinculadas a saques ativos/pagos)
+  // Corridas concluídas que ainda não entraram em nenhum saque
+  const unwithdrawnOrders = useMemo(
+    () => myCompletedOrders.filter(o => !withdrawnOrderIds.has(o.id)),
+    [myCompletedOrders, withdrawnOrderIds]
+  );
+
+  // Saques antigos (pendentes/pagos) SEM relatedOrderIds: não dá para saber quais
+  // corridas cobrem, então o valor deles é abatido do saldo para não inflar.
+  const legacyWithdrawnAmount = useMemo(() => {
+    return round2(
+      myWithdrawals
+        .filter(w => {
+          if (w.status !== 'pending' && w.status !== 'paid') return false;
+          const related = (w as any).relatedOrderIds;
+          return !(Array.isArray(related) && related.length > 0);
+        })
+        .reduce((acc, w) => acc + (Number(w.amount) || 0), 0)
+    );
+  }, [myWithdrawals]);
+
   const availableBalance = useMemo(() => {
-      const unwithdrawnOrders = myCompletedOrders.filter(o => !withdrawnOrderIds.has(o.id));
-      return round2(
-          unwithdrawnOrders.reduce((acc, o) => acc + (Number(o.deliveryFee) || 0), 0)
-      );
-  }, [myCompletedOrders, withdrawnOrderIds]);
+    const produced = unwithdrawnOrders.reduce((acc, o) => acc + (Number(o.deliveryFee) || 0), 0);
+    return Math.max(0, round2(produced - legacyWithdrawnAmount));
+  }, [unwithdrawnOrders, legacyWithdrawnAmount]);
 
   const walletBalance = availableBalance;
 
-  const totalRecebido = round2(
+  const totalRecebido = useMemo(() => round2(
     myWithdrawals
       .filter(w => w.status === 'paid')
       .reduce((acc, w) => acc + (Number(w.amount) || 0), 0)
+  ), [myWithdrawals]);
+
+  const availableOrderIdsToWithdraw = useMemo(
+    () => unwithdrawnOrders.map(o => o.id),
+    [unwithdrawnOrders]
   );
 
-  const availableOrderIdsToWithdraw = useMemo(() => {
-      return myCompletedOrders
-          .filter(o => !withdrawnOrderIds.has(o.id))
-          .map(o => o.id);
-  }, [myCompletedOrders, withdrawnOrderIds]);
+  // Libera a trava local assim que o saque pendente aparece nas props
+  useEffect(() => {
+    if (pendingWithdrawal) {
+      setJustRequested(false);
+      requestLockRef.current = false;
+    }
+  }, [pendingWithdrawal]);
 
   const handleRequestWithdrawal = async () => {
-      if (availableBalance <= 0) return;
-      setRequestingWithdrawal(true);
-      try {
-          const targetCompanyId = myCompletedOrders.length > 0 ? myCompletedOrders[myCompletedOrders.length - 1].companyId : undefined;
-          
-          await onRequestWithdrawal(
-              courier.id, 
-              availableBalance, 
-              availableOrderIdsToWithdraw, 
-              targetCompanyId
-          );
-      } finally {
-          setRequestingWithdrawal(false);
-      }
+    if (availableBalance <= 0) return;
+    if (requestLockRef.current || pendingWithdrawal || justRequested) return;
+
+    requestLockRef.current = true;
+    setRequestingWithdrawal(true);
+    setJustRequested(true);
+
+    // Rede de segurança: se o pai não devolver o saque pendente, destrava após 15s
+    const safety = setTimeout(() => {
+      setJustRequested(false);
+      requestLockRef.current = false;
+    }, 15_000);
+
+    try {
+      // Empresa: a da corrida mais recente que está sendo sacada; fallback no vínculo do entregador
+      const latest = [...unwithdrawnOrders]
+        .map(o => ({ o, d: getDeliveredDate(o)?.getTime() || 0 }))
+        .sort((a, b) => b.d - a.d)[0]?.o;
+      const targetCompanyId = latest?.companyId || (courier as any).companyId || undefined;
+
+      await onRequestWithdrawal(
+        courier.id,
+        availableBalance,
+        availableOrderIdsToWithdraw,
+        targetCompanyId
+      );
+    } catch (err) {
+      console.error('Erro ao solicitar saque:', err);
+      clearTimeout(safety);
+      setJustRequested(false);
+      requestLockRef.current = false;
+    } finally {
+      setRequestingWithdrawal(false);
+    }
   };
+
+  // -------------------------------------------------------------------------
+  // RENDER
+  // -------------------------------------------------------------------------
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col pb-20 font-sans">
@@ -295,7 +354,7 @@ const CourierView: React.FC<CourierViewProps> = ({
 
         {/* NAVEGAÇÃO DE ABAS */}
         <div className="flex bg-gray-800 p-1 rounded-xl">
-          <button 
+          <button
             onClick={() => setActiveTab('disponiveis')}
             className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors flex items-center justify-center gap-2 ${activeTab === 'disponiveis' ? 'bg-gray-900 text-white shadow' : 'text-gray-400'}`}
           >
@@ -304,7 +363,7 @@ const CourierView: React.FC<CourierViewProps> = ({
                 <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">{openPoolOrders.length}</span>
             )}
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab('rota')}
             className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors flex items-center justify-center gap-2 ${activeTab === 'rota' ? 'bg-gray-900 text-white shadow' : 'text-gray-400'}`}
           >
@@ -313,7 +372,7 @@ const CourierView: React.FC<CourierViewProps> = ({
                 <span className="bg-green-500 text-white text-[10px] px-2 py-0.5 rounded-full">{myActiveOrders.length}</span>
             )}
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab('carteira')}
             className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors flex items-center justify-center gap-2 ${activeTab === 'carteira' ? 'bg-gray-900 text-white shadow' : 'text-gray-400'}`}
           >
@@ -324,7 +383,7 @@ const CourierView: React.FC<CourierViewProps> = ({
 
       {/* CONTEÚDO PRINCIPAL */}
       <div className="p-4 flex-1">
-        
+
         {/* ABA: DISPONÍVEIS */}
         {activeTab === 'disponiveis' && (
           <div className="space-y-4">
@@ -355,7 +414,7 @@ const CourierView: React.FC<CourierViewProps> = ({
                                 <p className="text-xs text-gray-400">Taxa de Entrega</p>
                             </div>
                         </div>
-                        <button 
+                        <button
                             onClick={() => acceptOrder(order.id)}
                             className="w-full bg-gray-900 text-white font-bold py-3 rounded-xl hover:bg-black transition-colors shadow-lg"
                         >
@@ -383,16 +442,20 @@ const CourierView: React.FC<CourierViewProps> = ({
                     const pMethod = (order.paymentMethod || '').toLowerCase();
                     const isCash = pMethod.includes('cash') || pMethod.includes('dinheiro');
                     const isSettled = !!order.pay;
+                    // TRAVA: pedido em dinheiro cujo caixa ainda não confirmou o acerto
                     const blockedByCashSettlement = isCash && !isSettled;
 
-                    const rawPhone = order.customerPhone ? String(order.customerPhone).replace(/\D/g, '') : '';
+                    const rawPhone = onlyDigits(order.customerPhone);
                     const whatsappLink = rawPhone ? `https://wa.me/${rawPhone}` : null;
 
-                    const cleanCustomerPhone = order.customerPhone ? String(order.customerPhone).replace(/\D/g, '') : '';
-                    const lat = customerCoords[cleanCustomerPhone]?.lat;
-                    const lng = customerCoords[cleanCustomerPhone]?.lng;
-                    const hasExactCoords = !!lat && !!lng;
+                    const coords = customerCoords[phoneKey(order.customerPhone)];
+                    const lat = coords?.lat;
+                    const lng = coords?.lng;
+                    const hasExactCoords = lat !== undefined && lng !== undefined;
                     const addressSearchLink = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${order.deliveryAddress?.street || ''}, ${order.deliveryAddress?.number || ''}, ${order.deliveryAddress?.neighborhood || ''}, ${order.deliveryAddress?.city || ''}`)}`;
+
+                    const items: any[] = (order as any).items || [];
+                    const code = deliveryCodes[order.id] || '';
 
                     return (
                     <div key={order.id} className="bg-white rounded-2xl shadow-md border-l-4 border-green-500 overflow-hidden">
@@ -428,7 +491,7 @@ const CourierView: React.FC<CourierViewProps> = ({
                                 </div>
                             </div>
 
-                            {/* DETALHES DO PEDIDO COM PAGAMENTO TRADUZIDO */}
+                            {/* DETALHES DO PEDIDO */}
                             <div className="grid grid-cols-2 gap-2 bg-gray-50 rounded-xl p-3 border border-gray-100 text-sm">
                                 <div>
                                     <p className="text-[10px] text-gray-400 font-bold uppercase">Forma de Pagamento</p>
@@ -455,43 +518,50 @@ const CourierView: React.FC<CourierViewProps> = ({
                                 )}
                             </div>
 
-                            {/* ITENS DO PEDIDO */}
-                            {(order as any).items && (order as any).items.length > 0 && (
+                            {/* ITENS DO PEDIDO (checklist controlado) */}
+                            {items.length > 0 && (
                                 <div className="bg-gray-50 rounded-xl p-3 border border-gray-100 flex flex-col gap-2 mt-2">
                                     <p className="text-[10px] text-gray-400 font-bold uppercase flex items-center gap-1">
                                         <Package className="w-3.5 h-3.5" /> Conferência de Itens
                                     </p>
-                                    
+
                                     <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                                        {(order as any).items.map((item: any, idx: number) => (
-                                            <label 
-                                                key={item.id || idx} 
+                                        {items.map((item: any, idx: number) => {
+                                            const checkKey = `${order.id}:${item.id ?? idx}`;
+                                            return (
+                                            <label
+                                                key={checkKey}
                                                 className="flex items-start gap-3 p-2.5 bg-white rounded-lg border border-gray-200 cursor-pointer hover:bg-gray-50 transition-colors shadow-sm"
                                             >
-                                                <input 
-                                                    type="checkbox" 
+                                                <input
+                                                    type="checkbox"
+                                                    checked={!!checkedItems[checkKey]}
+                                                    onChange={(e) =>
+                                                        setCheckedItems(prev => ({ ...prev, [checkKey]: e.target.checked }))
+                                                    }
                                                     className="mt-0.5 w-4 h-4 text-green-600 rounded border-gray-300 focus:ring-green-500 cursor-pointer"
                                                 />
                                                 <div className="flex-1">
                                                     <p className="text-sm font-bold text-gray-800 leading-tight">
-                                                        <span className="text-green-600 mr-1">{item.quantity}x</span> 
+                                                        <span className="text-green-600 mr-1">{item.quantity}x</span>
                                                         {item.name || item.productName}
                                                     </p>
-                                                    
+
                                                     {item.observations && (
                                                         <p className="text-xs text-gray-500 mt-1 italic">
                                                             Obs: {item.observations}
                                                         </p>
                                                     )}
-                                                    
-                                                    {item.options && item.options.length > 0 && (
+
+                                                    {Array.isArray(item.options) && item.options.length > 0 && (
                                                         <p className="text-xs text-gray-500 mt-1">
                                                             + {item.options.join(', ')}
                                                         </p>
                                                     )}
                                                 </div>
                                             </label>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             )}
@@ -499,9 +569,9 @@ const CourierView: React.FC<CourierViewProps> = ({
                             {/* GPS */}
                             <div className="flex flex-col gap-2 mt-2">
                                 {hasExactCoords && (
-                                    <a 
+                                    <a
                                         href={`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`}
-                                        target="_blank" 
+                                        target="_blank"
                                         rel="noopener noreferrer"
                                         className="flex items-center justify-center gap-2 w-full bg-green-50 text-green-700 font-bold py-2.5 rounded-xl border border-green-200 hover:bg-green-100"
                                     >
@@ -509,9 +579,9 @@ const CourierView: React.FC<CourierViewProps> = ({
                                     </a>
                                 )}
                                 {order.deliveryAddress && (
-                                    <a 
+                                    <a
                                         href={order.deliveryAddress.mapLink || addressSearchLink}
-                                        target="_blank" 
+                                        target="_blank"
                                         rel="noopener noreferrer"
                                         className="flex items-center justify-center gap-2 w-full bg-blue-50 text-blue-700 font-bold py-2.5 rounded-xl border border-blue-200 hover:bg-blue-100"
                                     >
@@ -523,18 +593,24 @@ const CourierView: React.FC<CourierViewProps> = ({
                             <div className="pt-4 border-t border-gray-100">
                                 <label className="text-sm font-bold text-gray-700 mb-2 block">Código de Entrega (se houver):</label>
                                 <div className="flex gap-2">
-                                    <input 
-                                        type="text" 
+                                    <input
+                                        type="text"
                                         placeholder="Ex: 1234"
-                                        value={deliveryCode}
-                                        onChange={(e) => setDeliveryCode(e.target.value)}
+                                        value={code}
+                                        onChange={(e) =>
+                                            setDeliveryCodes(prev => ({ ...prev, [order.id]: e.target.value }))
+                                        }
                                         disabled={blockedByCashSettlement}
                                         className="flex-1 border-2 border-gray-200 rounded-xl px-4 py-2 text-center text-lg font-bold tracking-widest focus:border-green-500 outline-none disabled:bg-gray-100 disabled:text-gray-400"
                                     />
-                                    <button 
+                                    <button
                                         onClick={() => {
-                                            confirmDelivery(order.id, deliveryCode);
-                                            setDeliveryCode('');
+                                            confirmDelivery(order.id, code);
+                                            setDeliveryCodes(prev => {
+                                                const next = { ...prev };
+                                                delete next[order.id];
+                                                return next;
+                                            });
                                         }}
                                         disabled={blockedByCashSettlement}
                                         className="bg-green-600 text-white px-6 font-bold rounded-xl hover:bg-green-700 transition flex items-center gap-2 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed"
@@ -564,7 +640,7 @@ const CourierView: React.FC<CourierViewProps> = ({
                 <DollarSign className="absolute -right-4 -top-4 w-32 h-32 text-white opacity-5" />
                 <p className="text-gray-400 font-medium text-sm">Saldo a Receber (Pendente)</p>
                 <h2 className="text-4xl font-black mt-1 text-green-400">R$ {walletBalance.toFixed(2)}</h2>
-                
+
                 <div className="mt-6 pt-4 border-t border-gray-700 flex justify-between items-center">
                     <div>
                         <p className="text-gray-400 text-xs">Total já recebido</p>
@@ -578,16 +654,16 @@ const CourierView: React.FC<CourierViewProps> = ({
 
                 <button
                     onClick={handleRequestWithdrawal}
-                    disabled={availableBalance <= 0 || !!pendingWithdrawal || requestingWithdrawal}
+                    disabled={availableBalance <= 0 || !!pendingWithdrawal || requestingWithdrawal || justRequested}
                     className={`w-full mt-5 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${
                         pendingWithdrawal
                             ? 'bg-yellow-500/20 text-yellow-300 cursor-not-allowed'
-                            : availableBalance <= 0
+                            : availableBalance <= 0 || justRequested
                             ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                             : 'bg-green-500 text-gray-900 hover:bg-green-400'
                     }`}
                 >
-                    {requestingWithdrawal ? (
+                    {requestingWithdrawal || (justRequested && !pendingWithdrawal) ? (
                         <><Loader2 className="w-4 h-4 animate-spin" /> Enviando...</>
                     ) : pendingWithdrawal ? (
                         <><Clock className="w-4 h-4" /> Saque de R$ {(Number(pendingWithdrawal.amount) || 0).toFixed(2)} em análise</>
@@ -605,11 +681,13 @@ const CourierView: React.FC<CourierViewProps> = ({
                     <p className="text-sm text-gray-500 text-center py-4">Você ainda não solicitou nenhum saque.</p>
                 ) : (
                     <div className="space-y-2">
-                        {myWithdrawals.map(w => (
+                        {myWithdrawals.map(w => {
+                            const wDate = getWithdrawalDate(w);
+                            return (
                             <div key={w.id} className="bg-white p-3 rounded-xl border border-gray-200 flex justify-between items-center">
                                 <div>
                                     <p className="font-bold text-sm text-gray-800">R$ {(Number(w.amount) || 0).toFixed(2)}</p>
-                                    <p className="text-xs text-gray-400">{new Date(w.date).toLocaleDateString('pt-BR')}</p>
+                                    <p className="text-xs text-gray-400">{wDate ? wDate.toLocaleDateString('pt-BR') : '—'}</p>
                                 </div>
                                 {w.status === 'pending' && (
                                     <span className="flex items-center gap-1 text-xs font-bold text-yellow-700 bg-yellow-50 px-2.5 py-1 rounded-full border border-yellow-200">
@@ -627,14 +705,15 @@ const CourierView: React.FC<CourierViewProps> = ({
                                     </span>
                                 )}
                             </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </div>
 
             <div className="mt-6">
                 <h3 className="font-bold text-gray-700 mb-3 flex items-center gap-2">
-                    <CheckCircle className="w-4 h-4 text-green-500" /> Últimas corridas entregues
+                    <CheckCircle className="w-4 h-4 text-green-500" /> Corridas entregues hoje
                 </h3>
                 {todaysCompletedOrders.length === 0 ? (
                     <p className="text-sm text-gray-500 text-center py-4">Você ainda não realizou nenhuma entrega hoje.</p>
