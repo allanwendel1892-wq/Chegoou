@@ -155,12 +155,96 @@ const CourierView: React.FC<CourierViewProps> = ({
     return (availableOrders || []).filter(o => o.status === 'waiting_courier');
   }, [availableOrders]);
 
+  // ENTREGAS DO PRÓPRIO ENTREGADOR (busca direta no banco, paginada)
+  // - Saldo: TODAS as corridas entregues e ainda não pagas, de qualquer data.
+  // - Lista "hoje": corridas entregues hoje (mesmo as já pagas).
+  // Ficam em estado separado, que as props nunca sobrescrevem. As duas fontes são
+  // unidas por id (props têm prioridade nos campos), então não brigam entre si.
+  const [ownOrders, setOwnOrders] = useState<Order[]>([]);
+  const [ownLoaded, setOwnLoaded] = useState(false);
+  const [ownFetchError, setOwnFetchError] = useState<string | null>(null);
+  const ownFetchSeq = useRef(0);
+
+  const fetchOwnOrders = useCallback(async () => {
+    if (!courier?.id) return;
+    const seq = ++ownFetchSeq.current;
+    const cols = 'id,courierId,status,deliveryFee,courierPaid,companyId,customerName,timestamp,repasseDate';
+
+    try {
+      const rows = new Map<string, any>();
+
+      // 1) Entregas NÃO pagas (paginado: o Supabase corta em 1000 linhas por requisição)
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase
+          .from('orders').select(cols)
+          .eq('courierId', courier.id)
+          .eq('status', 'delivered')
+          .or('courierPaid.is.null,courierPaid.eq.false')
+          .order('timestamp', { ascending: false })
+          .range(from, from + 999);
+        if (error) throw error;
+        (data || []).forEach((r: any) => rows.set(r.id, r));
+        if (!data || data.length < 1000) break;
+      }
+
+      // 2) Entregues HOJE (inclui as já pagas), só para a lista do dia
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const since = startOfDay.toISOString();
+      for (const col of ['repasseDate', 'timestamp']) {
+        const { data, error } = await supabase
+          .from('orders').select(cols)
+          .eq('courierId', courier.id)
+          .eq('status', 'delivered')
+          .gte(col, since)
+          .limit(500);
+        if (error) throw error;
+        (data || []).forEach((r: any) => rows.set(r.id, r));
+      }
+
+      if (seq !== ownFetchSeq.current) return; // já existe uma busca mais nova
+      setOwnOrders(Array.from(rows.values()) as Order[]);
+      setOwnFetchError(null);
+    } catch (err: any) {
+      console.error('[Carteira] erro ao buscar entregas do entregador:', err);
+      if (seq === ownFetchSeq.current) setOwnFetchError(err?.message || 'erro desconhecido');
+    } finally {
+      if (seq === ownFetchSeq.current) setOwnLoaded(true);
+    }
+  }, [courier?.id]);
+
+  // Quantas entregas dele já constam como "entregue" nas props: quando esse número
+  // muda (ele acabou de concluir uma corrida), busca de novo na hora.
+  const deliveredByMeCount = useMemo(
+    () => (availableOrders || []).filter(o => o.courierId === courier.id && o.status === 'delivered').length,
+    [availableOrders, courier.id]
+  );
+
+  useEffect(() => {
+    fetchOwnOrders();
+  }, [fetchOwnOrders, deliveredByMeCount]);
+
+  // Atualiza a cada 30s e ao voltar para a aba
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === 'visible') fetchOwnOrders(); };
+    const id = setInterval(refresh, 30_000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [fetchOwnOrders]);
+
   const myCompletedOrders = useMemo(() => {
-    return (availableOrders || []).filter(o =>
-        o.courierId === courier.id &&
-        o.status === 'delivered'
-    );
-  }, [availableOrders, courier.id]);
+    const map = new Map<string, Order>();
+    ownOrders.forEach(o => map.set(o.id, o));
+    (availableOrders || []).forEach(o => {
+      if (o.courierId === courier.id && o.status === 'delivered') {
+        map.set(o.id, { ...(map.get(o.id) || {}), ...o } as Order);
+      }
+    });
+    return Array.from(map.values());
+  }, [availableOrders, ownOrders, courier.id]);
 
   const todaysCompletedOrders = useMemo(() => {
     return myCompletedOrders
@@ -262,7 +346,7 @@ const CourierView: React.FC<CourierViewProps> = ({
 
   // Corridas concluídas que ainda não entraram em nenhum saque
   const unwithdrawnOrders = useMemo(
-    () => myCompletedOrders.filter(o => !withdrawnOrderIds.has(o.id)),
+    () => myCompletedOrders.filter(o => !withdrawnOrderIds.has(o.id) && (o as any).courierPaid !== true),
     [myCompletedOrders, withdrawnOrderIds]
   );
 
@@ -308,6 +392,7 @@ const CourierView: React.FC<CourierViewProps> = ({
 
   const handleRequestWithdrawal = async () => {
     if (availableBalance <= 0) return;
+    if (!ownLoaded || ownFetchError) return; // não saca com saldo incompleto
     if (requestLockRef.current || pendingWithdrawal || justRequested) return;
 
     requestLockRef.current = true;
@@ -660,10 +745,17 @@ const CourierView: React.FC<CourierViewProps> = ({
         {/* ABA: CARTEIRA */}
         {activeTab === 'carteira' && (
           <div className="space-y-4">
+            {ownFetchError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded-xl p-3 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span className="flex-1">Não foi possível atualizar suas entregas. O saque fica bloqueado até atualizar.</span>
+                    <button onClick={fetchOwnOrders} className="underline">Tentar de novo</button>
+                </div>
+            )}
             <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
                 <DollarSign className="absolute -right-4 -top-4 w-32 h-32 text-white opacity-5" />
                 <p className="text-gray-400 font-medium text-sm">Saldo a Receber (Pendente)</p>
-                <h2 className="text-4xl font-black mt-1 text-green-400">R$ {walletBalance.toFixed(2)}</h2>
+                <h2 className="text-4xl font-black mt-1 text-green-400">{ownLoaded ? `R$ ${walletBalance.toFixed(2)}` : 'Calculando...'}</h2>
 
                 <div className="mt-6 pt-4 border-t border-gray-700 flex justify-between items-center">
                     <div>
@@ -671,14 +763,14 @@ const CourierView: React.FC<CourierViewProps> = ({
                         <p className="font-bold">R$ {totalRecebido.toFixed(2)}</p>
                     </div>
                     <div className="text-right">
-                        <p className="text-gray-400 text-xs">Total de entregas</p>
-                        <p className="font-bold">{myCompletedOrders.length} corridas</p>
+                        <p className="text-gray-400 text-xs">Entregas a receber</p>
+                        <p className="font-bold">{unwithdrawnOrders.length} corridas</p>
                     </div>
                 </div>
 
                 <button
                     onClick={handleRequestWithdrawal}
-                    disabled={availableBalance <= 0 || !!pendingWithdrawal || requestingWithdrawal || justRequested}
+                    disabled={availableBalance <= 0 || !!pendingWithdrawal || requestingWithdrawal || justRequested || !ownLoaded || !!ownFetchError}
                     className={`w-full mt-5 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${
                         pendingWithdrawal
                             ? 'bg-yellow-500/20 text-yellow-300 cursor-not-allowed'
