@@ -39,6 +39,13 @@ const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 const onlyDigits = (v?: string | null): string => (v ? String(v).replace(/\D/g, '') : '');
 
+// Colunas como items e deliveryAddress podem vir do banco como STRING JSON.
+// Se for string, faz o parse; se já for objeto/array, devolve como está.
+const parseJson = (v: any): any => {
+  if (typeof v !== 'string') return v;
+  try { return JSON.parse(v); } catch { return null; }
+};
+
 // Chave canônica de telefone: só dígitos e sem o DDI 55 (se houver),
 // para casar "(81) 99999-9999", "81999999999" e "5581999999999".
 const phoneKey = (v?: string | null): string => {
@@ -61,9 +68,11 @@ const parseDate = (raw: any): Date | null => {
       return isNaN(d.getTime()) ? null : d;
     }
     if (typeof raw === 'string') {
-      let s = raw.trim();
-      const semFuso = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s);
-      if (semFuso) s = s.replace(' ', 'T') + 'Z';
+      let s = raw.trim().replace(' ', 'T');
+      // "…23:08:18.21+00" -> "…+00:00" (Safari/iPhone rejeita fuso sem os minutos)
+      s = s.replace(/(T[\d:.]+)([+-]\d{2})$/, '$1$2:00');
+      // sem fuso nenhum -> assume UTC
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)) s += 'Z';
       const d = new Date(s);
       return isNaN(d.getTime()) ? null : d;
     }
@@ -75,8 +84,15 @@ const parseDate = (raw: any): Date | null => {
 
 // Data em que a entrega foi concluída. NÃO cai em createdAt: um pedido criado
 // ontem e entregue hoje não pode ser tratado como "de ontem" nem vice-versa.
-const getDeliveredDate = (order: any): Date | null =>
-  parseDate(order.deliveredAt ?? order.delivered_at ?? order.updatedAt ?? order.updated_at ?? order.timestamp ?? order.date);
+const getDeliveredDate = (order: any): Date | null => {
+  const explicit = parseDate(order.deliveredAt ?? order.delivered_at);
+  if (explicit) return explicit;
+  // O App grava repasseDate = momento da entrega em updateOrderStatus('delivered').
+  // Ignora se estiver no futuro (data de repasse agendada, não de entrega).
+  const rep = parseDate(order.repasseDate);
+  if (rep && rep.getTime() <= Date.now() + 5 * 60_000) return rep;
+  return parseDate(order.timestamp ?? order.date);
+};
 
 const getWithdrawalDate = (w: any): Date | null =>
   parseDate(w.date ?? w.createdAt ?? w.created_at);
@@ -405,9 +421,9 @@ const CourierView: React.FC<CourierViewProps> = ({
                     <div key={order.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col gap-4">
                         <div className="flex justify-between items-start">
                             <div>
-                                <span className="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-1 rounded-md">#{order.id.slice(0,6)}</span>
+                                <span className="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-1 rounded-md">#{order.id.slice(-6)}</span>
                                 <p className="font-bold text-gray-800 mt-2">{order.customerName}</p>
-                                <p className="text-sm text-gray-500 truncate max-w-[200px]">{order.deliveryAddress?.street}</p>
+                                <p className="text-sm text-gray-500 truncate max-w-[200px]">{parseJson((order as any).deliveryAddress)?.street}</p>
                             </div>
                             <div className="text-right">
                                 <span className="text-xl font-black text-green-600">R$ {(Number(order.deliveryFee) || 0).toFixed(2)}</span>
@@ -445,6 +461,8 @@ const CourierView: React.FC<CourierViewProps> = ({
                     // TRAVA: pedido em dinheiro cujo caixa ainda não confirmou o acerto
                     const blockedByCashSettlement = isCash && !isSettled;
 
+                    const addr: any = parseJson((order as any).deliveryAddress) || {};
+                    const parsedItems = parseJson((order as any).items);
                     const rawPhone = onlyDigits(order.customerPhone);
                     const whatsappLink = rawPhone ? `https://wa.me/${rawPhone}` : null;
 
@@ -452,9 +470,9 @@ const CourierView: React.FC<CourierViewProps> = ({
                     const lat = coords?.lat;
                     const lng = coords?.lng;
                     const hasExactCoords = lat !== undefined && lng !== undefined;
-                    const addressSearchLink = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${order.deliveryAddress?.street || ''}, ${order.deliveryAddress?.number || ''}, ${order.deliveryAddress?.neighborhood || ''}, ${order.deliveryAddress?.city || ''}`)}`;
+                    const addressSearchLink = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${addr.street || ''}, ${addr.number || ''}, ${addr.neighborhood || ''}, ${addr.city || ''}`)}`;
 
-                    const items: any[] = (order as any).items || [];
+                    const items: any[] = Array.isArray(parsedItems) ? parsedItems : [];
                     const code = deliveryCodes[order.id] || '';
 
                     return (
@@ -480,8 +498,8 @@ const CourierView: React.FC<CourierViewProps> = ({
                                     <p className="text-gray-600 text-sm mt-1 flex items-start gap-1">
                                         <MapPin className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
                                         <span>
-                                            {order.deliveryAddress?.street}, {order.deliveryAddress?.number}
-                                            <br/>{order.deliveryAddress?.neighborhood}
+                                            {addr.street}, {addr.number}
+                                            <br/>{addr.neighborhood}
                                         </span>
                                     </p>
                                 </div>
@@ -553,6 +571,12 @@ const CourierView: React.FC<CourierViewProps> = ({
                                                         </p>
                                                     )}
 
+                                                    {Array.isArray(item.selectedOptions) && item.selectedOptions.length > 0 && (
+                                                        <p className="text-xs text-gray-500 mt-1">
+                                                            + {item.selectedOptions.map((o: any) => o.optionName || o).join(', ')}
+                                                        </p>
+                                                    )}
+
                                                     {Array.isArray(item.options) && item.options.length > 0 && (
                                                         <p className="text-xs text-gray-500 mt-1">
                                                             + {item.options.join(', ')}
@@ -578,9 +602,9 @@ const CourierView: React.FC<CourierViewProps> = ({
                                         <Crosshair className="w-5 h-5" /> Abrir Localização
                                     </a>
                                 )}
-                                {order.deliveryAddress && (
+                                {(addr.street || addr.neighborhood) && (
                                     <a
-                                        href={order.deliveryAddress.mapLink || addressSearchLink}
+                                        href={addr.mapLink || addressSearchLink}
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="flex items-center justify-center gap-2 w-full bg-blue-50 text-blue-700 font-bold py-2.5 rounded-xl border border-blue-200 hover:bg-blue-100"
@@ -723,7 +747,7 @@ const CourierView: React.FC<CourierViewProps> = ({
                             <div key={order.id} className="bg-white p-3 rounded-xl border border-gray-200 flex justify-between items-center">
                                 <div>
                                     <p className="font-bold text-sm text-gray-800">{order.customerName}</p>
-                                    <p className="text-xs text-gray-400">Pedido #{order.id.slice(0,6)}</p>
+                                    <p className="text-xs text-gray-400">Pedido #{order.id.slice(-6)}</p>
                                 </div>
                                 <div className="font-bold text-green-600">
                                     + R$ {(Number(order.deliveryFee) || 0).toFixed(2)}
