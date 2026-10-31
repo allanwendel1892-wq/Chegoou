@@ -543,13 +543,14 @@ const App: React.FC = () => {
    *   orders, users, coupons, withdrawals, messages), sem travar a tela de login,
    *   que já é exibida instantaneamente (ver LÓGICA DE RENDERIZAÇÃO mais abaixo).
    */
-  useEffect(() => {
+    useEffect(() => {
     if (publicMenuCompanyId) {
       fetchPublicMenuData();
-    } else {
-      fetchInitialData();
+      return;
     }
-  }, []);
+    if (!currentUser) return; // sem login, não baixa nada
+    fetchInitialData();
+  }, [currentUser?.id]);
 
     // --- SUPABASE REALTIME: PEDIDOS, CHAT E SAQUES ---
   useEffect(() => {
@@ -751,7 +752,9 @@ const App: React.FC = () => {
 
           if (courierCompanyId) {
               // Entregador só baixa pedidos do restaurante que ele está vinculado
-              ordersQuery = supabase.from('orders').select('*').eq('companyId', courierCompanyId).limit(5000);
+              ordersQuery = supabase.from('orders').select('*')
+    .eq('companyId', courierCompanyId)
+    .in('status', ACTIVE_STATUSES);
           } else {
               // Sem vínculo, não baixa pedidos
               ordersQuery = Promise.resolve({ data: [], error: null }) as any;
@@ -835,9 +838,13 @@ const App: React.FC = () => {
           // Baixar saques apenas deste restaurante (seja do parceiro ou repasses dos motoboys)
           withdrawalsQuery = supabase.from('withdrawal_requests').select('*').or(`userId.eq.${userId},companyId.eq.${userId}`);
 
-      } else if (role === 'courier' && userId) {
-          // O entregador não deve baixar usuários.
-          usersQuery = Promise.resolve({ data: [], error: null }) as any;
+                // Histórico do entregador: corridas entregues por ele e ainda não pagas
+          ordersHistoryQuery = supabase.from('orders').select('*')
+              .eq('courierId', userId)
+              .eq('status', 'delivered')
+              .or('courierPaid.is.null,courierPaid.eq.false')
+              .order('timestamp', { ascending: false })
+              .limit(500);
 
           // Entregador só baixa seus próprios saques
           withdrawalsQuery = supabase.from('withdrawal_requests').select('*').eq('userId', userId);
@@ -1353,7 +1360,7 @@ const App: React.FC = () => {
         }
 
         // 2. Atualiza o estado interno do React local
-        setWithdrawals(prev => [newRequest as any, ...prev]);
+        setWithdrawals(prev => prev.some(w => w.id === newRequest.id) ? prev : [newRequest as any, ...prev]);
         alert("Solicitação de saque enviada com sucesso! Aguarde a aprovação do restaurante.");
 
     } catch (err) {
