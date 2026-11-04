@@ -1441,9 +1441,15 @@ const App: React.FC = () => {
         }
     }
 
-    // 2. CORREÇÃO DO STATUS E PIX:
-    // O Pix direto na chave da loja agora se comporta como dinheiro (entra como Pendente)
-    const initialStatus = (paymentMethod === 'cash' || paymentMethod === 'pix') ? 'pending' : 'waiting_payment';
+    // 2. STATUS INICIAL DO PEDIDO
+    // Cardápio digital (sempre envia guestData):
+    //   - Pix  -> "Aguardando Pagamento" (restaurante confere o recebimento)
+    //   - Dinheiro / Cartão (maquineta na entrega) -> "Pendente"
+    // Fluxo logado (ClientView): mantém a regra anterior por causa do gateway de cartão.
+    const isDigitalMenuOrder = !!guestData;
+    const initialStatus: Order['status'] = isDigitalMenuOrder
+        ? (paymentMethod === 'pix' ? 'waiting_payment' : 'pending')
+        : ((paymentMethod === 'cash' || paymentMethod === 'pix') ? 'pending' : 'waiting_payment');
 
     const newOrder: Order = {
         id: `ord-${Date.now()}`,
@@ -1520,34 +1526,23 @@ const App: React.FC = () => {
     showInAppNotification("Pedido Criado!", "Seu pedido foi enviado com sucesso!", "🍟");
     return newOrder.id; 
   };
-    /**
-   * Busca pedido ativo pelo número do WhatsApp (Para Cardápio Digital Público)
+  /**
+   * Converte o pedido do banco no formato do acompanhamento do cliente.
+   * Para o cliente, "aguardando pagamento" e "pendente" aparecem iguais ("Pendente"),
+   * para ele não achar que o pagamento deu errado enquanto o restaurante confere.
+   * `pixPending` indica que o pedido ainda está de fato em conferência de Pix
+   * (usado só para exibir o QR Code).
    */
-  const handleTrackByPhone = async (phone: string) => {
-      const formattedPhone = normalizeWhatsApp(phone);
-      
-      const { data, error } = await supabase
-          .from('orders')
-          .select('*')
-          .eq('customerPhone', formattedPhone)
-          .in('status', ['waiting_payment', 'pending', 'preparing', 'ready', 'delivering'])
-          .order('timestamp', { ascending: false })
-          .limit(1)
-          .single();
-          
-      if (error || !data) return null;
-
-      // Pedidos concluídos ou cancelados não devem aparecer para o cliente
+  const mapOrderToTracking = (data: any) => {
+      if (!data) return null;
       if (data.status === 'delivered' || data.status === 'cancelled') return null;
-      
-      // Adaptando o status do banco para o padrão da nova interface
+
       let trackingStatus: 'pending_payment' | 'preparing' | 'ready' | 'out_for_delivery' = 'preparing';
-      
-      if (data.status === 'waiting_payment' || (data.status === 'pending' && data.paymentMethod === 'pix')) {
+      if (data.status === 'waiting_payment' || data.status === 'pending') {
           trackingStatus = 'pending_payment';
       } else if (data.status === 'delivering') {
           trackingStatus = 'out_for_delivery';
-      } else if (data.status === 'ready') {
+      } else if (data.status === 'ready' || data.status === 'waiting_courier') {
           trackingStatus = 'ready';
       }
 
@@ -1557,6 +1552,7 @@ const App: React.FC = () => {
           paymentMethod: data.paymentMethod,
           customerName: data.customerName,
           status: trackingStatus,
+          pixPending: data.paymentMethod === 'pix' && data.status === 'waiting_payment',
           timestamp: Date.now(), // injeta timestamp novo para prolongar cache
           items: (data.items || []).map((i: any) => ({
               name: i.productName,
@@ -1566,7 +1562,26 @@ const App: React.FC = () => {
       };
   };
 
-    /**
+  /**
+   * Busca pedido ativo pelo número do WhatsApp (Para Cardápio Digital Público)
+   */
+  const handleTrackByPhone = async (phone: string) => {
+      const formattedPhone = normalizeWhatsApp(phone);
+
+      const { data, error } = await supabase
+          .from('orders')
+          .select('*')
+          .eq('customerPhone', formattedPhone)
+          .in('status', ['waiting_payment', 'pending', 'preparing', 'ready', 'waiting_courier', 'delivering'])
+          .order('timestamp', { ascending: false })
+          .limit(1)
+          .single();
+
+      if (error || !data) return null;
+      return mapOrderToTracking(data);
+  };
+
+  /**
    * Busca pedido ativo pelo ID (Para atualizar o status na tela de Rastreio)
    */
   const handleTrackOrderById = async (orderId: string) => {
@@ -1575,34 +1590,9 @@ const App: React.FC = () => {
           .select('*')
           .eq('id', orderId)
           .single();
-          
+
       if (error || !data) return null;
-
-      // Pedido concluído ou cancelado: encerra o acompanhamento do cliente
-      if (data.status === 'delivered' || data.status === 'cancelled') return null;
-      
-      let trackingStatus: 'pending_payment' | 'preparing' | 'ready' | 'out_for_delivery' = 'preparing';
-      if (data.status === 'waiting_payment' || (data.status === 'pending' && data.paymentMethod === 'pix')) {
-          trackingStatus = 'pending_payment';
-      } else if (data.status === 'delivering') {
-          trackingStatus = 'out_for_delivery';
-      } else if (data.status === 'ready') {
-          trackingStatus = 'ready';
-      }
-
-      return {
-          id: data.id,
-          total: data.total,
-          paymentMethod: data.paymentMethod,
-          customerName: data.customerName,
-          status: trackingStatus,
-          timestamp: Date.now(), // injeta novo timestamp
-          items: (data.items || []).map((i: any) => ({
-              name: i.productName,
-              quantity: i.quantity,
-              selectedOptions: i.selectedOptions
-          }))
-      };
+      return mapOrderToTracking(data);
   };
 
   /**
