@@ -106,6 +106,20 @@ const formatPaymentMethod = (method?: string) => {
   return method.charAt(0).toUpperCase() + method.slice(1);
 };
 
+// Agrupa as opções selecionadas pelo nome do grupo (ex: "BEBIDA: Coca, Guaraná").
+// Aceita opções como objeto ({ groupName, optionName }) ou como string simples.
+const groupSelectedOptions = (item: any): { groupName: string; names: string[] }[] => {
+  const opts = Array.isArray(item?.selectedOptions) ? item.selectedOptions : [];
+  const groups = new Map<string, string[]>();
+  opts.forEach((o: any) => {
+    const groupName = o && typeof o === 'object' ? String(o.groupName || '') : '';
+    const name = o && typeof o === 'object' ? String(o.optionName || o.name || '') : String(o || '');
+    if (!name) return;
+    groups.set(groupName, [...(groups.get(groupName) || []), name]);
+  });
+  return Array.from(groups, ([groupName, names]) => ({ groupName, names }));
+};
+
 const sameDay = (a: Date, b: Date) =>
   a.getDate() === b.getDate() && a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
 
@@ -656,11 +670,14 @@ const CourierView: React.FC<CourierViewProps> = ({
                                                         </p>
                                                     )}
 
-                                                    {Array.isArray(item.selectedOptions) && item.selectedOptions.length > 0 && (
-                                                        <p className="text-xs text-gray-500 mt-1">
-                                                            + {item.selectedOptions.map((o: any) => o.optionName || o).join(', ')}
+                                                    {groupSelectedOptions(item).map((g, gi) => (
+                                                        <p key={gi} className="text-xs text-gray-600 mt-1 leading-snug">
+                                                            {g.groupName
+                                                                ? <span className="font-bold uppercase text-gray-800">{g.groupName}: </span>
+                                                                : <span className="font-bold text-gray-800">+ </span>}
+                                                            {g.names.join(', ')}
                                                         </p>
-                                                    )}
+                                                    ))}
 
                                                     {Array.isArray(item.options) && item.options.length > 0 && (
                                                         <p className="text-xs text-gray-500 mt-1">
