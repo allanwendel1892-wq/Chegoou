@@ -16,6 +16,7 @@ export interface ActiveOrder {
     paymentMethod: 'cash' | 'card' | 'pix';
     customerName: string;
     status: 'pending_payment' | 'preparing' | 'ready' | 'out_for_delivery';
+    pixPending?: boolean;
     timestamp: number;
     items?: { name: string; quantity: number; selectedOptions?: { groupName?: string; optionName: string; price?: number }[] }[];
 }
@@ -426,6 +427,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                 paymentMethod,
                 customerName: customerName.trim(),
                 status: 'pending_payment',
+                pixPending: paymentMethod === 'pix',
                 timestamp: Date.now()
             };
 
@@ -938,15 +940,17 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                             </div>
                         </div>
 
-                        {activeOrder.status === 'pending_payment' && activeOrder.paymentMethod === 'pix' && trackingPixPayload && (
+                        {activeOrder.pixPending && trackingPixPayload && (
                             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden relative">
                                 <div className="h-2 w-full bg-teal-50 flex" style={{ backgroundImage: 'radial-gradient(circle, #fff 4px, transparent 5px)', backgroundSize: '12px 12px', backgroundPosition: 'top left', marginTop: '-4px' }}></div>
                                 <div className="bg-teal-50 p-5 border-b border-teal-100 text-center relative">
                                     <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center mx-auto mb-2 shadow-sm">
                                         <QrCode className="w-6 h-6 text-teal-600" />
                                     </div>
-                                    <h3 className="font-bold text-teal-900 text-lg">Aguardando Pagamento</h3>
-                                    <p className="text-sm text-teal-700 mt-1">Escaneie o QR Code ou copie o código Pix para iniciarmos o preparo.</p>
+                                    <h3 className="font-bold text-teal-900 text-lg">Pedido Recebido!</h3>
+                                    <p className="text-sm text-teal-700 mt-1">
+                                        Pague com o QR Code ou com o Pix Copia e Cola abaixo. Se você já pagou, fique tranquilo: o restaurante está conferindo e o pedido segue para o preparo em seguida.
+                                    </p>
                                 </div>
                                 <div className="p-6 flex flex-col items-center">
                                     <div className="bg-white p-3 rounded-2xl border-2 border-dashed border-gray-200 mb-6 inline-block">
