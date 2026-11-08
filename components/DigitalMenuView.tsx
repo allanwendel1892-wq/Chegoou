@@ -178,15 +178,29 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
     const categories = useMemo(() => ['Tudo', ...Array.from(new Set(products.map(p => p.category)))], [products]);
     const productTotal = useMemo(() => cart.reduce((acc, item) => acc + (item.finalPrice * item.quantity), 0), [cart]);
     
+    // Bairros disponíveis para entrega: só os ativos (active !== false), em ordem alfabética
+    const availableNeighborhoods = useMemo(() => {
+        const list: any[] = (company as any).neighborhood_fees || (company as any).neighborhoodFees || [];
+        return list
+            .filter(n => n && n.neighborhood && n.active !== false)
+            .sort((a, b) => String(a.neighborhood).localeCompare(String(b.neighborhood), 'pt-BR', { sensitivity: 'base' }));
+    }, [company]);
+
+    // Se o bairro escolhido foi desativado depois, limpa a seleção
+    useEffect(() => {
+        if (neighborhood && !availableNeighborhoods.some(n => n.neighborhood === neighborhood)) {
+            setNeighborhood('');
+        }
+    }, [availableNeighborhoods, neighborhood]);
+
     const activeDeliveryFee = useMemo(() => {
         if (deliveryMethod === 'pickup') return 0;
-        const neighborhoodFees = (company as any).neighborhood_fees || (company as any).neighborhoodFees || [];
-        if (neighborhood && neighborhoodFees.length > 0) {
-            const found = neighborhoodFees.find((n: any) => n.neighborhood === neighborhood);
+        if (neighborhood && availableNeighborhoods.length > 0) {
+            const found = availableNeighborhoods.find((n: any) => n.neighborhood === neighborhood);
             if (found) return found.fee;
         }
         return company.deliveryType === 'own' ? (company.ownDeliveryFee || 0) : 5.00;
-    }, [deliveryMethod, neighborhood, company]);
+    }, [deliveryMethod, neighborhood, company, availableNeighborhoods]);
 
     const serviceFeeValue = 0.00; 
 
@@ -359,6 +373,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
         }
         if (step === 3 && deliveryMethod === 'delivery') {
             if (!neighborhood.trim()) return "Selecione o bairro para entrega.";
+            if (availableNeighborhoods.length > 0 && !availableNeighborhoods.some(n => n.neighborhood === neighborhood)) return "Este bairro não está disponível para entrega no momento.";
             if (!street.trim() || !number.trim()) return "Preencha a rua e o número para entrega.";
         }
         if ((step === 3 || step === 4) && isBelowMinOrder) {
@@ -760,7 +775,7 @@ const DigitalMenuView: React.FC<DigitalMenuViewProps> = ({ company, products, on
                                             <div className="space-y-3 animate-fade-in">
                                                 <select value={neighborhood} onChange={e => setNeighborhood(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-3 text-sm outline-none focus:border-red-400 text-gray-700">
                                                     <option value="">Selecione o Bairro da Entrega...</option>
-                                                    {((company as any).neighborhood_fees || (company as any).neighborhoodFees || []).map((n: any) => (
+                                                    {availableNeighborhoods.map((n: any) => (
                                                         <option key={n.neighborhood} value={n.neighborhood}>{n.neighborhood} (Taxa: R$ {n.fee.toFixed(2)})</option>
                                                     ))}
                                                 </select>
