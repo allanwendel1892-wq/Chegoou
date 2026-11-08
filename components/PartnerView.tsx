@@ -2026,6 +2026,13 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             updatedCompany.coverImage = await uploadCompanyImage(updatedCompany.coverImage, company.id, 'banner');
         }
 
+        // Ordena os bairros alfabeticamente (pt-BR, ignora acentos/maiúsculas) e descarta linhas vazias
+        const sortedFees = [...(((updatedCompany as any).neighborhood_fees || (updatedCompany as any).neighborhoodFees || []) as any[])]
+            .filter(n => n && String(n.neighborhood || '').trim() !== '')
+            .map(n => ({ ...n, neighborhood: String(n.neighborhood).trim(), active: n.active !== false }))
+            .sort((a, b) => a.neighborhood.localeCompare(b.neighborhood, 'pt-BR', { sensitivity: 'base' }));
+        (updatedCompany as any).neighborhood_fees = sortedFees;
+
         // 1. Atualiza a tela imediatamente (Otimista)
         setLocalCompany(updatedCompany);
         updateCompany(updatedCompany);
@@ -2035,7 +2042,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
             const { error } = await supabase
                 .from('companies') 
                 .update({
-                    neighborhood_fees: (updatedCompany as any).neighborhoodFees,
+                    neighborhood_fees: sortedFees,
                     min_order_value: Number((updatedCompany as any).min_order_value) || 0
                 })
                 .eq('id', company.id);
@@ -3411,7 +3418,7 @@ delete updated.mapLink;
                                     </label>
                                     <button 
                                         onClick={() => {
-                                            const newFees = [...(localCompany.neighborhood_fees || []), { neighborhood: '', fee: 0 }];
+                                            const newFees = [...(localCompany.neighborhood_fees || []), { neighborhood: '', fee: 0, active: true } as any];
                                             setLocalCompany({...localCompany, neighborhood_fees: newFees});
                                         }}
                                         className="text-xs bg-gray-900 text-white hover:bg-black px-3 py-1.5 rounded-lg font-bold transition-colors"
@@ -3425,7 +3432,23 @@ delete updated.mapLink;
                                 ) : (
                                     <div className="space-y-2">
                                         {localCompany.neighborhood_fees.map((item, index) => (
-                                            <div key={index} className="flex items-center gap-2 bg-white p-2 rounded-lg border border-gray-200">
+                                            <div key={index} className={`flex items-center gap-2 bg-white p-2 rounded-lg border border-gray-200 transition-opacity ${(item as any).active === false ? 'opacity-60' : ''}`}>
+                                                <label
+                                                    className="relative inline-flex items-center cursor-pointer shrink-0"
+                                                    title={(item as any).active === false ? 'Bairro desativado (não aparece no cardápio digital)' : 'Bairro ativo (aparece no cardápio digital)'}
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        className="sr-only peer"
+                                                        checked={(item as any).active !== false}
+                                                        onChange={(e) => {
+                                                            const newFees = [...(localCompany.neighborhood_fees || [])] as any[];
+                                                            newFees[index] = { ...newFees[index], active: e.target.checked };
+                                                            setLocalCompany({...localCompany, neighborhood_fees: newFees});
+                                                        }}
+                                                    />
+                                                    <div className="w-9 h-5 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-500"></div>
+                                                </label>
                                                 <input 
                                                     type="text" 
                                                     placeholder="Nome do Bairro (Ex: Centro)"
