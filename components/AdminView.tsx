@@ -1,6 +1,6 @@
-      import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { User, Company, Order, WithdrawalRequest, UserRole, Address } from '../types';
-import { Users, Building2, DollarSign, Settings, Trash2, CheckCircle, Ban, TrendingUp, Search, Lock, Unlock, Edit, X, Save, Bike, LogOut, MapPin, Truck, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, Store, Wallet, MessageSquare } from 'lucide-react';
+import { AlertTriangle, Users, Building2, DollarSign, Settings, Trash2, CheckCircle, Ban, TrendingUp, Search, Lock, Unlock, Edit, X, Save, Bike, LogOut, MapPin, Truck, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, Store, Wallet, MessageSquare } from 'lucide-react';
 
 interface AdminViewProps {
   users: User[];
@@ -33,7 +33,103 @@ const COMPANY_CATEGORIES = [
     "Sorvetes", "Carnes", "Mercado", "Asiática"
 ];
 
-const AdminView: React.FC<AdminViewProps> = ({ 
+// ---------------------------------------------------------------------------
+// USER SEARCH HELPERS
+// ---------------------------------------------------------------------------
+type SearchStatus = 'idle' | 'loading' | 'success' | 'error';
+
+const MIN_AUTO_SEARCH_CHARS = 2;
+const SEARCH_DEBOUNCE_MS = 400;
+const PHONE_LIKE = /^[\d\s()+\-.]+$/;
+
+/** minúsculas, sem acentos e sem espaços nas pontas: "  JOÃO " -> "joao" */
+const normalizeText = (value: unknown): string =>
+    String(value ?? '')
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '')
+        .toLowerCase()
+        .trim();
+
+const onlyDigits = (value: unknown): string => String(value ?? '').replace(/\D/g, '');
+
+const getErrorMessage = (error: unknown): string => {
+    if (error instanceof Error && error.message) return error.message;
+    if (typeof error === 'string' && error) return error;
+    // Erros do Supabase (PostgrestError) são objetos simples com "message"
+    if (error && typeof error === 'object' && 'message' in error) {
+        const msg = String((error as { message: unknown }).message);
+        if (msg) return msg;
+    }
+    return 'Erro desconhecido.';
+};
+
+/**
+ * Um usuário casa com a busca quando TODOS os termos digitados aparecem
+ * (em qualquer ordem, parcialmente) no nome, e-mail ou ID — ou, se o termo
+ * parecer telefone, nos dígitos do telefone (com ou sem máscara/DDI).
+ */
+const userMatchesQuery = (user: User, rawQuery: string): boolean => {
+    const query = normalizeText(rawQuery);
+    if (!query) return false;
+
+    const searchable = normalizeText(`${user.name ?? ''} ${user.email ?? ''} ${user.id ?? ''}`);
+    const phoneDigits = onlyDigits(user.phone);
+
+    // Busca por telefone completa: "(81) 99999-1234", "+55 81 99999 1234", "99999"
+    if (PHONE_LIKE.test(query)) {
+        const digits = onlyDigits(query);
+        if (digits) {
+            if (phoneDigits.includes(digits)) return true;
+            if (digits.startsWith('55') && digits.length > 11 && phoneDigits.includes(digits.slice(2))) return true;
+        }
+    }
+
+    // Busca por nome/e-mail/ID: cada palavra digitada precisa aparecer em algum lugar
+    return query.split(/\s+/).every(token => {
+        if (searchable.includes(token)) return true;
+        if (PHONE_LIKE.test(token)) {
+            const digits = onlyDigits(token);
+            return digits.length > 0 && phoneDigits.includes(digits);
+        }
+        return false;
+    });
+};
+
+/** Variações da busca enviadas ao banco, que costuma ser menos tolerante que o filtro local. */
+const buildQueryVariants = (term: string): { query: string; refilter: boolean }[] => {
+    const variants = [{ query: term, refilter: false }];
+    const digits = onlyDigits(term);
+
+    if (PHONE_LIKE.test(term) && digits && digits !== term) {
+        variants.push({ query: digits, refilter: true });
+    } else {
+        const tokens = term.split(/\s+/).filter(Boolean);
+        if (tokens.length > 1) {
+            const longest = tokens.reduce((a, b) => (b.length > a.length ? b : a));
+            variants.push({ query: longest, refilter: true });
+        }
+    }
+    return variants;
+};
+
+const mergeUsers = (...lists: User[][]): User[] => {
+    const byId = new Map<string, User>();
+    lists.forEach(list => list.forEach(u => {
+        if (u && u.id && !byId.has(u.id)) byId.set(u.id, u);
+    }));
+    return Array.from(byId.values());
+};
+
+/** Quem começa com o termo vem primeiro; depois ordem alfabética. */
+const sortByRelevance = (list: User[], term: string): User[] => {
+    const q = normalizeText(term);
+    const rank = (u: User) => (normalizeText(u.name).startsWith(q) ? 0 : 1);
+    return [...list].sort((a, b) =>
+        rank(a) - rank(b) || String(a.name ?? '').localeCompare(String(b.name ?? ''), 'pt-BR')
+    );
+};
+
+const AdminView: React.FC<AdminViewProps> = ({
     users, setUsers, companies, setCompanies, orders, onLogout,
     withdrawals, onUpdateWithdrawal,
     globalSettings, onUpdateSettings,
@@ -74,8 +170,16 @@ const AdminView: React.FC<AdminViewProps> = ({
 
   // --- USER SEARCH STATES ---
   const [userSearchTerm, setUserSearchTerm] = useState('');
-  const [isSearchingUser, setIsSearchingUser] = useState(false);
   const [displayedUsers, setDisplayedUsers] = useState<User[]>([]);
+  const [searchStatus, setSearchStatus] = useState<SearchStatus>('idle');
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchWarning, setSearchWarning] = useState<string | null>(null);
+  const [lastSearchedTerm, setLastSearchedTerm] = useState('');
+  const searchRequestId = useRef(0);            // descarta respostas antigas (corrida entre buscas)
+  const lastSearchedRef = useRef('');           // evita repetir a mesma busca (Enter + debounce)
+  const latestSearchDeps = useRef({ users, onSearchUsers });
+  latestSearchDeps.current = { users, onSearchUsers };
+  const isSearchingUser = searchStatus === 'loading';
 
   // Update local form when global settings change
   useEffect(() => {
@@ -83,37 +187,97 @@ const AdminView: React.FC<AdminViewProps> = ({
   }, [globalSettings]);
 
   // --- USER SEARCH LOGIC ---
-  const handleSearchUser = async () => {
-      const query = userSearchTerm.trim();
-      
-      if (!query) {
+  const runUserSearch = useCallback(async (rawTerm: string) => {
+      const term = rawTerm.trim();
+      const requestId = ++searchRequestId.current;
+      lastSearchedRef.current = term;
+
+      // Campo vazio: volta ao estado inicial
+      if (!term) {
           setDisplayedUsers([]);
+          setSearchStatus('idle');
+          setSearchError(null);
+          setSearchWarning(null);
+          setLastSearchedTerm('');
           return;
       }
-      
-      setIsSearchingUser(true);
+
+      const { users: loadedUsers, onSearchUsers: searchInDb } = latestSearchDeps.current;
+
+      setSearchStatus('loading');
+      setSearchError(null);
+      setSearchWarning(null);
+      setLastSearchedTerm(term);
+
       try {
-          // Se a função de busca no DB foi passada, usa ela (ideal para não carregar 1000 usuários)
-          if (onSearchUsers) {
-              const results = await onSearchUsers(query);
-              setDisplayedUsers(results);
+          // 1) Filtro local (tolerante a maiúsculas, acentos, termos parciais e telefone com máscara)
+          const localMatches = loadedUsers.filter(u => userMatchesQuery(u, term));
+
+          // 2) Banco de dados (quando o pai fornece onSearchUsers)
+          let remoteMatches: User[] = [];
+          let remoteError: string | null = null;
+
+          if (searchInDb) {
+              const variants = buildQueryVariants(term);
+              const settled = await Promise.allSettled(variants.map(v => searchInDb(v.query)));
+
+              settled.forEach((res, i) => {
+                  if (res.status !== 'fulfilled') return;
+                  const list = Array.isArray(res.value) ? res.value : [];
+                  remoteMatches.push(...(variants[i].refilter ? list.filter(u => userMatchesQuery(u, term)) : list));
+              });
+
+              // Só é "erro" se TODAS as consultas ao banco falharam
+              if (settled.every(res => res.status === 'rejected')) {
+                  const first = settled[0] as PromiseRejectedResult;
+                  console.error('Erro na busca de usuários:', first.reason);
+                  remoteError = getErrorMessage(first.reason);
+              }
+          }
+
+          // Ignora a resposta se o usuário já iniciou outra busca
+          if (requestId !== searchRequestId.current) return;
+
+          const results = sortByRelevance(mergeUsers(remoteMatches, localMatches), term);
+          setDisplayedUsers(results);
+
+          if (remoteError && results.length === 0) {
+              // Falha real: não dá para afirmar que o usuário não existe
+              setSearchStatus('error');
+              setSearchError(remoteError);
           } else {
-              // Fallback: Busca local na prop 'users' se a integração com o DB não estiver no Pai ainda
-              const lowerQuery = query.toLowerCase();
-              const results = users.filter(u => 
-                  u.name.toLowerCase().includes(lowerQuery) || 
-                  u.email.toLowerCase().includes(lowerQuery) || 
-                  u.id.toLowerCase().includes(lowerQuery) ||
-                  (u.phone && u.phone.includes(lowerQuery))
-              );
-              setDisplayedUsers(results);
+              setSearchStatus('success');
+              if (remoteError) {
+                  setSearchWarning(`A busca no banco falhou (${remoteError}). Exibindo apenas usuários já carregados.`);
+              } else if (!searchInDb && results.length === 0) {
+                  setSearchWarning('Esta busca considera apenas os usuários já carregados na tela.');
+              }
           }
       } catch (error) {
-          console.error("Erro na busca de usuários:", error);
-      } finally {
-          setIsSearchingUser(false);
+          if (requestId !== searchRequestId.current) return;
+          console.error('Erro na busca de usuários:', error);
+          setDisplayedUsers([]);
+          setSearchStatus('error');
+          setSearchError(getErrorMessage(error));
       }
-  };
+  }, []);
+
+  // Busca automática enquanto digita (debounce). Enter e o botão buscam na hora.
+  useEffect(() => {
+      const term = userSearchTerm.trim();
+
+      if (!term) {
+          runUserSearch('');
+          return;
+      }
+      if (term.length < MIN_AUTO_SEARCH_CHARS) return;
+
+      const timer = setTimeout(() => {
+          if (lastSearchedRef.current !== term) runUserSearch(term);
+      }, SEARCH_DEBOUNCE_MS);
+
+      return () => clearTimeout(timer);
+  }, [userSearchTerm, runUserSearch]);
 
   // --- MAP LOGIC ---
   useEffect(() => {
@@ -395,7 +559,7 @@ const AdminView: React.FC<AdminViewProps> = ({
       
       await onDeleteCompany(id);
       
-      const user = users.find(u => u.id === id);
+      const user = users.find(u => u.id === id) || displayedUsers.find(u => u.id === id);
       if (user) {
           await onUpdateUser({ ...user, role: 'client' });
           // Atualiza a visualização da busca se o usuário alterado estiver listado
@@ -532,17 +696,14 @@ const AdminView: React.FC<AdminViewProps> = ({
                         <input 
                             type="text" 
                             value={userSearchTerm}
-                            onChange={(e) => {
-                                setUserSearchTerm(e.target.value);
-                                if (e.target.value.trim() === '') setDisplayedUsers([]);
-                            }}
-                            onKeyDown={(e) => e.key === 'Enter' && handleSearchUser()}
-                            placeholder="Buscar por nome, ID, telefone ou email..." 
+                            onChange={(e) => setUserSearchTerm(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && runUserSearch(userSearchTerm)}
+                            placeholder="Nome, e-mail, ID ou telefone (completo ou parcial)..." 
                             className="pl-9 pr-4 py-2 w-full bg-gray-50 rounded-lg text-sm outline-none focus:ring-2 focus:ring-gray-200 border border-transparent" 
                         />
                     </div>
                     <button 
-                        onClick={handleSearchUser}
+                        onClick={() => runUserSearch(userSearchTerm)}
                         disabled={isSearchingUser || !userSearchTerm.trim()}
                         className="bg-gray-900 text-white px-5 py-2 rounded-lg text-sm font-bold disabled:opacity-50 hover:bg-black transition-colors flex items-center gap-2"
                     >
@@ -550,6 +711,18 @@ const AdminView: React.FC<AdminViewProps> = ({
                     </button>
                 </div>
             </div>
+
+            {/* Aviso (busca parcial) e contador de resultados */}
+            {searchStatus === 'success' && searchWarning && displayedUsers.length > 0 && (
+                <div className="px-6 py-3 bg-yellow-50 border-b border-yellow-100 text-xs text-yellow-800 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0" /> {searchWarning}
+                </div>
+            )}
+            {searchStatus === 'success' && displayedUsers.length > 0 && (
+                <div className="px-6 py-2 text-xs text-gray-500 border-b border-gray-100">
+                    {displayedUsers.length} {displayedUsers.length === 1 ? 'usuário encontrado' : 'usuários encontrados'} para "{lastSearchedTerm}"
+                </div>
+            )}
             
             <div className="overflow-x-auto">
                 <table className="w-full text-left">
@@ -565,14 +738,42 @@ const AdminView: React.FC<AdminViewProps> = ({
                         {displayedUsers.length === 0 ? (
                             <tr>
                                 <td colSpan={4} className="p-10 text-center">
-                                    <div className="flex flex-col items-center justify-center text-gray-400">
-                                        <Search className="w-10 h-10 mb-3 text-gray-300" />
-                                        <p className="text-sm font-medium">
-                                            {userSearchTerm.trim() === '' 
-                                                ? 'Digite um nome, ID ou telefone e clique em buscar para localizar usuários no banco.'
-                                                : 'Nenhum usuário encontrado para a busca atual.'}
-                                        </p>
-                                    </div>
+                                    {searchStatus === 'loading' ? (
+                                        <div className="flex flex-col items-center justify-center text-gray-400">
+                                            <Loader2 className="w-10 h-10 mb-3 animate-spin text-gray-300" />
+                                            <p className="text-sm font-medium">Buscando usuários...</p>
+                                        </div>
+                                    ) : searchStatus === 'error' ? (
+                                        <div className="flex flex-col items-center justify-center">
+                                            <div className="p-3 bg-red-50 rounded-full mb-3">
+                                                <AlertTriangle className="w-8 h-8 text-red-500" />
+                                            </div>
+                                            <p className="text-sm font-bold text-red-600">Não foi possível realizar a busca</p>
+                                            <p className="text-xs text-gray-500 mt-1 max-w-md break-words">{searchError}</p>
+                                            <p className="text-xs text-gray-400 mt-1">Isso é um erro do sistema, não significa que o usuário não existe.</p>
+                                            <button
+                                                onClick={() => runUserSearch(userSearchTerm)}
+                                                className="mt-4 px-4 py-2 bg-gray-900 text-white rounded-lg text-xs font-bold hover:bg-black transition-colors"
+                                            >
+                                                Tentar novamente
+                                            </button>
+                                        </div>
+                                    ) : searchStatus === 'success' ? (
+                                        <div className="flex flex-col items-center justify-center text-gray-400">
+                                            <Search className="w-10 h-10 mb-3 text-gray-300" />
+                                            <p className="text-sm font-medium text-gray-600">Nenhum usuário encontrado para "{lastSearchedTerm}"</p>
+                                            <p className="text-xs mt-1">A busca funcionou, mas nenhum cadastro corresponde. Tente apenas parte do nome, e-mail ou telefone.</p>
+                                            {searchWarning && <p className="text-xs mt-2 text-yellow-700">{searchWarning}</p>}
+                                        </div>
+                                    ) : (
+                                        <div className="flex flex-col items-center justify-center text-gray-400">
+                                            <Search className="w-10 h-10 mb-3 text-gray-300" />
+                                            <p className="text-sm font-medium">
+                                                Digite nome, e-mail, ID ou telefone (completo ou parcial) para localizar usuários.
+                                            </p>
+                                            <p className="text-xs mt-1">Maiúsculas, minúsculas e acentos não importam.</p>
+                                        </div>
+                                    )}
                                 </td>
                             </tr>
                         ) : (
@@ -581,11 +782,11 @@ const AdminView: React.FC<AdminViewProps> = ({
                                     <td className="p-4">
                                         <div className="flex items-center gap-3">
                                             <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center font-bold text-xs text-gray-600">
-                                                {user.name.charAt(0)}
+                                                {String(user.name || '?').charAt(0).toUpperCase()}
                                             </div>
                                             <div>
                                                 <span className="font-medium text-gray-900 block">{user.name}</span>
-                                                <span className="text-xs text-gray-400">ID: {user.id.slice(0, 6)}</span>
+                                                <span className="text-xs text-gray-400">ID: {String(user.id || '').slice(0, 6)}</span>
                                             </div>
                                         </div>
                                     </td>
