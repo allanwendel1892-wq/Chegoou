@@ -809,7 +809,9 @@ const App: React.FC = () => {
       const ACTIVE_CHAT_STATUSES = ['pending', 'preparing', 'ready', 'waiting_courier', 'delivering'];
 
       let ordersHistoryQuery: PromiseLike<{ data: any[] | null; error: any }> = Promise.resolve({ data: [], error: null });
-      let usersQuery: any = supabase.from('users').select('*').limit(5000);
+      let usersQuery: any = role === 'admin'
+    ? supabase.from('users').select('*').order('name').limit(100)   // só uma amostra inicial
+    : supabase.from('users').select('*').limit(5000);
       let couponsQuery: any = supabase.from('coupons').select('*');
       let withdrawalsQuery: any = supabase.from('withdrawal_requests').select('*');
 
@@ -2061,6 +2063,7 @@ const App: React.FC = () => {
             onDeleteUser={handleDeleteUser}
             onUpsertCompany={handleUpsertCompany}
             onDeleteCompany={handleDeleteCompany}
+            onSearchUsers={handleSearchUsers}
         />;
         break;
     
