@@ -1186,6 +1186,23 @@ const App: React.FC = () => {
       }
   };
 
+    const handleSearchUsers = async (query: string): Promise<User[]> => {
+    // remove caracteres que quebram o filtro .or() do PostgREST
+    const q = query.trim().replace(/[%,()*\\]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!q) return [];
+
+    const pattern = `%${q}%`;
+    const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .or(`name.ilike.${pattern},email.ilike.${pattern},phone.ilike.${pattern},id.ilike.${pattern}`)
+        .order('name', { ascending: true })
+        .limit(100);
+
+    if (error) throw error;   // o AdminView mostra isso como ERRO, não como "não encontrado"
+    return (data ?? []) as User[];
+};
+
   /**
    * Remove usuário do sistema
    */
