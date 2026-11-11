@@ -1,6 +1,4 @@
-
-
-import React, { useState, useRef, useEffect } from 'react';
+      import React, { useState, useRef, useEffect } from 'react';
 import { User, Company, Order, WithdrawalRequest, UserRole, Address } from '../types';
 import { Users, Building2, DollarSign, Settings, Trash2, CheckCircle, Ban, TrendingUp, Search, Lock, Unlock, Edit, X, Save, Bike, LogOut, MapPin, Truck, Loader2, Navigation, MousePointer2, Map as MapIcon, Crosshair, Store, Wallet, MessageSquare } from 'lucide-react';
 
@@ -23,6 +21,9 @@ interface AdminViewProps {
   onDeleteUser: (userId: string) => Promise<void>;
   onUpsertCompany: (company: Company) => Promise<void>;
   onDeleteCompany: (companyId: string) => Promise<void>;
+  
+  // NOVO: Handler opcional para buscar usuários direto do banco
+  onSearchUsers?: (query: string) => Promise<User[]>;
 }
 
 // Standardized Categories - MUST MATCH CLIENT VIEW
@@ -36,14 +37,15 @@ const AdminView: React.FC<AdminViewProps> = ({
     users, setUsers, companies, setCompanies, orders, onLogout,
     withdrawals, onUpdateWithdrawal,
     globalSettings, onUpdateSettings,
-    onUpdateUser, onDeleteUser, onUpsertCompany, onDeleteCompany
+    onUpdateUser, onDeleteUser, onUpsertCompany, onDeleteCompany,
+    onSearchUsers
 }) => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'companies' | 'users' | 'finance'>('dashboard');
 
   // --- MODAL STATES ---
   const [showSettings, setShowSettings] = useState(false);
   
-  // Local Settings State (for form editing before save)
+  // Local Settings State
   const [localSettingsForm, setLocalSettingsForm] = useState(globalSettings);
 
   // Edit User Modal State
@@ -61,7 +63,7 @@ const AdminView: React.FC<AdminViewProps> = ({
       message: string;
   } | null>(null);
 
-  // --- MAP & ADDRESS LOGIC STATES (FOR EDIT USER) ---
+  // --- MAP STATES ---
   const [showMapModal, setShowMapModal] = useState(false);
   const [loadingCep, setLoadingCep] = useState(false);
   const [loadingLocation, setLoadingLocation] = useState(false);
@@ -70,18 +72,54 @@ const AdminView: React.FC<AdminViewProps> = ({
   const [isMapDragging, setIsMapDragging] = useState(false);
   const [mapError, setMapError] = useState(false);
 
-  // Update local form when global settings change (sync)
+  // --- USER SEARCH STATES ---
+  const [userSearchTerm, setUserSearchTerm] = useState('');
+  const [isSearchingUser, setIsSearchingUser] = useState(false);
+  const [displayedUsers, setDisplayedUsers] = useState<User[]>([]);
+
+  // Update local form when global settings change
   useEffect(() => {
       setLocalSettingsForm(globalSettings);
   }, [globalSettings]);
 
-  // --- MAP LOGIC (Copied from ClientView/AuthView for consistency) ---
+  // --- USER SEARCH LOGIC ---
+  const handleSearchUser = async () => {
+      const query = userSearchTerm.trim();
+      
+      if (!query) {
+          setDisplayedUsers([]);
+          return;
+      }
+      
+      setIsSearchingUser(true);
+      try {
+          // Se a função de busca no DB foi passada, usa ela (ideal para não carregar 1000 usuários)
+          if (onSearchUsers) {
+              const results = await onSearchUsers(query);
+              setDisplayedUsers(results);
+          } else {
+              // Fallback: Busca local na prop 'users' se a integração com o DB não estiver no Pai ainda
+              const lowerQuery = query.toLowerCase();
+              const results = users.filter(u => 
+                  u.name.toLowerCase().includes(lowerQuery) || 
+                  u.email.toLowerCase().includes(lowerQuery) || 
+                  u.id.toLowerCase().includes(lowerQuery) ||
+                  (u.phone && u.phone.includes(lowerQuery))
+              );
+              setDisplayedUsers(results);
+          }
+      } catch (error) {
+          console.error("Erro na busca de usuários:", error);
+      } finally {
+          setIsSearchingUser(false);
+      }
+  };
+
+  // --- MAP LOGIC ---
   useEffect(() => {
     let map: any;
-    
     const initMap = () => {
         if (!mapContainerRef.current || !window.google || mapError || !editingUser) return;
-
         try {
             const initialPos = { 
                 lat: editingUser.address?.lat || -23.550520, 
@@ -110,11 +148,7 @@ const AdminView: React.FC<AdminViewProps> = ({
                     geocoder.geocode({ location: { lat, lng } }, (results: any, status: any) => {
                         if (status === 'OK' && results[0]) {
                             const addressComponents = results[0].address_components;
-                            let route = '';
-                            let streetNumber = '';
-                            let sublocality = '';
-                            let locality = '';
-                            let postalCode = '';
+                            let route = '', streetNumber = '', sublocality = '', locality = '', postalCode = '';
 
                             addressComponents.forEach((component: any) => {
                                 if (component.types.includes('route')) route = component.long_name;
@@ -125,16 +159,13 @@ const AdminView: React.FC<AdminViewProps> = ({
                             });
 
                             setMapAddress(`${route}, ${streetNumber || 'S/N'}`);
-                            
-                            // Update editingUser state directly with GEOCODED coordinates
                             setEditingUser(prev => {
                                 if(!prev) return null;
                                 return {
                                     ...prev,
                                     address: {
                                         ...prev.address!,
-                                        lat,
-                                        lng,
+                                        lat, lng,
                                         street: route || prev.address?.street || '',
                                         neighborhood: sublocality || prev.address?.neighborhood || '',
                                         city: locality || prev.address?.city || '',
@@ -181,7 +212,6 @@ const AdminView: React.FC<AdminViewProps> = ({
                   geocoder.geocode({ location: { lat: latitude, lng: longitude } }, (results: any, status: any) => {
                       if (status === 'OK' && results[0]) {
                           const components = results[0].address_components;
-                          // Extract address parts...
                           let route = '', num = '', neigh = '', city = '', zip = '';
                           components.forEach((c: any) => {
                               if (c.types.includes('route')) route = c.long_name;
@@ -190,7 +220,6 @@ const AdminView: React.FC<AdminViewProps> = ({
                               if (c.types.includes('administrative_area_level_2')) city = c.long_name;
                               if (c.types.includes('postal_code')) zip = c.long_name;
                           });
-
                           setEditingUser(prev => prev ? ({
                               ...prev,
                               address: {
@@ -203,7 +232,6 @@ const AdminView: React.FC<AdminViewProps> = ({
                       setLoadingLocation(false);
                   });
               } else {
-                  // Fallback
                   setEditingUser(prev => prev ? ({ ...prev, address: { ...prev.address!, lat: latitude, lng: longitude } }) : null);
                   setLoadingLocation(false);
               }
@@ -227,7 +255,6 @@ const AdminView: React.FC<AdminViewProps> = ({
               const response = await fetch(`https://viacep.com.br/ws/${value}/json/`);
               const data = await response.json();
               if (!data.erro) {
-                  // 1. Update text fields first
                   setEditingUser(prev => prev ? ({
                       ...prev,
                       address: {
@@ -238,7 +265,6 @@ const AdminView: React.FC<AdminViewProps> = ({
                       }
                   }) : null);
 
-                  // 2. CRITICAL: Trigger Google Geocoder to get coordinates for this address
                   if (window.google && window.google.maps) {
                       const geocoder = new window.google.maps.Geocoder();
                       const fullAddress = `${data.logradouro}, ${data.bairro}, ${data.localidade}, Brasil`;
@@ -249,7 +275,7 @@ const AdminView: React.FC<AdminViewProps> = ({
                               setEditingUser(prev => prev ? ({
                                   ...prev,
                                   address: {
-                                      ...prev.address!, // Keep latest text updates
+                                      ...prev.address!, 
                                       lat: location.lat(),
                                       lng: location.lng()
                                   }
@@ -265,7 +291,6 @@ const AdminView: React.FC<AdminViewProps> = ({
 
   // --- USER ACTIONS ---
   const startEditingUser = (user: User) => {
-      // Ensure address object exists
       const userWithAddress = {
           ...user,
           address: user.address || { street: '', number: '', neighborhood: '', city: '', zipCode: '', lat: 0, lng: 0 }
@@ -284,39 +309,37 @@ const AdminView: React.FC<AdminViewProps> = ({
       if (!editingUser) return;
       const updatedUser = editingUser;
 
-      // 1. PERSIST USER CHANGE
       await onUpdateUser(updatedUser);
+      
+      // Atualiza a lista visual da busca
+      setDisplayedUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
 
-      // 2. Handle Partner/Company Logic
       if (updatedUser.role === 'partner') {
            const existingCompany = companies.find(c => c.id === updatedUser.id);
-           
            if (!existingCompany) {
-               // Create new company if it doesn't exist (promoted user)
                const newCompany: Company = {
                     id: updatedUser.id,
                     name: `Restaurante de ${updatedUser.name}`,
                     description: 'Configure sua loja...',
-                    category: 'Lanches', // Default category
+                    category: 'Lanches', 
                     logo: '',
                     status: 'open', 
-                    serviceFeePercentage: globalSettings.platformFee, // USE GLOBAL SETTING
+                    serviceFeePercentage: globalSettings.platformFee,
                     deliveryType: editingUserCompany?.deliveryType || 'chegoou',
                     deliveryRadiusKm: editingUserCompany?.deliveryRadiusKm || 5,
                     openingHours: '08:00 - 22:00',
                     openingDays: ['Seg', 'Ter', 'Qua', 'Qui', 'Sex'],
                     isSuspended: false,
-                    address: updatedUser.address // Sync address
+                    address: updatedUser.address
                 };
                 await onUpsertCompany(newCompany);
            } else if (editingUserCompany) {
-               // Update existing company
                const updatedCompany = {
                    ...existingCompany,
                    deliveryType: editingUserCompany.deliveryType,
                    deliveryRadiusKm: editingUserCompany.deliveryRadiusKm,
                    ownDeliveryFee: editingUserCompany.ownDeliveryFee,
-                   address: updatedUser.address // CRITICAL: Sync address here to update Coordinates!
+                   address: updatedUser.address 
                };
                await onUpsertCompany(updatedCompany);
            }
@@ -340,7 +363,9 @@ const AdminView: React.FC<AdminViewProps> = ({
       
       await onDeleteUser(id);
       
-      // Also check if company needs deletion (although database cascade should handle it, we do it in state via App logic usually)
+      // Remove da lista de busca atual
+      setDisplayedUsers(prev => prev.filter(u => u.id !== id));
+      
       const comp = companies.find(c => c.id === id);
       if (comp) {
           await onDeleteCompany(id);
@@ -370,10 +395,11 @@ const AdminView: React.FC<AdminViewProps> = ({
       
       await onDeleteCompany(id);
       
-      // Revert User Role to Client
       const user = users.find(u => u.id === id);
       if (user) {
           await onUpdateUser({ ...user, role: 'client' });
+          // Atualiza a visualização da busca se o usuário alterado estiver listado
+          setDisplayedUsers(prev => prev.map(u => u.id === id ? { ...u, role: 'client' } : u));
       }
       
       setConfirmAction(null);
@@ -398,37 +424,25 @@ const AdminView: React.FC<AdminViewProps> = ({
 
   const executeApproveWithdrawal = () => {
       if (!confirmAction) return;
-      const id = confirmAction.id;
-      // Call prop handler to update DB
-      onUpdateWithdrawal(id, 'paid');
+      onUpdateWithdrawal(confirmAction.id, 'paid');
       setConfirmAction(null);
   };
 
-  // --- SAVE SETTINGS ---
   const saveGlobalSettings = () => {
       onUpdateSettings(localSettingsForm);
       setShowSettings(false);
       alert('Configurações atualizadas! As taxas das empresas foram ajustadas.');
   };
 
-
   // --- CALCULATIONS ---
   const totalRevenue = orders.reduce((acc, o) => o.status !== 'cancelled' ? acc + o.total : acc, 0);
   const totalOrders = orders.length;
   const activeCompaniesCount = companies.filter(c => !c.isSuspended).length;
   
-  // Platform Revenue Logic: Sum of all Service Fees + Delivery Fees (where type=chegoou)
   const platformRevenue = orders.reduce((acc, o) => {
       if (o.status === 'cancelled') return acc;
-      
-      // Add Service Fee (always goes to platform)
       let fee = o.serviceFee || 0;
-      
-      // Add Delivery Fee ONLY if it's platform delivery
-      if (o.deliveryType === 'chegoou') {
-          fee += o.deliveryFee;
-      }
-      
+      if (o.deliveryType === 'chegoou') fee += o.deliveryFee;
       return acc + fee;
   }, 0);
 
@@ -443,10 +457,7 @@ const AdminView: React.FC<AdminViewProps> = ({
         </div>
         <div className="flex gap-2">
             <button 
-                onClick={() => {
-                    setLocalSettingsForm(globalSettings); // Reset form to current
-                    setShowSettings(true);
-                }}
+                onClick={() => { setLocalSettingsForm(globalSettings); setShowSettings(true); }}
                 className="bg-white p-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 shadow-sm transition-colors hover:text-red-600"
                 title="Configurações Globais"
             >
@@ -509,16 +520,37 @@ const AdminView: React.FC<AdminViewProps> = ({
           </div>
       )}
 
-      {/* USERS TAB */}
+      {/* USERS TAB - REESTRUTURADA A PARTE DE BUSCA */}
       {activeTab === 'users' && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+            <div className="p-6 border-b border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <h3 className="font-bold text-lg text-gray-800">Base de Usuários</h3>
-                <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                    <input type="text" placeholder="Buscar usuário..." className="pl-9 pr-4 py-2 bg-gray-50 rounded-lg text-sm outline-none focus:ring-2 focus:ring-gray-200" />
+                
+                <div className="flex w-full md:max-w-md gap-2">
+                    <div className="relative flex-1">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+                        <input 
+                            type="text" 
+                            value={userSearchTerm}
+                            onChange={(e) => {
+                                setUserSearchTerm(e.target.value);
+                                if (e.target.value.trim() === '') setDisplayedUsers([]);
+                            }}
+                            onKeyDown={(e) => e.key === 'Enter' && handleSearchUser()}
+                            placeholder="Buscar por nome, ID, telefone ou email..." 
+                            className="pl-9 pr-4 py-2 w-full bg-gray-50 rounded-lg text-sm outline-none focus:ring-2 focus:ring-gray-200 border border-transparent" 
+                        />
+                    </div>
+                    <button 
+                        onClick={handleSearchUser}
+                        disabled={isSearchingUser || !userSearchTerm.trim()}
+                        className="bg-gray-900 text-white px-5 py-2 rounded-lg text-sm font-bold disabled:opacity-50 hover:bg-black transition-colors flex items-center gap-2"
+                    >
+                        {isSearchingUser ? <Loader2 className="w-4 h-4 animate-spin"/> : "Procurar"}
+                    </button>
                 </div>
             </div>
+            
             <div className="overflow-x-auto">
                 <table className="w-full text-left">
                     <thead className="bg-gray-50/50">
@@ -530,53 +562,68 @@ const AdminView: React.FC<AdminViewProps> = ({
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                        {users.map(user => (
-                            <tr key={user.id} className="hover:bg-gray-50 transition-colors">
-                                <td className="p-4">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center font-bold text-xs text-gray-600">
-                                            {user.name.charAt(0)}
-                                        </div>
-                                        <div>
-                                            <span className="font-medium text-gray-900 block">{user.name}</span>
-                                            <span className="text-xs text-gray-400">ID: {user.id.slice(0, 6)}</span>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td className="p-4 text-sm text-gray-500">
-                                    <div className="flex flex-col">
-                                        <span>{user.email}</span>
-                                        <span className="text-xs">{user.phone}</span>
-                                    </div>
-                                </td>
-                                <td className="p-4">
-                                    <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wide
-                                        ${user.role === 'admin' ? 'bg-purple-100 text-purple-700' : ''}
-                                        ${user.role === 'client' ? 'bg-gray-100 text-gray-600' : ''}
-                                        ${user.role === 'partner' ? 'bg-blue-100 text-blue-700' : ''}
-                                        ${user.role === 'courier' ? 'bg-orange-100 text-orange-700' : ''}
-                                    `}>
-                                        {user.role}
-                                    </span>
-                                </td>
-                                <td className="p-4">
-                                    <div className="flex justify-end gap-2">
-                                        <button 
-                                            onClick={() => startEditingUser(user)}
-                                            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                        >
-                                            <Edit className="w-4 h-4"/>
-                                        </button>
-                                        <button 
-                                            onClick={() => confirmDeleteUser(user.id)}
-                                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                        >
-                                            <Trash2 className="w-4 h-4"/>
-                                        </button>
+                        {displayedUsers.length === 0 ? (
+                            <tr>
+                                <td colSpan={4} className="p-10 text-center">
+                                    <div className="flex flex-col items-center justify-center text-gray-400">
+                                        <Search className="w-10 h-10 mb-3 text-gray-300" />
+                                        <p className="text-sm font-medium">
+                                            {userSearchTerm.trim() === '' 
+                                                ? 'Digite um nome, ID ou telefone e clique em buscar para localizar usuários no banco.'
+                                                : 'Nenhum usuário encontrado para a busca atual.'}
+                                        </p>
                                     </div>
                                 </td>
                             </tr>
-                        ))}
+                        ) : (
+                            displayedUsers.map(user => (
+                                <tr key={user.id} className="hover:bg-gray-50 transition-colors">
+                                    <td className="p-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center font-bold text-xs text-gray-600">
+                                                {user.name.charAt(0)}
+                                            </div>
+                                            <div>
+                                                <span className="font-medium text-gray-900 block">{user.name}</span>
+                                                <span className="text-xs text-gray-400">ID: {user.id.slice(0, 6)}</span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td className="p-4 text-sm text-gray-500">
+                                        <div className="flex flex-col">
+                                            <span>{user.email}</span>
+                                            <span className="text-xs">{user.phone}</span>
+                                        </div>
+                                    </td>
+                                    <td className="p-4">
+                                        <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wide
+                                            ${user.role === 'admin' ? 'bg-purple-100 text-purple-700' : ''}
+                                            ${user.role === 'client' ? 'bg-gray-100 text-gray-600' : ''}
+                                            ${user.role === 'partner' ? 'bg-blue-100 text-blue-700' : ''}
+                                            ${user.role === 'courier' ? 'bg-orange-100 text-orange-700' : ''}
+                                        `}>
+                                            {user.role}
+                                        </span>
+                                    </td>
+                                    <td className="p-4">
+                                        <div className="flex justify-end gap-2">
+                                            <button 
+                                                onClick={() => startEditingUser(user)}
+                                                className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                            >
+                                                <Edit className="w-4 h-4"/>
+                                            </button>
+                                            <button 
+                                                onClick={() => confirmDeleteUser(user.id)}
+                                                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                            >
+                                                <Trash2 className="w-4 h-4"/>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))
+                        )}
                     </tbody>
                 </table>
             </div>
@@ -684,7 +731,7 @@ const AdminView: React.FC<AdminViewProps> = ({
                   </div>
               </div>
 
-              {/* All Withdrawals (Partners & Couriers) */}
+              {/* All Withdrawals */}
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                  <div className="p-6 border-b border-gray-100 flex items-center gap-3">
                      <Wallet className="w-5 h-5 text-gray-600" />
@@ -842,8 +889,6 @@ const AdminView: React.FC<AdminViewProps> = ({
       {editingUser && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
               <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl my-8 relative flex flex-col max-h-[90vh]">
-                  {/* ... (Existing User Edit Modal Code) ... */}
-                  {/* ... Reusing previous implementation for brevity ... */}
                   <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-white z-10 rounded-t-2xl">
                       <h3 className="text-lg font-bold">Editar Usuário</h3>
                       <button onClick={() => setEditingUser(null)}><X className="w-5 h-5"/></button>
@@ -889,7 +934,6 @@ const AdminView: React.FC<AdminViewProps> = ({
                             <MapPin className="w-4 h-4"/> Endereço Completo
                         </h4>
                         
-                        {/* CEP & GPS */}
                         <div className="flex gap-2 mb-2">
                             <div className="relative w-1/3">
                                 <input 
@@ -1069,7 +1113,6 @@ const AdminView: React.FC<AdminViewProps> = ({
                           />
                       </div>
                       
-                      {/* UPDATED CATEGORY SELECT */}
                       <div>
                           <label className="text-xs font-bold text-gray-500 uppercase">Categoria</label>
                           <select 
@@ -1085,7 +1128,7 @@ const AdminView: React.FC<AdminViewProps> = ({
 
                       <div className="grid grid-cols-2 gap-4">
                           <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase">Taxa de Transação Bancária (%)</label>
+                            <label className="text-xs font-bold text-gray-500 uppercase">Taxa Transação (%)</label>
                             <input 
                                 type="number"
                                 value={editingCompany.serviceFeePercentage} 
@@ -1093,7 +1136,7 @@ const AdminView: React.FC<AdminViewProps> = ({
                                 className="w-full border rounded-lg px-3 py-2 mt-1"
                                 placeholder="Ex: 2.5"
                             />
-                            <p className="text-[10px] text-gray-400 mt-1">Porcentagem descontada do valor do saque.</p>
+                            <p className="text-[10px] text-gray-400 mt-1">Descontada do saque.</p>
                           </div>
                           <div>
                             <label className="text-xs font-bold text-gray-500 uppercase">Status</label>
@@ -1108,7 +1151,6 @@ const AdminView: React.FC<AdminViewProps> = ({
                           </div>
                       </div>
                       
-                      {/* MARKETING LIMITS CONFIGURATION */}
                       <div className="bg-green-50 p-3 rounded-lg border border-green-100">
                            <label className="text-xs font-bold text-green-700 uppercase block mb-1 flex items-center gap-1">
                                <MessageSquare className="w-3 h-3"/> Limites de Marketing (WhatsApp)
@@ -1135,7 +1177,6 @@ const AdminView: React.FC<AdminViewProps> = ({
                            </div>
                       </div>
                       
-                      {/* NEW: PIX FIELDS FOR ADMIN */}
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
                             <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Dados Bancários (Pix)</label>
                             <div className="flex gap-2 mb-2">
@@ -1159,7 +1200,6 @@ const AdminView: React.FC<AdminViewProps> = ({
                             </div>
                       </div>
 
-                      {/* DELIVERY CONFIG IN COMPANY MODAL */}
                       <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
                           <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Tipo de Entrega</label>
                           <select 
