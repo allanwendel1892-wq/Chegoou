@@ -130,6 +130,25 @@ const COMPANY_CATEGORIES = [
     "Doces & Bolos", "Saudável", "Italiana", "Bebidas", "Padaria", 
     "Sorvetes", "Carnes", "Mercado", "Asiática","Combos",
 ];
+// --- TEMPO MÉDIO (pedido -> pronto) ---
+const FUSO = 'America/Fortaleza';
+const MAX_PREP_MIN = 360; // descarta outliers (pedido agendado/esquecido aberto)
+
+const dayKeyLocal = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: FUSO });
+
+const getPrepMinutes = (o: Order, readyIso?: string | null): number | null => {
+    const ready = readyIso || (o as any).readyAt;
+    if (!ready) return null;
+    const min = (new Date(ready).getTime() - new Date(o.timestamp).getTime()) / 60000;
+    return min > 0 && min <= MAX_PREP_MIN ? min : null;
+};
+
+const formatMinutes = (m: number | null) => {
+    if (m === null) return '--';
+    const r = Math.round(m);
+    return r >= 60 ? `${Math.floor(r / 60)}h ${String(r % 60).padStart(2, '0')}min` : `${r} min`;
+};
+
 //BLOQUEIE OS MODULOS AQUI, PARA ACESSO RESTRITO
 const PROTECTED_VIEWS = [
     ViewState.DASHBOARD, 
@@ -964,6 +983,42 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   // para que as props do KanbanColumn não mudem de referência a cada render.
   const handleOpenChat = useCallback((orderId: string) => setActiveChatOrder(orderId), []);
   const handleSetEditingOrder = useCallback((order: Order) => setEditingOrder(order), []);
+  // Cache local para o card/quadro atualizar na hora, antes do refresh dos pedidos
+  const [readyAtLocal, setReadyAtLocal] = useState<Record<string, string>>({});
+
+  // Grava SEMPRE um novo timestamp em orders.readyAt quando o pedido vai para "Pronto"
+  // (sobrescreve a cada vez, quantas vezes for). O .eq('companyId') garante que só
+  // atinge pedidos DESTE restaurante.
+  const markOrderReady = useCallback(async (orderId: string) => {
+      const iso = new Date().toISOString();
+      setReadyAtLocal(prev => ({ ...prev, [orderId]: iso }));
+      const { error } = await supabase
+          .from('orders')
+          .update({ readyAt: iso })
+          .eq('id', orderId)
+          .eq('companyId', company.id);
+      if (error) console.error('Erro ao gravar readyAt:', error);
+  }, [company.id]);
+
+  // Tempo médio (pedido -> pronto) apenas dos pedidos que ficaram prontos HOJE, deste restaurante.
+  const avgPrepToday = useMemo(() => {
+      const today = dayKeyLocal(new Date());
+      const values: number[] = [];
+      orders.forEach(o => {
+          const oc = (o as any).companyId;
+          if (oc && oc !== company.id) return; // trava extra contra mistura entre restaurantes
+          if (o.status === 'cancelled') return;
+          const readyIso = readyAtLocal[o.id] || (o as any).readyAt;
+          if (!readyIso || dayKeyLocal(new Date(readyIso)) !== today) return;
+          const m = getPrepMinutes(o, readyIso);
+          if (m !== null) values.push(m);
+      });
+      return {
+          avg: values.length ? values.reduce((a, b) => a + b, 0) / values.length : null,
+          count: values.length,
+      };
+  }, [orders, readyAtLocal, company.id]);
+
   const prevOrdersCount = useRef(orders.length);
   // Ref sincronizado com `orders`: permite que handleDragDropOrder acesse a lista mais
   // recente sem precisar de `orders` no array de dependências do useCallback, evitando
@@ -1888,6 +1943,9 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       }
       updateOrderStatus(orderId, status);
 
+      // Sempre que for movido para "Pronto" (mesmo repetidamente), grava novo readyAt no banco
+      if (status === 'ready') markOrderReady(orderId);
+
       // Só notifica quando o status realmente mudou (evita reenvio ao soltar o card na mesma coluna)
       if (!order || order.status === status) return;
 
@@ -1897,7 +1955,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           // Pedido de retirada pronto no balcão
           notifyCustomerWhatsApp(order, 'ready_pickup', company.id, company.name);
       }
-  }, [updateOrderStatus, company.id, company.name]);
+  }, [updateOrderStatus, company.id, company.name, markOrderReady]);
 
   // Handler estável (useCallback) para alternar entre entrega/retirada direto no card do Kanban,
   // evitando recriar uma função inline por coluna a cada render do PartnerView.
@@ -2312,7 +2370,12 @@ delete updated.mapLink;
                 order={editingOrder}
                 products={products}
                 onClose={() => setEditingOrder(null)}
-                onSave={(updatedOrder) => { onUpdateFullOrder(updatedOrder); setEditingOrder(null); }}
+                onSave={(updatedOrder) => {
+                    const becameReady = updatedOrder.status === 'ready' && editingOrder.status !== 'ready';
+                    onUpdateFullOrder(becameReady ? ({ ...updatedOrder, readyAt: new Date().toISOString() } as Order) : updatedOrder);
+                    if (becameReady) markOrderReady(updatedOrder.id);
+                    setEditingOrder(null);
+                }}
                 onCancelOrder={(orderId) => { updateOrderStatus(orderId, 'cancelled'); setEditingOrder(null); }}
             />
         )}
@@ -2704,6 +2767,21 @@ delete updated.mapLink;
                             <p className="text-gray-500"></p>
                         </div>
                         <div className="flex gap-2">
+                             <div
+                                 className="px-4 py-2 bg-white rounded-lg border border-gray-200 flex items-center gap-3"
+                                 title="Média do tempo entre o pedido e o status Pronto, apenas pedidos de hoje deste restaurante"
+                             >
+                                 <div className="bg-purple-50 p-2 rounded-lg"><Clock className="w-5 h-5 text-purple-600" /></div>
+                                 <div>
+                                     <p className="text-[10px] font-bold text-gray-400 uppercase leading-none">Tempo médio hoje</p>
+                                     <p className="text-lg font-bold text-gray-900 leading-tight">
+                                         {formatMinutes(avgPrepToday.avg)}
+                                         <span className="text-xs font-medium text-gray-400 ml-1">
+                                             ({avgPrepToday.count} {avgPrepToday.count === 1 ? 'pedido' : 'pedidos'})
+                                         </span>
+                                     </p>
+                                 </div>
+                             </div>
                              <div className="px-4 py-2 bg-white rounded-lg border border-gray-200 text-sm font-bold flex items-center gap-2">
                                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
                                  Online
