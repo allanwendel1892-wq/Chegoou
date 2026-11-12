@@ -984,14 +984,14 @@ const PartnerView: React.FC<PartnerViewProps> = ({
   const handleOpenChat = useCallback((orderId: string) => setActiveChatOrder(orderId), []);
   const handleSetEditingOrder = useCallback((order: Order) => setEditingOrder(order), []);
   // Cache local para o card/quadro atualizar na hora, antes do refresh dos pedidos
-  const [readyAtLocal, setReadyAtLocal] = useState<Record<string, string>>({});
+  const [deliveredAtLocal, setDeliveredAtLocal] = useState<Record<string, string>>({});
 
-  // Grava SEMPRE um novo timestamp em orders.readyAt quando o pedido vai para "Pronto"
-  // (sobrescreve a cada vez, quantas vezes for). O .eq('companyId') garante que só
+  // Grava SEMPRE um novo timestamp em orders.readyAt quando o pedido vai para "Concluído" (delivered)
+  // (sobrescreve a cada vez, quantas vezes for). A coluna readyAt guarda o horário de conclusão. O .eq('companyId') garante que só
   // atinge pedidos DESTE restaurante.
-  const markOrderReady = useCallback(async (orderId: string) => {
+  const markOrderDelivered = useCallback(async (orderId: string) => {
       const iso = new Date().toISOString();
-      setReadyAtLocal(prev => ({ ...prev, [orderId]: iso }));
+      setDeliveredAtLocal(prev => ({ ...prev, [orderId]: iso }));
       const { error } = await supabase
           .from('orders')
           .update({ readyAt: iso })
@@ -1000,15 +1000,16 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       if (error) console.error('Erro ao gravar readyAt:', error);
   }, [company.id]);
 
-  // Tempo médio (pedido -> pronto) apenas dos pedidos que ficaram prontos HOJE, deste restaurante.
+  // Tempo médio (pedido -> concluído) apenas de pedidos de ENTREGA concluídos HOJE, deste restaurante.
   const avgPrepToday = useMemo(() => {
       const today = dayKeyLocal(new Date());
       const values: number[] = [];
       orders.forEach(o => {
           const oc = (o as any).companyId;
           if (oc && oc !== company.id) return; // trava extra contra mistura entre restaurantes
-          if (o.status === 'cancelled') return;
-          const readyIso = readyAtLocal[o.id] || (o as any).readyAt;
+          if (o.status !== 'delivered') return; // só pedidos Concluídos
+          if (String(o.deliveryMethod ?? '').trim().toLowerCase() !== 'delivery') return; // só entrega
+          const readyIso = deliveredAtLocal[o.id] || (o as any).readyAt;
           if (!readyIso || dayKeyLocal(new Date(readyIso)) !== today) return;
           const m = getPrepMinutes(o, readyIso);
           if (m !== null) values.push(m);
@@ -1017,7 +1018,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           avg: values.length ? values.reduce((a, b) => a + b, 0) / values.length : null,
           count: values.length,
       };
-  }, [orders, readyAtLocal, company.id]);
+  }, [orders, deliveredAtLocal, company.id]);
 
   const prevOrdersCount = useRef(orders.length);
   // Ref sincronizado com `orders`: permite que handleDragDropOrder acesse a lista mais
@@ -1943,8 +1944,8 @@ const PartnerView: React.FC<PartnerViewProps> = ({
       }
       updateOrderStatus(orderId, status);
 
-      // Sempre que for movido para "Pronto" (mesmo repetidamente), grava novo readyAt no banco
-      if (status === 'ready') markOrderReady(orderId);
+      // Sempre que for movido para "Concluído" (mesmo repetidamente), grava novo readyAt no banco
+      if (status === 'delivered') markOrderDelivered(orderId);
 
       // Só notifica quando o status realmente mudou (evita reenvio ao soltar o card na mesma coluna)
       if (!order || order.status === status) return;
@@ -1955,7 +1956,7 @@ const PartnerView: React.FC<PartnerViewProps> = ({
           // Pedido de retirada pronto no balcão
           notifyCustomerWhatsApp(order, 'ready_pickup', company.id, company.name);
       }
-  }, [updateOrderStatus, company.id, company.name, markOrderReady]);
+  }, [updateOrderStatus, company.id, company.name, markOrderDelivered]);
 
   // Handler estável (useCallback) para alternar entre entrega/retirada direto no card do Kanban,
   // evitando recriar uma função inline por coluna a cada render do PartnerView.
@@ -2371,9 +2372,9 @@ delete updated.mapLink;
                 products={products}
                 onClose={() => setEditingOrder(null)}
                 onSave={(updatedOrder) => {
-                    const becameReady = updatedOrder.status === 'ready' && editingOrder.status !== 'ready';
-                    onUpdateFullOrder(becameReady ? ({ ...updatedOrder, readyAt: new Date().toISOString() } as Order) : updatedOrder);
-                    if (becameReady) markOrderReady(updatedOrder.id);
+                    const becameDelivered = updatedOrder.status === 'delivered' && editingOrder.status !== 'delivered';
+                    onUpdateFullOrder(becameDelivered ? ({ ...updatedOrder, readyAt: new Date().toISOString() } as Order) : updatedOrder);
+                    if (becameDelivered) markOrderDelivered(updatedOrder.id);
                     setEditingOrder(null);
                 }}
                 onCancelOrder={(orderId) => { updateOrderStatus(orderId, 'cancelled'); setEditingOrder(null); }}
@@ -2769,7 +2770,7 @@ delete updated.mapLink;
                         <div className="flex gap-2">
                              <div
                                  className="px-4 py-2 bg-white rounded-lg border border-gray-200 flex items-center gap-3"
-                                 title="Média do tempo entre o pedido e o status Pronto, apenas pedidos de hoje deste restaurante"
+                                 title="Média do tempo entre o pedido e o status Concluído, apenas pedidos de ENTREGA concluídos hoje neste restaurante"
                              >
                                  <div className="bg-purple-50 p-2 rounded-lg"><Clock className="w-5 h-5 text-purple-600" /></div>
                                  <div>
