@@ -146,7 +146,7 @@ function descStats(values: number[]) {
 
 /* ============================== TIPOS ============================== */
 
-/* Tempo de preparo: pedido criado -> status "Pronto" (orders.readyAt). Descarta outliers. */
+/* Tempo de entrega: pedido criado -> status "Concluído" (orders.readyAt guarda o horário de conclusão). Só pedidos de entrega. Descarta outliers. */
 const MAX_PREP_MIN = 360;
 const calcPrep = (readyAt: any, created: Date): number | null => {
   if (!readyAt) return null;
@@ -401,7 +401,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ companyId }) => {
           name: String(o.customerName ?? '').trim(),
           phoneRaw: String(o.customerPhone ?? ''),
           pKey: phoneKey(o.customerPhone),
-          prepMin: calcPrep(o.readyAt, d),
+          prepMin: method === 'delivery' && String(o.status ?? '').toLowerCase() === 'delivered' ? calcPrep(o.readyAt, d) : null,
         };
       })
       .filter((o): o is POrder => o !== null);
@@ -775,14 +775,14 @@ const DashboardView: React.FC<DashboardViewProps> = ({ companyId }) => {
             <Kpi title="Ticket médio" value={brl(cur.ticket)} icon={Receipt} color="bg-purple-50 text-purple-600" cur={cur.ticket} prev={prev?.ticket ?? null} />
             <Kpi title="Clientes ativos" value={num(cur.customers)} icon={Users} color="bg-amber-50 text-amber-600" cur={cur.customers} prev={prev?.customers ?? null} hint="telefones distintos no período" />
             <Kpi
-              title="Tempo médio (pedido → pronto)"
+              title="Tempo médio de entrega (pedido → concluído)"
               value={cur.prepCount ? fmtMin(cur.avgPrep) : '--'}
               icon={Clock}
               color="bg-indigo-50 text-indigo-600"
               cur={cur.avgPrep}
               prev={prev && prev.prepCount ? prev.avgPrep : null}
               inverse
-              hint={`${num(cur.prepCount)} de ${num(cur.count)} pedidos com horário de pronto`}
+              hint={`${num(cur.prepCount)} entregas concluídas no cálculo`}
             />
           </div>
 
@@ -825,8 +825,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({ companyId }) => {
             <TrendCard title="Ticket médio" reg={trend.regTicket} fmt={brl} unitLabel="dia" />
             <Card
               className="lg:col-span-3"
-              title="Tempo médio de preparo por dia"
-              subtitle="Minutos entre o pedido e o status Pronto · muda conforme o período e os filtros"
+              title="Tempo médio de entrega por dia"
+              subtitle="Minutos entre o pedido e o status Concluído, só pedidos de entrega · muda conforme o período e os filtros"
             >
               {trend.rows.some((r: any) => r.prep !== null && r.prep !== undefined) ? (
                 <ResponsiveContainer width="100%" height={260}>
@@ -838,7 +838,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ companyId }) => {
                     <Line dataKey="prep" name="Tempo médio" stroke="#6366f1" strokeWidth={2} connectNulls dot />
                   </ComposedChart>
                 </ResponsiveContainer>
-              ) : <Empty text="Ainda não há pedidos com horário de 'Pronto' neste período." />}
+              ) : <Empty text="Ainda não há pedidos com horário de conclusão (entrega) neste período." />}
             </Card>
           </div>
 
