@@ -146,6 +146,20 @@ function descStats(values: number[]) {
 
 /* ============================== TIPOS ============================== */
 
+/* Tempo de preparo: pedido criado -> status "Pronto" (orders.readyAt). Descarta outliers. */
+const MAX_PREP_MIN = 360;
+const calcPrep = (readyAt: any, created: Date): number | null => {
+  if (!readyAt) return null;
+  const r = new Date(readyAt);
+  const mins = (r.getTime() - created.getTime()) / 60000;
+  return !isNaN(mins) && mins > 0 && mins <= MAX_PREP_MIN ? mins : null;
+};
+const fmtMin = (m: number | null | undefined) => {
+  if (m === null || m === undefined || !m) return '--';
+  const r = Math.round(m);
+  return r >= 60 ? `${Math.floor(r / 60)}h ${String(r % 60).padStart(2, '0')}min` : `${r} min`;
+};
+
 interface POrder {
   id: string;
   total: number;
@@ -161,6 +175,7 @@ interface POrder {
   name: string;
   phoneRaw: string;
   pKey: string;
+  prepMin: number | null;
 }
 
 /* ============================== UI BÁSICA ============================== */
@@ -185,12 +200,13 @@ const Empty = ({ text = 'Sem dados para o filtro selecionado.' }) => (
   <div className="py-10 text-center text-sm text-gray-400">{text}</div>
 );
 
-const Delta = ({ cur, prev }: { cur: number; prev: number | null }) => {
+const Delta = ({ cur, prev, inverse = false }: { cur: number; prev: number | null; inverse?: boolean }) => {
   if (prev === null || prev === 0) return null;
   const d = ((cur - prev) / prev) * 100;
   const up = d >= 0;
+  const good = inverse ? !up : up; // em métricas "menor é melhor" (tempo), queda fica verde
   return (
-    <div className={`flex items-center mt-3 text-xs font-medium ${up ? 'text-green-600' : 'text-red-600'}`}>
+    <div className={`flex items-center mt-3 text-xs font-medium ${good ? 'text-green-600' : 'text-red-600'}`}>
       {up ? <ArrowUpRight className="w-4 h-4 mr-0.5" /> : <ArrowDownRight className="w-4 h-4 mr-0.5" />}
       {up ? '+' : ''}{num(d, 1)}%
       <span className="text-gray-400 ml-1 font-normal">vs. período anterior</span>
@@ -198,7 +214,7 @@ const Delta = ({ cur, prev }: { cur: number; prev: number | null }) => {
   );
 };
 
-const Kpi = ({ title, value, icon: Icon, color, cur, prev, hint }: any) => (
+const Kpi = ({ title, value, icon: Icon, color, cur, prev, hint, inverse }: any) => (
   <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
     <div className="flex justify-between items-start">
       <div>
@@ -208,7 +224,7 @@ const Kpi = ({ title, value, icon: Icon, color, cur, prev, hint }: any) => (
       </div>
       <div className={`p-2.5 rounded-lg ${color}`}><Icon className="w-5 h-5" /></div>
     </div>
-    {cur !== undefined && <Delta cur={cur} prev={prev} />}
+    {cur !== undefined && <Delta cur={cur} prev={prev} inverse={inverse} />}
   </div>
 );
 
@@ -385,6 +401,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({ companyId }) => {
           name: String(o.customerName ?? '').trim(),
           phoneRaw: String(o.customerPhone ?? ''),
           pKey: phoneKey(o.customerPhone),
+          prepMin: calcPrep(o.readyAt, d),
         };
       })
       .filter((o): o is POrder => o !== null);
@@ -428,7 +445,12 @@ const DashboardView: React.FC<DashboardViewProps> = ({ companyId }) => {
     const revenue = sum(list.map(o => o.total));
     const count = list.length;
     const customers = new Set(list.map(o => o.pKey).filter(Boolean)).size;
-    return { revenue, count, ticket: count ? revenue / count : 0, customers };
+    const preps = list.map(o => o.prepMin).filter((v): v is number => v !== null);
+    return {
+      revenue, count, ticket: count ? revenue / count : 0, customers,
+      avgPrep: preps.length ? sum(preps) / preps.length : 0,
+      prepCount: preps.length,
+    };
   };
   const cur = useMemo(() => summarize(current), [current]);
   const prev = useMemo(() => (previous ? summarize(previous) : null), [previous]);
@@ -440,16 +462,22 @@ const DashboardView: React.FC<DashboardViewProps> = ({ companyId }) => {
     const days: string[] = [];
     for (let d = start; d <= range.end; d = addDays(d, 1)) days.push(d);
 
-    const map = new Map<string, { revenue: number; orders: number }>();
+    const map = new Map<string, { revenue: number; orders: number; prepSum: number; prepN: number }>();
     current.forEach(o => {
-      const c = map.get(o.dateKey) || { revenue: 0, orders: 0 };
+      const c = map.get(o.dateKey) || { revenue: 0, orders: 0, prepSum: 0, prepN: 0 };
       c.revenue += o.total; c.orders += 1;
+      if (o.prepMin !== null) { c.prepSum += o.prepMin; c.prepN += 1; }
       map.set(o.dateKey, c);
     });
 
     const rows: any[] = days.map((d, i) => {
-      const v = map.get(d) || { revenue: 0, orders: 0 };
-      return { date: d, label: shortDate(d), revenue: v.revenue, orders: v.orders, ticket: v.orders ? v.revenue / v.orders : 0, idx: i };
+      const v = map.get(d) || { revenue: 0, orders: 0, prepSum: 0, prepN: 0 };
+      return {
+        date: d, label: shortDate(d), revenue: v.revenue, orders: v.orders,
+        ticket: v.orders ? v.revenue / v.orders : 0,
+        prep: v.prepN ? v.prepSum / v.prepN : null,
+        idx: i,
+      };
     });
     rows.forEach((r, i) => {
       const w = rows.slice(Math.max(0, i - 6), i + 1);
@@ -741,11 +769,21 @@ const DashboardView: React.FC<DashboardViewProps> = ({ companyId }) => {
       {/* ============ RESUMO ============ */}
       {tab === 'resumo' && (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <Kpi title="Faturamento" value={brl(cur.revenue)} icon={DollarSign} color="bg-green-50 text-green-600" cur={cur.revenue} prev={prev?.revenue ?? null} />
             <Kpi title="Pedidos fechados" value={num(cur.count)} icon={ShoppingBag} color="bg-blue-50 text-blue-600" cur={cur.count} prev={prev?.count ?? null} />
             <Kpi title="Ticket médio" value={brl(cur.ticket)} icon={Receipt} color="bg-purple-50 text-purple-600" cur={cur.ticket} prev={prev?.ticket ?? null} />
             <Kpi title="Clientes ativos" value={num(cur.customers)} icon={Users} color="bg-amber-50 text-amber-600" cur={cur.customers} prev={prev?.customers ?? null} hint="telefones distintos no período" />
+            <Kpi
+              title="Tempo médio (pedido → pronto)"
+              value={cur.prepCount ? fmtMin(cur.avgPrep) : '--'}
+              icon={Clock}
+              color="bg-indigo-50 text-indigo-600"
+              cur={cur.avgPrep}
+              prev={prev && prev.prepCount ? prev.avgPrep : null}
+              inverse
+              hint={`${num(cur.prepCount)} de ${num(cur.count)} pedidos com horário de pronto`}
+            />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -785,6 +823,23 @@ const DashboardView: React.FC<DashboardViewProps> = ({ companyId }) => {
             <TrendCard title="Faturamento" reg={trend.regRev} fmt={brl} unitLabel="dia" />
             <TrendCard title="Volume de pedidos" reg={trend.regOrd} fmt={v => num(v, 2)} unitLabel="dia" />
             <TrendCard title="Ticket médio" reg={trend.regTicket} fmt={brl} unitLabel="dia" />
+            <Card
+              className="lg:col-span-3"
+              title="Tempo médio de preparo por dia"
+              subtitle="Minutos entre o pedido e o status Pronto · muda conforme o período e os filtros"
+            >
+              {trend.rows.some((r: any) => r.prep !== null && r.prep !== undefined) ? (
+                <ResponsiveContainer width="100%" height={260}>
+                  <ComposedChart data={trend.rows.filter((r: any) => r.orders !== undefined)}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                    <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${num(v)} min`} width={65} />
+                    <Tooltip formatter={(v: any) => fmtMin(Number(v))} />
+                    <Line dataKey="prep" name="Tempo médio" stroke="#6366f1" strokeWidth={2} connectNulls dot />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              ) : <Empty text="Ainda não há pedidos com horário de 'Pronto' neste período." />}
+            </Card>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
